@@ -18,21 +18,25 @@ use tokio::io::AsyncReadExt;
 static TOKENS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 static STRM_CACHE: OnceLock<Mutex<HashMap<String, (String, Instant)>>> = OnceLock::new();
 
-// 限制 STRM 文件的最大读取字节数 (16KB)，防止恶意文件打爆内存
+// 限制 STRM 文件的最大读取字节数 (16KB)
 const MAX_STRM_SIZE: u64 = 16 * 1024;
 
 // =========================================================================
-// 1. Web UI 基础与鉴权
+// 1. Token 万能提取逻辑 (兼容各种奇葩客户端)
 // =========================================================================
 fn extract_emby_token(headers: &HeaderMap, query_str: Option<&str>) -> Option<String> {
     if let Some(val) = headers.get("X-Emby-Token").or_else(|| headers.get("X-MediaBrowser-Token")) {
         if let Ok(s) = val.to_str() { if !s.is_empty() { return Some(s.to_string()); } }
     }
     if let Some(val) = headers.get("Authorization").and_then(|v| v.to_str().ok()) {
-        if let Some(token) = val.strip_prefix("Bearer ") { return Some(token.trim().to_string()); }
+        if let Some(token) = val.strip_prefix("Bearer ") {
+            return Some(token.trim().to_string());
+        }
         if let Some(idx) = val.find("Token=\"") {
             let rest = &val[idx + 7..];
-            if let Some(end_idx) = rest.find('"') { return Some(rest[..end_idx].to_string()); }
+            if let Some(end_idx) = rest.find('"') {
+                return Some(rest[..end_idx].to_string());
+            }
         }
     }
     if let Some(query) = query_str {
@@ -48,6 +52,9 @@ fn extract_emby_token(headers: &HeaderMap, query_str: Option<&str>) -> Option<St
     None
 }
 
+// =========================================================================
+// 2. Web UI 基础 API
+// =========================================================================
 #[derive(Deserialize)]
 pub struct LoginReq { username: String, password: String }
 
@@ -70,17 +77,14 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
 pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     if let Some(token) = extract_emby_token(req.headers(), req.uri().query()) {
         if let Some(tokens) = TOKENS.get() {
-            if tokens.lock().unwrap().contains(&token) { return Ok(next.run(req).await); }
+            if tokens.lock().unwrap().contains(&token) {
+                return Ok(next.run(req).await);
+            }
         }
     }
     Err(StatusCode::UNAUTHORIZED)
 }
 
-// =========================================================================
-// 2. 扫描核心逻辑 (吸收 Lux 的设计精髓)
-// =========================================================================
-
-// 目录浏览
 #[derive(Deserialize)]
 pub struct BrowseReq { path: String }
 
@@ -165,7 +169,26 @@ pub async fn rescan_library(State(pool): State<Arc<Mutex<Connection>>>, AxumPath
     Json(json!({"status": "scanning"}))
 }
 
-// 提取的核心扫描函数：带指纹比对、安全读取、智能 Sidecar 查找
+// =========================================================================
+// 3. 智能扫描与本地图片匹配 (提取自 Lux)
+// =========================================================================
+
+fn get_image_type(stem: &str) -> Option<&'static str> {
+    let lower = stem.to_lowercase();
+    let base = if let Some((b, suffix)) = lower.rsplit_once('-') {
+        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) { b } else { &lower }
+    } else { &lower };
+
+    match base {
+        "poster" => Some("poster"),
+        "fanart" | "backdrop" => Some("fanart"),
+        "logo" | "clearlogo" => Some("logo"),
+        "thumb" | "thumbnail" => Some("thumb"),
+        "banner" => Some("banner"),
+        _ => None,
+    }
+}
+
 fn scan_directory(conn: &Connection, lib_id: i64, lib_type: &str, dir_path: &Path) {
     println!("🔍 开始扫描目录: {:?}", dir_path);
     let mut count = 0;
@@ -176,7 +199,6 @@ fn scan_directory(conn: &Connection, lib_id: i64, lib_type: &str, dir_path: &Pat
         let path = entry.path();
         if !path.is_file() { continue; }
         
-        // 目前依然只处理 .strm 文件，后续可扩展支持 mp4/mkv 等
         if path.extension().and_then(|e| e.to_str()).map_or(false, |e| e.eq_ignore_ascii_case("strm")) {
             count += 1;
             let metadata = match std::fs::metadata(path) { Ok(m) => m, Err(_) => continue };
@@ -184,26 +206,31 @@ fn scan_directory(conn: &Connection, lib_id: i64, lib_type: &str, dir_path: &Pat
             let mtime = metadata.modified().unwrap_or(UNIX_EPOCH).duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
             let path_str = path.to_string_lossy().to_string();
 
-            // 1. 增量检查：是否已存在且未修改？
+            // 增量比对：如果存在且没变，直接跳过
             let mut stmt = conn.prepare("SELECT id, size, mtime FROM items WHERE file_path = ?1").unwrap();
             let existing: Option<(i64, i64, i64)> = stmt.query_row([&path_str], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).ok();
             if let Some((_, db_size, db_mtime)) = existing {
-                if db_size == size as i64 && db_mtime == mtime {
-                    continue; // 指纹一致，跳过
-                }
+                if db_size == size as i64 && db_mtime == mtime { continue; }
             }
             updated += 1;
 
-            // 2. 寻找 Sidecar 文件 (NFO 与 图片)
             let stem = path.file_stem().unwrap().to_string_lossy();
             let parent = path.parent().unwrap_or(Path::new(""));
             
-            // 智能 NFO 搜索
-            let nfo_candidates = [
-                path.with_extension("nfo"), 
-                parent.join(format!("{}.nfo", stem)), 
-                parent.join("movie.nfo")
+            // 1. 智能 NFO 搜索
+            let mut nfo_candidates = vec![
+                path.with_extension("nfo"),
+                parent.join("movie.nfo"),
             ];
+            if let Ok(entries) = std::fs::read_dir(parent) {
+                for entry in entries.flatten() {
+                    if entry.path().extension().map_or(false, |e| e == "nfo") {
+                        nfo_candidates.push(entry.path());
+                        break;
+                    }
+                }
+            }
+
             let mut title = stem.to_string();
             let mut plot = "".to_string();
             let mut year = "".to_string();
@@ -218,33 +245,62 @@ fn scan_directory(conn: &Connection, lib_id: i64, lib_type: &str, dir_path: &Pat
                 }
             }
 
-            // 智能图片搜索
-            let mut poster_path = "".to_string();
-            let mut fanart_path = "".to_string();
-            let img_names = ["poster.jpg", "folder.jpg", &format!("{}-poster.jpg", stem)];
-            for name in img_names {
-                let p = parent.join(name);
-                if p.exists() { poster_path = p.to_string_lossy().to_string(); break; }
-            }
-            let bg_names = ["fanart.jpg", "background.jpg", &format!("{}-fanart.jpg", stem)];
-            for name in bg_names {
-                let p = parent.join(name);
-                if p.exists() { fanart_path = p.to_string_lossy().to_string(); break; }
+            // 2. 全方位图片搜索
+            let mut poster = String::new();
+            let mut fanart = String::new();
+            let mut logo = String::new();
+            let mut thumb = String::new();
+            let mut banner = String::new();
+
+            if let Ok(entries) = std::fs::read_dir(parent) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if !p.is_file() { continue; }
+                    if let (Some(ext), Some(file_stem)) = (p.extension().and_then(|e| e.to_str()), p.file_stem().and_then(|s| s.to_str())) {
+                        let ext = ext.to_lowercase();
+                        if !["jpg", "jpeg", "png", "webp"].contains(&ext.as_str()) { continue; }
+
+                        let is_match_media = file_stem.starts_with(&format!("{}-", stem));
+                        let test_stem = if is_match_media {
+                            file_stem.trim_start_matches(&format!("{}-", stem))
+                        } else {
+                            file_stem
+                        };
+
+                        if let Some(img_type) = get_image_type(test_stem) {
+                            let p_str = p.to_string_lossy().to_string();
+                            match img_type {
+                                "poster" => if poster.is_empty() { poster = p_str },
+                                "fanart" => if fanart.is_empty() { fanart = p_str },
+                                "logo" => if logo.is_empty() { logo = p_str },
+                                "thumb" => if thumb.is_empty() { thumb = p_str },
+                                "banner" => if banner.is_empty() { banner = p_str },
+                                _ => {}
+                            }
+                        }
+                    }
+                }
             }
 
-            // 3. 写入或更新数据库
+            // 3. 写入数据库
             let _ = conn.execute(
-                "INSERT INTO items (library_id, title, file_path, type, plot, year, poster_path, fanart_path, size, mtime) 
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                "INSERT INTO items (library_id, title, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime) 
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
                  ON CONFLICT(file_path) DO UPDATE SET 
                  title=excluded.title, size=excluded.size, mtime=excluded.mtime,
-                 plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, fanart_path=excluded.fanart_path",
-                rusqlite::params![lib_id, title, path_str, lib_type, plot, year, poster_path, fanart_path, size as i64, mtime]
+                 plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, 
+                 fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, 
+                 thumb_path=excluded.thumb_path, banner_path=excluded.banner_path",
+                rusqlite::params![lib_id, title, path_str, lib_type, plot, year, poster, fanart, logo, thumb, banner, size as i64, mtime]
             );
         }
     }
     println!("✅ 扫描完成。共找到 {} 个 STRM，更新/新增 {} 个。", count, updated);
 }
+
+// =========================================================================
+// 4. Web UI 数据接口
+// =========================================================================
 
 #[derive(Deserialize)]
 pub struct ItemQuery { library_id: Option<i64>, lib_type: Option<String> }
@@ -273,7 +329,14 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
 pub async fn get_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((id, img_type)): AxumPath<(i64, String)>) -> Response {
     let path_opt = {
         let conn = pool.lock().unwrap();
-        let query = if img_type == "poster" { "SELECT poster_path FROM items WHERE id = ?1" } else { "SELECT fanart_path FROM items WHERE id = ?1" };
+        let query = match img_type.as_str() {
+            "poster" => "SELECT poster_path FROM items WHERE id = ?1",
+            "fanart" => "SELECT fanart_path FROM items WHERE id = ?1",
+            "logo" => "SELECT logo_path FROM items WHERE id = ?1",
+            "thumb" => "SELECT thumb_path FROM items WHERE id = ?1",
+            "banner" => "SELECT banner_path FROM items WHERE id = ?1",
+            _ => "SELECT poster_path FROM items WHERE id = ?1",
+        };
         let mut stmt = conn.prepare(query).unwrap();
         stmt.query_row([id], |row| row.get::<_, String>(0)).ok()
     };
@@ -305,7 +368,7 @@ pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
 }
 
 // =========================================================================
-// 3. Emby 协议兼容层 (含安全读取 STRM 流)
+// 5. Emby 协议兼容层
 // =========================================================================
 
 pub async fn emby_public_info() -> impl IntoResponse {
@@ -433,7 +496,13 @@ pub async fn emby_item_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPat
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let path_opt = {
         let conn = pool.lock().unwrap();
-        let query = if image_type.to_lowercase() == "primary" || image_type.to_lowercase() == "thumb" { "SELECT poster_path FROM items WHERE id = ?1" } else { "SELECT fanart_path FROM items WHERE id = ?1" };
+        let query = match image_type.to_lowercase().as_str() {
+            "primary" | "poster" | "thumb" => "SELECT poster_path FROM items WHERE id = ?1",
+            "backdrop" | "fanart" => "SELECT fanart_path FROM items WHERE id = ?1",
+            "logo" => "SELECT logo_path FROM items WHERE id = ?1",
+            "banner" => "SELECT banner_path FROM items WHERE id = ?1",
+            _ => "SELECT poster_path FROM items WHERE id = ?1",
+        };
         let mut stmt = conn.prepare(query).unwrap();
         stmt.query_row([id], |row| row.get::<_, String>(0)).ok()
     };
@@ -456,7 +525,6 @@ pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, Axum
     } else { StatusCode::NOT_FOUND.into_response() }
 }
 
-// 核心：带安全边界和并发防封禁的流重定向
 pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>, headers: HeaderMap) -> Response {
     let path_opt = {
         let conn = pool.lock().unwrap();
@@ -464,7 +532,6 @@ pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(it
     };
     let Some(strm_path) = path_opt else { return StatusCode::NOT_FOUND.into_response(); };
 
-    // 1. 安全读取 STRM 文件 (参考 Lux 防止恶意文件占满内存)
     let file = match tokio::fs::File::open(&strm_path).await {
         Ok(f) => f,
         Err(_) => return StatusCode::NOT_FOUND.into_response(),
@@ -474,7 +541,6 @@ pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(it
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    // 去除空行和多余空格
     let url = contents.lines().map(str::trim).find(|s| !s.is_empty()).unwrap_or("");
     if !url.starts_with("http") { return StatusCode::NOT_FOUND.into_response(); }
 
@@ -507,26 +573,66 @@ pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(it
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
 }
 
-// ================= 隐藏继续观看 =================
-#[derive(Deserialize)]
-pub struct ResumeVisibilityQuery { #[serde(rename = "Hide")] pub hide: Option<String> }
-#[derive(Deserialize)]
-pub struct ResumeVisibilityBody { #[serde(rename = "Hide")] pub hide: bool }
+// ================= 继续观看隐藏 =================
 
-fn emby_user_item_data_json(item_id: &str, is_hidden: bool) -> Value {
-    json!({ "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "HideFromResume": is_hidden })
+#[derive(Deserialize)]
+pub struct ResumeVisibilityQuery {
+    #[serde(rename = "Hide")]
+    pub hide: Option<String>,
 }
 
-pub async fn emby_hide_from_resume(AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Query(query): Query<ResumeVisibilityQuery>, body: Bytes) -> Response { emby_handle_hide(item_id, query, body) }
-pub async fn emby_hide_from_resume_without_user(AxumPath(item_id): AxumPath<String>, Query(query): Query<ResumeVisibilityQuery>, body: Bytes) -> Response { emby_handle_hide(item_id, query, body) }
+#[derive(Deserialize)]
+pub struct ResumeVisibilityBody {
+    #[serde(rename = "Hide")]
+    pub hide: bool,
+}
+
+fn emby_user_item_data_json(item_id: &str, is_hidden: bool) -> Value {
+    json!({
+        "PlaybackPositionTicks": 0,
+        "PlayCount": 0,
+        "IsFavorite": false,
+        "Played": false,
+        "HideFromResume": is_hidden
+    })
+}
+
+pub async fn emby_hide_from_resume(
+    AxumPath((_user_id, item_id)): AxumPath<(String, String)>,
+    Query(query): Query<ResumeVisibilityQuery>,
+    body: Bytes,
+) -> Response {
+    emby_handle_hide(item_id, query, body)
+}
+
+pub async fn emby_hide_from_resume_without_user(
+    AxumPath(item_id): AxumPath<String>,
+    Query(query): Query<ResumeVisibilityQuery>,
+    body: Bytes,
+) -> Response {
+    emby_handle_hide(item_id, query, body)
+}
 
 fn emby_handle_hide(item_id: String, query: ResumeVisibilityQuery, body: Bytes) -> Response {
-    let query_hide = match query.hide.as_deref().map(str::parse::<bool>).transpose() { Ok(value) => value, Err(_) => return StatusCode::BAD_REQUEST.into_response() };
-    let body_hide = if body.is_empty() { None } else { match serde_json::from_slice::<ResumeVisibilityBody>(&body) { Ok(body) => Some(body.hide), Err(_) => return StatusCode::BAD_REQUEST.into_response() } };
+    let query_hide = match query.hide.as_deref().map(str::parse::<bool>).transpose() {
+        Ok(value) => value,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    let body_hide = if body.is_empty() {
+        None
+    } else {
+        match serde_json::from_slice::<ResumeVisibilityBody>(&body) {
+            Ok(body) => Some(body.hide),
+            Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+        }
+    };
     let hidden = match (query_hide, body_hide) {
-        (Some(q), Some(b)) if q != b => return StatusCode::BAD_REQUEST.into_response(),
+        (Some(q), Some(b)) if q != b => {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
         (Some(h), _) | (_, Some(h)) => h,
         (None, None) => return StatusCode::BAD_REQUEST.into_response(),
     };
+    
     Json(emby_user_item_data_json(&item_id, hidden)).into_response()
 }
