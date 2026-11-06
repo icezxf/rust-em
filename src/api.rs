@@ -32,7 +32,7 @@ fn extract_emby_token(headers: &HeaderMap, query_str: Option<&str>) -> Option<St
         for pair in query.split('&') {
             if let Some((k, v)) = pair.split_once('=') {
                 let k_lower = k.to_lowercase();
-                if k_lower == "api_key" || k_lower == "x-emby-token" || k_lower == "apikey" { return Some(v.to_string()); }
+                if k_lower == "api_key" || k_lower == "x-emby-token" || k_lower == "apikey" || k_lower == "token" { return Some(v.to_string()); }
             }
         }
     }
