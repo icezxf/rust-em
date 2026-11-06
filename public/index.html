@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <title>Rust-Em</title>
     <script src="https://cdn.tailwindcss.com"></script>
-<link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@1,300&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@1,300&display=swap" rel="stylesheet">
     <style>
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -16,6 +16,7 @@
     </style>
 </head>
 <body class="bg-[#0f1115] text-gray-200 font-sans h-screen flex flex-col md:flex-row overflow-hidden">
+    <!-- 登录页 -->
     <div id="login-view" class="fixed inset-0 z-50 flex items-center justify-center bg-[#0f1115] px-4">
         <div class="bg-[#1a1d24] p-8 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-800">
             <h2 class="text-2xl mb-8 text-center font-bold text-white tracking-wider">RUST-EM</h2>
@@ -25,9 +26,10 @@
         </div>
     </div>
 
-    <div id="main-view" class="hidden flex-1 flex flex-col md:flex-row h-full relative">
+    <!-- 主界面 -->
+    <div id="main-view" class="hidden flex-1 flex flex-col md:flex-row h-full">
         <!-- PC 侧边栏 -->
-        <div class="hidden md:flex w-64 bg-[#16191f] p-4 flex-col border-r border-gray-800 z-50 shrink-0">
+        <div class="hidden md:flex w-64 bg-[#16191f] p-4 flex-col border-r border-gray-800 z-[60] shrink-0">
             <h1 class="text-xl font-bold mb-8 text-blue-500 px-2 flex items-center gap-2">
                 <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
                 Rust-Em
@@ -43,7 +45,7 @@
         </div>
 
         <!-- 移动端顶栏 -->
-        <div class="md:hidden bg-[#16191f] px-4 py-3 flex flex-col shadow-md z-10 sticky top-0 border-b border-gray-800 shrink-0">
+        <div class="md:hidden bg-[#16191f] px-4 py-3 flex flex-col shadow-md z-50 sticky top-0 border-b border-gray-800 shrink-0">
             <div class="flex justify-between items-center mb-2">
                 <h1 class="text-lg font-bold text-blue-500" id="mobile-title">媒体库</h1>
                 <button onclick="switchTab('settings')" class="text-gray-400 text-sm">⚙️</button>
@@ -51,7 +53,7 @@
             <div id="mobile-libs" class="flex overflow-x-auto gap-2 pb-1 no-scrollbar"></div>
         </div>
 
-        <!-- 主内容区 -->
+        <!-- 内容区 -->
         <div class="flex-1 flex flex-col h-full overflow-hidden bg-[#0f1115] relative">
             <div id="content-header" class="hidden p-4 md:px-8 md:pt-6 md:pb-2 shrink-0">
                 <div class="flex gap-3">
@@ -97,25 +99,33 @@
             </div>
         </div>
 
-        <!-- 详情页 Modal：Web 端在右侧区域固定，移动端全屏 -->
-        <div id="detail-modal" class="hidden fixed inset-0 md:left-64 z-40 overflow-y-auto bg-[#0b0e14]">
+        <!-- 沉浸式详情页 Modal -->
+        <div id="detail-modal" class="hidden fixed inset-0 md:left-64 z-[70] overflow-y-auto bg-[#0b0e14]">
             <div id="detail-fanart" class="fixed inset-0 md:left-64 bg-cover bg-top backdrop-blur-heavy transition-opacity duration-500 opacity-40"></div>
             
             <div class="relative min-h-screen w-full p-4 md:p-8 flex flex-col">
-                <!-- 关闭按钮 -->
                 <button onclick="closeDetail()" class="fixed top-4 right-4 md:top-8 md:right-8 text-white bg-black/50 hover:bg-black/80 p-3 rounded-full z-50 backdrop-blur-md transition">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
 
-                <!-- 头部信息 -->
                 <div class="flex flex-col md:flex-row gap-8 mt-12 md:mt-24 mb-10 z-10">
                     <div class="w-48 md:w-64 shrink-0 aspect-[2/3] bg-gray-800 rounded-xl overflow-hidden shadow-2xl border border-gray-600/50">
                         <img id="detail-poster" src="" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzM3NDE1MSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjOWNhM2FmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg=='">
                     </div>
                     
                     <div class="flex-1 flex flex-col justify-end pb-2">
-                        <h1 id="detail-title" class="text-4xl md:text-6xl font-black text-white mb-2 tracking-tight drop-shadow-lg">影片标题</h1>
-                        <div id="detail-tagline-box" class="hidden mb-6 mt-2"><div class="flex items-start gap-1 text-gray-300 text-lg md:text-xl" style="font-family: 'Merriweather', serif; font-style: italic;"><span class="text-3xl text-gray-500 leading-none mt-1">“</span><span id="detail-tagline" class="text-center px-2"></span><span class="text-3xl text-gray-500 leading-none mt-1 self-end">”</span></div></div>
+                        <div class="flex items-center gap-4 mb-2">
+                            <h1 id="detail-title" class="text-4xl md:text-6xl font-black text-white tracking-tight drop-shadow-lg">影片标题</h1>
+                            <span id="detail-num" class="hidden border border-blue-500/50 bg-blue-500/20 text-blue-300 px-3 py-1 rounded-lg text-xl font-mono"></span>
+                        </div>
+                        
+                        <div id="detail-tagline-box" class="hidden mb-4 mt-2">
+                            <div class="flex items-start gap-1 text-gray-300 text-lg md:text-xl" style="font-family: 'Merriweather', serif; font-style: italic;">
+                                <span class="text-3xl text-gray-500 leading-none mt-1">“</span>
+                                <span id="detail-tagline" class="text-center px-2"></span>
+                                <span class="text-3xl text-gray-500 leading-none mt-1 self-end">”</span>
+                            </div>
+                        </div>
                         
                         <div class="flex flex-wrap items-center gap-3 mb-6 text-sm font-medium">
                             <span id="detail-year" class="text-gray-300">2024</span>
@@ -130,8 +140,13 @@
                             <span id="detail-mpaa" class="border border-gray-500 text-gray-300 px-2 py-0.5 rounded text-xs"></span>
                         </div>
 
+                        <div id="detail-genres" class="flex flex-wrap gap-2 mb-6 hidden">
+                            <span class="text-gray-500 py-1">类型: </span> 
+                            <div id="detail-genres-val" class="flex flex-wrap gap-2"></div>
+                        </div>
+
                         <div class="flex gap-3 mb-6">
-                            <button class="bg-white text-black hover:bg-gray-200 px-6 py-2 rounded-full font-bold flex items-center gap-2 transition">
+                            <button onclick="playVideo()" class="bg-white text-black hover:bg-gray-200 px-6 py-2 rounded-full font-bold flex items-center gap-2 transition shadow-lg shadow-white/20">
                                 <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
                                 播放
                             </button>
@@ -141,16 +156,21 @@
                         </div>
 
                         <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base max-w-4xl line-clamp-4 hover:line-clamp-none transition-all cursor-pointer">暂无简介...</p>
+                        
+                        <div class="flex flex-wrap items-center gap-4 mt-4 text-sm text-gray-400">
+                            <div id="detail-series-box" class="hidden"><span class="text-gray-500">系列: </span> <span id="detail-series" class="text-blue-400 cursor-pointer hover:underline"></span></div>
+                            <div id="detail-label-box" class="hidden"><span class="text-gray-500">厂牌: </span> <span id="detail-label" class="text-blue-400"></span></div>
+                            <div id="detail-directors" class="hidden"><span class="text-gray-500">导演: </span> <span class="text-gray-300" id="detail-directors-val"></span></div>
+                            <div id="detail-tags" class="hidden"><span class="text-gray-500">标签: </span> <span class="text-gray-300" id="detail-tags-val"></span></div>
+                        </div>
                     </div>
                 </div>
 
-                <!-- 演职人员 -->
                 <div class="mb-10 z-10">
                     <h3 class="text-sm text-gray-500 font-bold mb-4 uppercase tracking-wider">演职人员 CAST & CREW</h3>
                     <div id="detail-actors-list" class="flex gap-6 overflow-x-auto pb-4 no-scrollbar"></div>
                 </div>
 
-                <!-- 媒体文件区域 -->
                 <div class="mb-20 z-10">
                     <h3 class="text-sm text-gray-500 font-bold mb-4 uppercase tracking-wider">媒体文件 MEDIA FILES</h3>
                     <div class="bg-[#16191f]/80 backdrop-blur-md border border-gray-800 rounded-xl p-5">
@@ -180,10 +200,28 @@
                 </div>
             </div>
         </div>
+
+        <!-- 全屏视频播放器 -->
+        <div id="video-player-modal" class="hidden fixed inset-0 z-[100] bg-black flex flex-col">
+            <div class="flex justify-between items-center p-4 bg-gradient-to-b from-black/80 to-transparent absolute top-0 w-full z-10">
+                <h2 id="player-title" class="text-white text-lg font-bold drop-shadow-md">正在播放</h2>
+                <button onclick="closePlayer()" class="text-white bg-white/20 hover:bg-white/40 p-2 rounded-full backdrop-blur-md transition">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="flex-1 flex items-center justify-center relative">
+                <video id="main-video" class="w-full h-full max-h-screen outline-none" controls autoplay playsinline>
+                    您的浏览器不支持 HTML5 视频播放。
+                </video>
+                <div id="player-loading" class="absolute inset-0 flex items-center justify-center text-white text-lg bg-black/50 hidden">
+                    正在解析直链并加载...
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- 路径选择弹窗 -->
-    <div id="path-modal" class="hidden fixed inset-0 z-[60] bg-black/80 flex items-end md:items-center justify-center backdrop-blur-sm">
+    <div id="path-modal" class="hidden fixed inset-0 z-[90] bg-black/80 flex items-end md:items-center justify-center backdrop-blur-sm">
         <div class="bg-[#16191f] w-full md:w-2/3 lg:w-1/2 md:rounded-2xl rounded-t-2xl shadow-2xl flex flex-col h-[85vh] md:h-[75vh] border border-gray-700">
             <div class="p-4 border-b border-gray-800 flex justify-between items-center bg-[#1a1d24] rounded-t-2xl">
                 <h3 class="font-bold truncate text-sm md:text-base text-blue-400" id="current-path">/media</h3>
@@ -206,6 +244,7 @@
         let currentLibId = 'all';
         let currentType = 'all';
         let cachedItems = [];
+        let currentPlayingItemId = null;
 
         const defaultPosterSvg = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzFhMWQyNCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjNGI1NTYzIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg==';
 
@@ -287,8 +326,13 @@
             mobileContainer.innerHTML = mobileHtml;
         }
 
-        function setLibraryFilter(libId) {
-            closeDetail(); currentLibId = libId; renderSidebarLibraries(); switchTab('library'); }
+        function setLibraryFilter(libId) { 
+            closeDetail();
+            currentLibId = libId; 
+            renderSidebarLibraries(); 
+            switchTab('library'); 
+        }
+        
         function setTypeFilter(type) {
             currentType = type;
             ['all', 'movies', 'tvshows'].forEach(t => {
@@ -337,11 +381,48 @@
             } catch (e) { console.error(e); }
         }
 
+        function playVideo() {
+            if (!currentPlayingItemId) return;
+            const playerModal = document.getElementById('video-player-modal');
+            const video = document.getElementById('main-video');
+            const loading = document.getElementById('player-loading');
+            const title = document.getElementById('player-title');
+            
+            const item = cachedItems.find(i => i.id === currentPlayingItemId);
+            if(item) title.innerText = item.title;
+
+            playerModal.classList.remove('hidden');
+            loading.classList.remove('hidden');
+            loading.innerHTML = "正在解析直链并加载...";
+            
+            // 直接请求流接口，后端会返回 302 跳转到真实网盘直链
+            video.src = `/Videos/${currentPlayingItemId}/stream?token=${token}`;
+            
+            video.play().then(() => {
+                loading.classList.add('hidden');
+            }).catch(e => {
+                console.error("播放失败:", e);
+                loading.innerHTML = `<span class="text-red-400">播放失败: 浏览器可能不支持该视频格式，或网盘直链被拦截。<br>建议使用 Infuse 或 SenPlayer 等专业播放器。</span>`;
+            });
+        }
+
+        function closePlayer() {
+            const playerModal = document.getElementById('video-player-modal');
+            const video = document.getElementById('main-video');
+            playerModal.classList.add('hidden');
+            video.pause();
+            video.src = ""; 
+        }
+
         function openDetail(itemId) {
             const item = cachedItems.find(i => i.id === itemId);
             if (!item) return;
+            currentPlayingItemId = item.id;
 
             document.getElementById('detail-title').innerText = item.title;
+            const numEl = document.getElementById('detail-num');
+            if (item.num) { numEl.innerText = item.num; numEl.classList.remove('hidden'); } else { numEl.classList.add('hidden'); }
+
             document.getElementById('detail-year').innerText = item.year || '未知年份';
             document.getElementById('detail-rating-val').innerText = item.rating > 0 ? item.rating.toFixed(1) : '暂无';
             document.getElementById('detail-plot').innerText = item.plot || '暂无简介。';
@@ -353,8 +434,29 @@
 
             const tagBox = document.getElementById('detail-tagline-box');
             if (item.tagline) { document.getElementById('detail-tagline').innerText = item.tagline; tagBox.classList.remove('hidden'); } else { tagBox.classList.add('hidden'); }
+
             const mpaaEl = document.getElementById('detail-mpaa');
             if (item.mpaa) { mpaaEl.innerText = item.mpaa; mpaaEl.classList.remove('hidden'); } else { mpaaEl.classList.add('hidden'); }
+
+            const genresBox = document.getElementById('detail-genres');
+            if (item.genres) {
+                document.getElementById('detail-genres-val').innerHTML = item.genres.split(' / ').map(g => `<span class="bg-gray-800 border border-gray-600 text-gray-300 px-3 py-1 rounded-full text-xs">${g}</span>`).join('');
+                genresBox.classList.remove('hidden'); genresBox.classList.add('flex');
+            } else { genresBox.classList.add('hidden'); }
+
+            const seriesBox = document.getElementById('detail-series-box');
+            if (item.series) { document.getElementById('detail-series').innerText = item.series; seriesBox.classList.remove('hidden'); } else { seriesBox.classList.add('hidden'); }
+            const labelBox = document.getElementById('detail-label-box');
+            if (item.label) { document.getElementById('detail-label').innerText = item.label; labelBox.classList.remove('hidden'); } else { labelBox.classList.add('hidden'); }
+
+            const updateTextBlock = (id, valId, value) => {
+                const el = document.getElementById(id);
+                const valEl = document.getElementById(valId);
+                if (value) { valEl.innerText = value; el.classList.remove('hidden'); }
+                else { el.classList.add('hidden'); }
+            };
+            updateTextBlock('detail-directors', 'detail-directors-val', item.directors);
+            updateTextBlock('detail-tags', 'detail-tags-val', item.tags);
 
             const actorsContainer = document.getElementById('detail-actors-list');
             if (item.actors && item.actors.length > 0) {
