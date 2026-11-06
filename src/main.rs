@@ -16,7 +16,9 @@ async fn main() {
     let protected_routes = Router::new()
         .route("/libraries", post(api::add_library).get(api::get_libraries))
         .route("/items", get(api::get_items))
-        .route("/user/update", post(api::update_user)) // 新增：修改账号密码
+        // 这里必须确认是 post
+        .route("/browse", post(api::browse_dir))
+        .route("/user/update", post(api::update_user))
         .layer(middleware::from_fn(api::auth))
         .with_state(db_pool.clone());
 
