@@ -14,8 +14,8 @@ sha2 = "0.10"
 tower-http = { version = "0.6", features = ["fs", "cors"] }
 walkdir = "2"
 uuid = { version = "1", features = ["v4"] }
-# 新增：用于解析网盘直链（使用 rustls 避免 alpine 环境下缺少 openssl 报错）
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+url = "2"
 
 [profile.release]
 opt-level = "z"
