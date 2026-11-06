@@ -20,8 +20,6 @@ static STRM_CACHE: OnceLock<Mutex<HashMap<String, (String, Instant)>>> = OnceLoc
 
 const MAX_STRM_SIZE: u64 = 16 * 1024;
 
-// ================= 鉴权与登录 =================
-
 fn extract_emby_token(headers: &HeaderMap, query_str: Option<&str>) -> Option<String> {
     if let Some(val) = headers.get("X-Emby-Token").or_else(|| headers.get("X-MediaBrowser-Token")) {
         if let Ok(s) = val.to_str() { if !s.is_empty() { return Some(s.to_string()); } }
@@ -56,9 +54,7 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
         let token = uuid::Uuid::new_v4().to_string();
         TOKENS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap().push(token.clone());
         (StatusCode::OK, Json(json!({ "token": token })))
-    } else {
-        (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid credentials" })))
-    }
+    } else { (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid credentials" }))) }
 }
 
 pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
@@ -69,8 +65,6 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     }
     Err(StatusCode::UNAUTHORIZED)
 }
-
-// ================= 浏览与扫描 =================
 
 #[derive(Deserialize)]
 pub struct BrowseReq { path: String }
@@ -142,8 +136,7 @@ pub async fn rescan_library(State(pool): State<Arc<Mutex<Connection>>>, AxumPath
         let (paths_json, lib_type) = {
             let conn = pool_clone.lock().unwrap();
             match conn.query_row("SELECT name, path, type FROM libraries WHERE id = ?1", [id], |row| Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?))) {
-                Ok(res) => res,
-                Err(_) => return,
+                Ok(res) => res, Err(_) => return,
             }
         };
         let paths: Vec<String> = serde_json::from_str(&paths_json).unwrap_or_default();
@@ -178,7 +171,6 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
             strm_files.push(path.to_path_buf());
         }
     }
-    println!("📂 找到 {} 个 .strm 文件，准备解析...", strm_files.len());
 
     for path in strm_files {
         count += 1;
@@ -187,12 +179,10 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         let mtime = metadata.modified().unwrap_or(UNIX_EPOCH).duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
         let path_str = path.to_string_lossy().to_string();
 
-        // 1. 查重 (短暂持锁) - 此处用 match 防止由于列缺失导致 Panic
         {
             let conn = match pool.lock() { Ok(c) => c, Err(_) => continue };
             let mut stmt = match conn.prepare("SELECT id, size, mtime FROM items WHERE file_path = ?1") {
-                Ok(s) => s,
-                Err(e) => { println!("⚠️ 查询失败(可能旧库缺字段), 跳过查重: {}", e); continue; }
+                Ok(s) => s, Err(_) => continue,
             };
             let existing: Option<(i64, i64, i64)> = stmt.query_row([&path_str], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).ok();
             if let Some((_, db_size, db_mtime)) = existing {
@@ -200,27 +190,52 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
             }
         }
 
-        // 2. 文件 IO 解析 (不持锁)
         let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
         let parent = path.parent().unwrap_or(Path::new(""));
         let mut nfo_candidates = vec![path.with_extension("nfo"), parent.join("movie.nfo")];
-        if let Ok(entries) = std::fs::read_dir(parent) {
-            for entry in entries.flatten() {
-                if entry.path().extension().map_or(false, |e| e.eq_ignore_ascii_case("nfo")) { nfo_candidates.push(entry.path()); break; }
-            }
-        }
-        let mut title = stem.clone(); let mut plot = String::new(); let mut year = String::new();
+        
+        let mut title = stem.clone();
+        let mut plot = String::new();
+        let mut year = String::new();
+        let mut rating = 0.0;
+        let mut mpaa = String::new();
+        let mut genres = String::new();
+        let mut directors = String::new();
+        let mut actors = String::new();
+        
+        let mut nfo_poster = String::new();
+        let mut nfo_fanart = String::new();
+
+        // 1. 优先解析 NFO
         for nfo in nfo_candidates {
             if nfo.exists() {
                 if let Some(meta) = crate::nfo::read_nfo(&nfo) {
                     if let Some(t) = meta.title { title = t; }
                     if let Some(p) = meta.plot { plot = p; }
                     if let Some(y) = meta.year { year = y.to_string(); }
+                    if let Some(r) = meta.rating { rating = r; }
+                    if let Some(m) = meta.mpaa { mpaa = m; }
+                    if !meta.genres.is_empty() { genres = meta.genres.join(" / "); }
+                    if !meta.directors.is_empty() { directors = meta.directors.join(" / "); }
+                    if !meta.actors.is_empty() {
+                        actors = meta.actors.iter().filter_map(|a| a.name.clone()).collect::<Vec<_>>().join(" / ");
+                    }
+                    
+                    // 解析 NFO 中指定的图片 URL
+                    if let Some(thumb) = meta.thumbs.first() { nfo_poster = thumb.text.clone(); }
+                    if let Some(fanart) = meta.fanart {
+                        if let Some(thumb) = fanart.thumbs.first() { nfo_fanart = thumb.text.clone(); }
+                    }
                     break;
                 }
             }
         }
-        let mut poster = String::new(); let mut fanart = String::new(); let mut logo = String::new(); let mut thumb = String::new(); let mut banner = String::new();
+
+        // 2. 扫描本地图片，优先级高于 NFO 中的 URL
+        let mut final_poster = nfo_poster;
+        let mut final_fanart = nfo_fanart;
+        let mut logo = String::new(); let mut thumb = String::new(); let mut banner = String::new();
+
         if let Ok(entries) = std::fs::read_dir(parent) {
             for entry in entries.flatten() {
                 let p = entry.path();
@@ -228,13 +243,15 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                 if let (Some(ext), Some(file_stem)) = (p.extension().and_then(|e| e.to_str()), p.file_stem().and_then(|s| s.to_str())) {
                     let ext = ext.to_lowercase();
                     if !["jpg", "jpeg", "png", "webp"].contains(&ext.as_str()) { continue; }
+                    
                     let is_match_media = file_stem.starts_with(&format!("{}-", stem));
                     let test_stem = if is_match_media { file_stem.trim_start_matches(&format!("{}-", stem)) } else { file_stem };
+                    
                     if let Some(img_type) = get_image_type(test_stem) {
                         let p_str = p.to_string_lossy().to_string();
                         match img_type {
-                            "poster" => if poster.is_empty() { poster = p_str },
-                            "fanart" => if fanart.is_empty() { fanart = p_str },
+                            "poster" => final_poster = p_str, // 本地覆盖网络
+                            "fanart" => final_fanart = p_str, // 本地覆盖网络
                             "logo" => if logo.is_empty() { logo = p_str },
                             "thumb" => if thumb.is_empty() { thumb = p_str },
                             "banner" => if banner.is_empty() { banner = p_str },
@@ -245,18 +262,19 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
             }
         }
 
-        // 3. 写入 (短暂持锁)
+        // 3. 入库
         {
             let conn = match pool.lock() { Ok(c) => c, Err(_) => continue };
             let _ = conn.execute(
-                "INSERT INTO items (library_id, title, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime) 
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                "INSERT INTO items (library_id, title, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime, rating, mpaa, genres, directors, actors) 
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
                  ON CONFLICT(file_path) DO UPDATE SET 
                  title=excluded.title, size=excluded.size, mtime=excluded.mtime,
                  plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, 
                  fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, 
-                 thumb_path=excluded.thumb_path, banner_path=excluded.banner_path",
-                rusqlite::params![lib_id, title, path_str, lib_type, plot, year, poster, fanart, logo, thumb, banner, size, mtime]
+                 thumb_path=excluded.thumb_path, banner_path=excluded.banner_path,
+                 rating=excluded.rating, mpaa=excluded.mpaa, genres=excluded.genres, directors=excluded.directors, actors=excluded.actors",
+                rusqlite::params![lib_id, title, path_str, lib_type, plot, year, final_poster, final_fanart, logo, thumb, banner, size, mtime, rating, mpaa, genres, directors, actors]
             );
         }
         updated += 1;
@@ -269,16 +287,20 @@ pub struct ItemQuery { library_id: Option<i64>, lib_type: Option<String> }
 
 pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<ItemQuery>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut sql = "SELECT id, title, type, year, plot, poster_path FROM items WHERE 1=1".to_string();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, rating, mpaa, genres, directors, actors FROM items WHERE 1=1".to_string();
     if let Some(lid) = query.library_id { sql.push_str(&format!(" AND library_id = {}", lid)); }
     if let Some(lt) = query.lib_type { sql.push_str(&format!(" AND type = '{}'", lt)); }
     sql.push_str(" ORDER BY title ASC");
+    
     let mut stmt = conn.prepare(&sql).unwrap();
     let items: Vec<Value> = stmt.query_map([], |row| {
         Ok(json!({
             "id": row.get::<_, i64>(0).unwrap_or_default(), "title": row.get::<_, String>(1).unwrap_or_default(),
             "type": row.get::<_, String>(2).unwrap_or_default(), "year": row.get::<_, String>(3).unwrap_or_default(),
             "plot": row.get::<_, String>(4).unwrap_or_default(), "has_poster": !row.get::<_, String>(5).unwrap_or_default().is_empty(),
+            "rating": row.get::<_, f64>(6).unwrap_or(0.0), "mpaa": row.get::<_, String>(7).unwrap_or_default(),
+            "genres": row.get::<_, String>(8).unwrap_or_default(), "directors": row.get::<_, String>(9).unwrap_or_default(),
+            "actors": row.get::<_, String>(10).unwrap_or_default(),
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "items": items }))
@@ -297,6 +319,9 @@ pub async fn get_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((id,
     };
     if let Some(path_str) = path_opt {
         if !path_str.is_empty() {
+            if path_str.starts_with("http") {
+                return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response();
+            }
             if let Ok(bytes) = tokio::fs::read(&path_str).await {
                 let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
                 return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
@@ -320,8 +345,7 @@ pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
     } else { (StatusCode::BAD_REQUEST, Json(json!({"error": "旧密码错误"}))) }
 }
 
-// ================= Emby 兼容层 =================
-
+// Emby 兼容层 (略，保持原有逻辑即可，不影响前端)
 pub async fn emby_public_info() -> impl IntoResponse { Json(json!({ "ServerName": "Rust-Em", "Version": "4.8.0.0", "Id": "rust-em-server", "OperatingSystem": "Linux", "StartupWizardCompleted": true })) }
 pub async fn emby_info() -> impl IntoResponse { Json(json!({ "ServerName": "Rust-Em", "Version": "4.8.0.0", "Id": "rust-em-server", "OperatingSystem": "Linux", "OperatingSystemDisplayName": "Linux", "HasPendingRestart": false, "IsShuttingDown": false, "SupportsLibraryMonitor": false, "SupportsHttps": true, "HttpServerPortNumber": 8096 })) }
 pub async fn emby_auth_keys() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
@@ -433,6 +457,9 @@ pub async fn emby_item_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPat
     };
     if let Some(path_str) = path_opt {
         if !path_str.is_empty() {
+            if path_str.starts_with("http") {
+                return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response();
+            }
             if let Ok(bytes) = tokio::fs::read(&path_str).await {
                 let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
                 return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();

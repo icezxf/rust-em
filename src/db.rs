@@ -3,49 +3,30 @@ use rusqlite::Connection;
 pub fn init_db(conn: &Connection) {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
-            username TEXT UNIQUE,
-            password TEXT
+            id INTEGER PRIMARY KEY, username TEXT UNIQUE, password TEXT
         );
         CREATE TABLE IF NOT EXISTS libraries (
-            id INTEGER PRIMARY KEY,
-            name TEXT,
-            path TEXT,
-            type TEXT
+            id INTEGER PRIMARY KEY, name TEXT, path TEXT, type TEXT
         );
         CREATE TABLE IF NOT EXISTS items (
-            id INTEGER PRIMARY KEY,
-            library_id INTEGER,
-            title TEXT,
-            file_path TEXT UNIQUE,
-            type TEXT,
-            plot TEXT,
-            year TEXT,
-            poster_path TEXT,
-            fanart_path TEXT,
-            logo_path TEXT,
-            thumb_path TEXT,
-            banner_path TEXT,
-            size INTEGER DEFAULT 0,
-            mtime INTEGER DEFAULT 0
+            id INTEGER PRIMARY KEY, library_id INTEGER, title TEXT, file_path TEXT UNIQUE,
+            type TEXT, plot TEXT, year TEXT, poster_path TEXT, fanart_path TEXT,
+            logo_path TEXT, thumb_path TEXT, banner_path TEXT, size INTEGER DEFAULT 0, mtime INTEGER DEFAULT 0,
+            rating REAL DEFAULT 0, mpaa TEXT, genres TEXT, directors TEXT, actors TEXT
         );
         INSERT OR IGNORE INTO users (username, password) VALUES ('admin', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918');"
     ).unwrap();
 
-    // 自动升级：检查并添加缺失的列（防止旧版本数据库导致的 Panic）
     let missing_columns = [
-        ("size", "INTEGER DEFAULT 0"),
-        ("mtime", "INTEGER DEFAULT 0"),
-        ("logo_path", "TEXT"),
-        ("thumb_path", "TEXT"),
-        ("banner_path", "TEXT"),
+        ("size", "INTEGER DEFAULT 0"), ("mtime", "INTEGER DEFAULT 0"),
+        ("logo_path", "TEXT"), ("thumb_path", "TEXT"), ("banner_path", "TEXT"),
+        ("rating", "REAL DEFAULT 0"), ("mpaa", "TEXT"),
+        ("genres", "TEXT"), ("directors", "TEXT"), ("actors", "TEXT"),
     ];
 
     for (col_name, col_type) in missing_columns {
         let check_sql = format!("SELECT {} FROM items LIMIT 1", col_name);
-        // 如果 prepare 报错，说明字段不存在，触发 ALTER TABLE
         if conn.prepare(&check_sql).is_err() {
-            println!("🛠️ 数据库升级：正在添加新列 {}", col_name);
             let alter_sql = format!("ALTER TABLE items ADD COLUMN {} {}", col_name, col_type);
             let _ = conn.execute(&alter_sql, []);
         }

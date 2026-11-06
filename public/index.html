@@ -9,10 +9,7 @@
     <style>
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        .backdrop-blur-heavy {
-            backdrop-filter: blur(24px) brightness(0.3);
-            -webkit-backdrop-filter: blur(24px) brightness(0.3);
-        }
+        .backdrop-blur-heavy { backdrop-filter: blur(24px) brightness(0.3); -webkit-backdrop-filter: blur(24px) brightness(0.3); }
         .media-card:hover .media-poster { transform: scale(1.05); }
         .media-card:hover { box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.4); }
     </style>
@@ -128,11 +125,22 @@
                     <h1 id="detail-title" class="text-3xl md:text-5xl font-extrabold text-white mb-3 tracking-tight drop-shadow-lg">影片标题</h1>
                     
                     <div class="flex flex-wrap justify-center md:justify-start gap-3 mb-6 items-center">
-                        <span id="detail-year" class="text-gray-300 font-medium text-lg">2024</span>
+                        <span id="detail-rating" class="text-yellow-400 font-bold text-lg flex items-center gap-1">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+                            <span id="detail-rating-val">0.0</span>
+                        </span>
                         <span class="w-1.5 h-1.5 rounded-full bg-gray-600"></span>
+                        <span id="detail-year" class="text-gray-300 font-medium text-lg">2024</span>
+                        <span id="detail-mpaa" class="border border-gray-500 text-gray-300 px-2 py-0.5 rounded text-sm font-medium"></span>
                         <span id="detail-type" class="border border-gray-500 text-gray-300 px-3 py-0.5 rounded text-sm font-medium">电影</span>
                     </div>
                     
+                    <div class="text-sm text-gray-300 mb-6 flex flex-col gap-2">
+                        <div id="detail-genres" class="hidden"><span class="text-gray-500">类型: </span> <span class="text-gray-300" id="detail-genres-val"></span></div>
+                        <div id="detail-directors" class="hidden"><span class="text-gray-500">导演: </span> <span class="text-gray-300" id="detail-directors-val"></span></div>
+                        <div id="detail-actors" class="hidden"><span class="text-gray-500">主演: </span> <span class="text-gray-300" id="detail-actors-val"></span></div>
+                    </div>
+
                     <div class="bg-black/30 rounded-xl p-5 border border-gray-800/50">
                         <h3 class="text-gray-400 text-sm font-bold mb-2 uppercase tracking-wider">剧情简介</h3>
                         <p id="detail-plot" class="text-gray-200 leading-relaxed max-h-48 md:max-h-64 overflow-y-auto pr-2 text-sm md:text-base">暂无简介...</p>
@@ -297,14 +305,16 @@
 
                 grid.innerHTML = data.items.map(item => {
                     const imgUrl = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
+                    const ratingHtml = item.rating > 0 ? `<div class="absolute bottom-2 right-2 bg-yellow-500 text-black font-bold text-xs px-2 py-0.5 rounded shadow-lg border border-yellow-400">${item.rating.toFixed(1)}</div>` : '';
 
                     return `
                     <div onclick="openDetail(${item.id})" class="media-card bg-[#16191f] rounded-xl overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1 relative group border border-gray-800/50">
-                        <div class="bg-gray-800 aspect-[2/3] overflow-hidden">
+                        <div class="bg-gray-800 aspect-[2/3] overflow-hidden relative">
                             <img src="${imgUrl}" class="media-poster w-full h-full object-cover transition-transform duration-500" onerror="this.src='${defaultPosterSvg}'">
                             <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                            ${ratingHtml}
                         </div>
-                        <div class="absolute bottom-0 w-full p-3 transform translate-y-2 group-hover:translate-y-0 transition-transform duration-300">
+                        <div class="absolute bottom-0 w-full p-3 transform translate-y-2 group-hover:translate-y-0 transition-transform duration-300 pointer-events-none">
                             <div class="font-bold text-white text-sm truncate drop-shadow-md">${item.title}</div>
                             <div class="text-xs text-gray-300 mt-1">${item.year || (item.type === 'movies' ? '电影' : '剧集')}</div>
                         </div>
@@ -320,10 +330,25 @@
             if (!item) return;
 
             document.getElementById('detail-title').innerText = item.title;
-            document.getElementById('detail-year').innerText = item.year || '未知';
+            document.getElementById('detail-year').innerText = item.year || '未知年份';
             document.getElementById('detail-type').innerText = item.type === 'movies' ? '电影' : '剧集';
-            document.getElementById('detail-plot').innerText = item.plot || '暂无简介。您可以尝试在目录下添加同名的 NFO 文件，或者重新扫描媒体库以获取更多信息。';
+            document.getElementById('detail-plot').innerText = item.plot || '暂无简介。';
+            document.getElementById('detail-rating-val').innerText = item.rating > 0 ? item.rating.toFixed(1) : '暂无';
             
+            const mpaaEl = document.getElementById('detail-mpaa');
+            if (item.mpaa) { mpaaEl.innerText = item.mpaa; mpaaEl.classList.remove('hidden'); }
+            else { mpaaEl.classList.add('hidden'); }
+
+            const updateTextBlock = (id, valId, value) => {
+                const el = document.getElementById(id);
+                const valEl = document.getElementById(valId);
+                if (value) { valEl.innerText = value; el.classList.remove('hidden'); }
+                else { el.classList.add('hidden'); }
+            };
+            updateTextBlock('detail-genres', 'detail-genres-val', item.genres);
+            updateTextBlock('detail-directors', 'detail-directors-val', item.directors);
+            updateTextBlock('detail-actors', 'detail-actors-val', item.actors);
+
             const posterImg = document.getElementById('detail-poster');
             posterImg.src = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
 
@@ -343,6 +368,7 @@
             document.body.style.overflow = 'auto';
         }
 
+        // ... 设置页管理 (和原来一样)
         function renderSettingsLibraries() {
             const container = document.getElementById('settings-lib-list');
             if (allLibraries.length === 0) {
