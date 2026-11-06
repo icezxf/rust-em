@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <!-- 强制禁用浏览器缓存 -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <title>Rust-Em</title>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -21,7 +20,7 @@
 
     <!-- 主界面 -->
     <div id="main-view" class="hidden flex-1 flex flex-col md:flex-row h-full">
-        <!-- PC 侧边栏 -->
+        <!-- 侧边栏 -->
         <div class="hidden md:flex w-64 bg-gray-800 p-4 flex-col border-r border-gray-700">
             <h1 class="text-xl font-bold mb-8 text-blue-400 px-2">🎬 Rust-Em</h1>
             <button onclick="switchTab('library')" class="text-left px-4 py-3 hover:bg-gray-700 rounded-lg mb-2 transition">媒体库</button>
@@ -37,38 +36,23 @@
 
         <!-- 内容区 -->
         <div class="flex-1 overflow-y-auto p-4 md:p-8 pb-20 md:pb-8">
-            <!-- 媒体库视图 -->
             <div id="tab-library" class="hidden">
                 <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-4"></div>
             </div>
-
-            <!-- 设置视图 -->
             <div id="tab-settings" class="hidden max-w-2xl mx-auto">
-                <!-- 添加媒体库 -->
                 <div class="bg-gray-800 p-5 md:p-6 rounded-xl shadow-lg mb-6">
                     <h3 class="text-lg font-bold mb-4 text-blue-300 border-b border-gray-700 pb-2">添加媒体库</h3>
-                    <input id="lib-name" placeholder="媒体库名称 (如: 电影)" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-blue-500">
+                    <input id="lib-name" placeholder="媒体库名称" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-blue-500">
                     <select id="lib-type" class="p-3 mb-4 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-blue-500">
                         <option value="movies">电影</option>
                         <option value="tvshows">电视剧</option>
                     </select>
-                    
                     <div class="mb-4">
                         <label class="block text-sm text-gray-400 mb-2">已选路径:</label>
                         <div id="selected-paths" class="flex flex-col gap-2 mb-2"></div>
                         <button onclick="openPathPicker()" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-sm transition w-full border border-gray-600 border-dashed">+ 添加路径</button>
                     </div>
-
                     <button onclick="addLibrary()" class="w-full bg-green-600 hover:bg-green-700 px-4 py-3 rounded-lg font-bold mt-2 transition">保存并扫描</button>
-                </div>
-
-                <!-- 修改账号 -->
-                <div class="bg-gray-800 p-5 md:p-6 rounded-xl shadow-lg">
-                    <h3 class="text-lg font-bold mb-4 text-yellow-300 border-b border-gray-700 pb-2">修改管理员账号</h3>
-                    <input id="old-pwd" type="password" placeholder="当前密码" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-yellow-500">
-                    <input id="new-user" type="text" placeholder="新用户名" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-yellow-500">
-                    <input id="new-pwd" type="password" placeholder="新密码" class="p-3 mb-4 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-yellow-500">
-                    <button onclick="updateUser()" class="w-full bg-yellow-600 hover:bg-yellow-700 px-4 py-3 rounded-lg font-bold transition">更新账号</button>
                 </div>
             </div>
         </div>
@@ -91,13 +75,9 @@
                 <h3 class="font-bold truncate text-sm md:text-base text-blue-300" id="current-path">/media</h3>
                 <button onclick="closePathPicker()" class="text-gray-400 hover:text-white px-2">✕</button>
             </div>
-            
-            <div id="dir-list" class="flex-1 overflow-y-auto p-2">
-                <!-- 目录列表动态渲染 -->
-            </div>
-            
+            <div id="dir-list" class="flex-1 overflow-y-auto p-2"></div>
             <div class="p-4 border-t border-gray-700 flex gap-2">
-                <button onclick="selectCurrentPath()" class="flex-1 bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold">选中当前目录并关闭</button>
+                <button onclick="selectCurrentPath()" class="flex-1 bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold">选中当前并关闭</button>
                 <button onclick="closePathPicker()" class="flex-1 bg-green-600 hover:bg-green-700 py-3 rounded-lg font-bold">确认勾选并关闭</button>
             </div>
         </div>
@@ -110,21 +90,20 @@
 
         if (token) showMain();
 
-        // 封装 fetch 请求
         async function api(path, method = 'GET', body = null) {
+            console.log(`[API 请求] ${method} ${path}`, body || '');
             const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
             const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : null });
             if (!res.ok) {
                 if (res.status === 401) { logout(); throw new Error("登录已过期"); }
                 const text = await res.text();
-                throw new Error(`HTTP ${res.status}: ${text || '无返回内容'}`);
+                throw new Error(`HTTP ${res.status}: ${text}`);
             }
             const text = await res.text();
             if (!text) return {};
-            try { return JSON.parse(text); } catch (e) { throw new Error("JSON解析失败"); }
+            return JSON.parse(text);
         }
 
-        // 登录
         async function login() {
             const u = document.getElementById('username').value;
             const p = document.getElementById('password').value;
@@ -134,117 +113,103 @@
             });
             if (res.ok) {
                 const data = await res.json();
-                token = data.token; 
-                localStorage.setItem('token', token); 
-                showMain();
-            } else alert('登录失败，请检查密码');
+                token = data.token; localStorage.setItem('token', token); showMain();
+            } else alert('登录失败');
         }
         
-        function logout() { 
-            localStorage.removeItem('token'); 
-            location.reload(); 
-        }
-        
+        function logout() { localStorage.removeItem('token'); location.reload(); }
         function showMain() {
             document.getElementById('login-view').classList.add('hidden');
             document.getElementById('main-view').classList.remove('hidden');
             switchTab('library');
         }
-        
-        // 切换标签
         function switchTab(tab) {
             document.getElementById('tab-library').classList.add('hidden');
             document.getElementById('tab-settings').classList.add('hidden');
             document.getElementById(`tab-${tab}`).classList.remove('hidden');
-            
             if(window.innerWidth < 768) {
                 document.getElementById('mobile-title').innerText = tab === 'library' ? '媒体库' : '设置';
             }
-            if (tab === 'library') loadMedia();
         }
 
-        // 加载媒体库
-        async function loadMedia() {
-            try {
-                const data = await api('/api/items');
-                const grid = document.getElementById('media-grid');
-                if (!data.items || data.items.length === 0) {
-                    grid.innerHTML = `<div class="col-span-full text-center text-gray-500 mt-10">媒体库为空，请先去设置里添加路径并扫描。</div>`;
-                    return;
-                }
-                grid.innerHTML = data.items.map(item => `
-                    <div class="bg-gray-800 p-2 rounded-lg shadow hover:ring-2 ring-blue-500 cursor-pointer transition">
-                        <div class="bg-gray-700 aspect-[2/3] mb-2 rounded flex items-center justify-center text-gray-500 text-sm">无封面</div>
-                        <div class="font-bold text-sm truncate">${item.title}</div>
-                        <div class="text-xs text-gray-400 mt-1">${item.type}</div>
-                    </div>
-                `).join('');
-            } catch (e) {
-                console.error(e);
-            }
-        }
-
-        // ================= 路径选择器逻辑 =================
         async function openPathPicker() {
             document.getElementById('path-modal').classList.remove('hidden');
             await browseDir(currentPath);
         }
-
         function closePathPicker() {
             document.getElementById('path-modal').classList.add('hidden');
         }
 
-        // 浏览目录（支持复选框多选）
+        // 完全重写：使用原生 DOM 构建列表，杜绝任何字符串转义问题
         async function browseDir(path) {
+            console.log(`[浏览目录] 准备进入: ${path}`);
             const list = document.getElementById('dir-list');
             list.innerHTML = `<div class="p-4 text-center text-gray-500">加载中...</div>`;
             
             try {
                 const res = await api(`/api/browse`, "POST", { path: path });
+                console.log(`[浏览目录] 后端返回:`, res);
+                
                 currentPath = res.current || path;
                 document.getElementById('current-path').innerText = currentPath;
-                
+
                 if (res.error) {
                     list.innerHTML = `<div class="p-4 text-center text-red-500 text-sm">${res.error}</div>`;
                     return;
                 }
 
-                let html = '';
-                // 返回上一级按钮
+                // 清空列表，开始用 DOM API 渲染
+                list.innerHTML = '';
+
+                // 1. 渲染返回上一级
                 if (currentPath !== '/media') {
                     const parent = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/media';
-                    html += `<div data-path="${parent}" onclick="browseDir(this.dataset.path)" class="p-3 border-b border-gray-700 cursor-pointer hover:bg-gray-700 flex items-center text-gray-400">⬅ 返回上一级</div>`;
+                    const backBtn = document.createElement('div');
+                    backBtn.className = "p-3 border-b border-gray-700 cursor-pointer hover:bg-gray-700 flex items-center text-gray-400 font-bold";
+                    backBtn.innerHTML = "⬅ 返回上一级";
+                    backBtn.onclick = () => browseDir(parent);
+                    list.appendChild(backBtn);
                 }
 
-                // 渲染子文件夹
+                // 2. 渲染子目录
                 if (!res.dirs || res.dirs.length === 0) {
-                    html += `<div class="p-6 text-center text-gray-400">当前目录下没有子文件夹。<br>如果电影在这里，请直接点击下方蓝色按钮选中当前目录。</div>`;
+                    const emptyMsg = document.createElement('div');
+                    emptyMsg.className = "p-6 text-center text-gray-400";
+                    emptyMsg.innerText = "当前目录下没有子文件夹。";
+                    list.appendChild(emptyMsg);
                 } else {
-                    html += res.dirs.map(d => {
-                        // 判断当前子目录是否已经被选中了
-                        const isChecked = selectedPaths.includes(d.path) ? 'checked' : '';
-                        return `
-                        <div class="p-3 border-b border-gray-700 flex justify-between items-center hover:bg-gray-700 transition">
-                            <!-- 左侧点击进入下一级 -->
-                            <div class="flex items-center flex-1 cursor-pointer overflow-hidden" data-path="${d.path}" onclick="browseDir(this.dataset.path)">
-                                <span class="text-yellow-500 mr-2">📁</span> <span class="truncate">${d.name}</span>
-                            </div>
-                            <!-- 右侧复选框直接选中 -->
-                            <input type="checkbox" ${isChecked} data-path="${d.path}" onchange="togglePath(this)" class="w-5 h-5 accent-blue-500 cursor-pointer flex-shrink-0 ml-2">
-                        </div>
-                        `;
-                    }).join('');
+                    res.dirs.forEach(d => {
+                        // 外框
+                        const row = document.createElement('div');
+                        row.className = "p-3 border-b border-gray-700 flex justify-between items-center hover:bg-gray-700 transition";
+
+                        // 左侧可点击区域
+                        const leftArea = document.createElement('div');
+                        leftArea.className = "flex items-center flex-1 cursor-pointer overflow-hidden";
+                        leftArea.innerHTML = `<span class="text-yellow-500 mr-2">📁</span> <span class="truncate">${d.name}</span>`;
+                        // 绑定点击事件（使用闭包锁定 d.path）
+                        leftArea.onclick = () => browseDir(d.path);
+
+                        // 右侧复选框
+                        const checkbox = document.createElement('input');
+                        checkbox.type = 'checkbox';
+                        checkbox.className = "w-5 h-5 accent-blue-500 cursor-pointer flex-shrink-0 ml-2";
+                        checkbox.checked = selectedPaths.includes(d.path);
+                        checkbox.onchange = (e) => togglePath(d.path, e.target.checked);
+
+                        row.appendChild(leftArea);
+                        row.appendChild(checkbox);
+                        list.appendChild(row);
+                    });
                 }
-                list.innerHTML = html;
             } catch (err) {
-                list.innerHTML = `<div class="p-4 text-center text-red-500 text-sm font-bold">请求失败:<br>${err.message}</div>`;
+                console.error(`[浏览目录] 发生错误:`, err);
+                list.innerHTML = `<div class="p-4 text-center text-red-500 text-sm font-bold">错误详情:<br>${err.message}</div>`;
             }
         }
 
-        // 处理复选框勾选
-        function togglePath(checkbox) {
-            const path = checkbox.dataset.path;
-            if (checkbox.checked) {
+        function togglePath(path, isChecked) {
+            if (isChecked) {
                 if (!selectedPaths.includes(path)) selectedPaths.push(path);
             } else {
                 selectedPaths = selectedPaths.filter(p => p !== path);
@@ -252,7 +217,6 @@
             renderSelectedPaths();
         }
 
-        // 选中当前所在目录
         function selectCurrentPath() {
             if (!selectedPaths.includes(currentPath)) {
                 selectedPaths.push(currentPath);
@@ -261,7 +225,6 @@
             closePathPicker();
         }
 
-        // 渲染已选路径列表
         function renderSelectedPaths() {
             const container = document.getElementById('selected-paths');
             if (selectedPaths.length === 0) {
@@ -281,7 +244,6 @@
             renderSelectedPaths();
         }
 
-        // 保存媒体库
         async function addLibrary() {
             const name = document.getElementById('lib-name').value;
             const type = document.getElementById('lib-type').value;
@@ -294,24 +256,6 @@
                 renderSelectedPaths();
                 document.getElementById('lib-name').value = '';
                 switchTab('library');
-            } catch(e) {
-                alert(e.message);
-            }
-        }
-
-        // 修改账号
-        async function updateUser() {
-            const oldPwd = document.getElementById('old-pwd').value;
-            const newUser = document.getElementById('new-user').value;
-            const newPwd = document.getElementById('new-pwd').value;
-            if (!oldPwd || !newUser || !newPwd) return alert('请填写完整所有选项');
-            
-            try {
-                const res = await api('/api/user/update', 'POST', { old_password: oldPwd, new_username: newUser, new_password: newPwd });
-                if (res && res.status === 'success') {
-                    alert('账号修改成功！请使用新账号重新登录。');
-                    logout();
-                }
             } catch (e) {
                 alert(e.message);
             }
