@@ -105,3 +105,42 @@ pub async fn emby_info() -> impl IntoResponse {
 pub async fn emby_items() -> impl IntoResponse {
     Json(json!({"Items": [], "TotalRecordCount": 0}))
 }
+
+// ================= 新增：修改账号密码 =================
+#[derive(Deserialize)]
+pub struct UpdateUserReq {
+    old_password: String,
+    new_username: String,
+    new_password: String,
+}
+
+pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<UpdateUserReq>) -> impl IntoResponse {
+    let mut hasher_old = Sha256::new();
+    hasher_old.update(&payload.old_password);
+    let hashed_old = format!("{:x}", hasher_old.finalize());
+
+    let mut hasher_new = Sha256::new();
+    hasher_new.update(&payload.new_password);
+    let hashed_new = format!("{:x}", hasher_new.finalize());
+
+    let conn = pool.lock().unwrap();
+    
+    // 验证旧密码是否正确
+    let mut stmt = conn.prepare("SELECT id FROM users WHERE username = 'admin' AND password = ?1").unwrap();
+    if stmt.exists([&hashed_old]).unwrap() {
+        // 更新密码和用户名
+        conn.execute(
+            "UPDATE users SET username = ?1, password = ?2 WHERE username = 'admin'", 
+            [&payload.new_username, &hashed_new]
+        ).unwrap();
+        
+        // 清空现有的 Token，强制用户重新登录
+        if let Some(tokens) = TOKENS.get() {
+            tokens.lock().unwrap().clear();
+        }
+        
+        (StatusCode::OK, Json(json!({"status": "success"})))
+    } else {
+        (StatusCode::BAD_REQUEST, Json(json!({"error": "旧密码错误"})))
+    }
+}

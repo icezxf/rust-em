@@ -31,7 +31,7 @@
             <div id="tab-settings" class="hidden">
                 <h2 class="text-2xl mb-4">设置</h2>
                 <div class="bg-gray-800 p-6 rounded mb-6">
-                    <h3 class="text-lg mb-2">添加媒体库 (STRM)</h3>
+                    <h3 class="text-lg mb-2 text-blue-300">添加媒体库 (STRM)</h3>
                     <input id="lib-name" placeholder="媒体库名称 (如: 电影)" class="p-2 mb-2 bg-gray-700 rounded w-full">
                     <input id="lib-path" placeholder="服务器本地绝对路径 (如: /media/movies)" class="p-2 mb-2 bg-gray-700 rounded w-full">
                     <select id="lib-type" class="p-2 mb-2 bg-gray-700 rounded w-full">
@@ -39,6 +39,15 @@
                         <option value="tvshows">电视剧</option>
                     </select>
                     <button onclick="addLibrary()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded mt-2">添加并扫描</button>
+                </div>
+
+                <!-- 新增：修改账号密码 -->
+                <div class="bg-gray-800 p-6 rounded mb-6">
+                    <h3 class="text-lg mb-2 text-yellow-300">修改管理员账号</h3>
+                    <input id="old-pwd" type="password" placeholder="当前密码 (默认 admin)" class="p-2 mb-2 bg-gray-700 rounded w-full">
+                    <input id="new-user" type="text" placeholder="新用户名" class="p-2 mb-2 bg-gray-700 rounded w-full">
+                    <input id="new-pwd" type="password" placeholder="新密码" class="p-2 mb-2 bg-gray-700 rounded w-full">
+                    <button onclick="updateUser()" class="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded mt-2">更新账号</button>
                 </div>
             </div>
         </div>
@@ -97,6 +106,22 @@
             await api('/api/libraries', 'POST', { name, path, type });
             alert('媒体库已添加，后台开始扫描...');
             switchTab('library');
+        }
+        
+        // 新增：修改账号逻辑
+        async function updateUser() {
+            const oldPwd = document.getElementById('old-pwd').value;
+            const newUser = document.getElementById('new-user').value;
+            const newPwd = document.getElementById('new-pwd').value;
+            if (!oldPwd || !newUser || !newPwd) return alert('请填写完整所有选项');
+            
+            const res = await api('/api/user/update', 'POST', { old_password: oldPwd, new_username: newUser, new_password: newPwd });
+            if (res && res.status === 'success') {
+                alert('账号修改成功！请使用新账号重新登录。');
+                logout();
+            } else if (res) {
+                alert(res.error || '修改失败');
+            }
         }
     </script>
 </body>
