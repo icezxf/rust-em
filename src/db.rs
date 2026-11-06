@@ -23,6 +23,9 @@ pub fn init_db(conn: &Connection) {
             year TEXT,
             poster_path TEXT,
             fanart_path TEXT,
+            logo_path TEXT,        -- 新增
+            thumb_path TEXT,       -- 新增
+            banner_path TEXT,      -- 新增
             size INTEGER DEFAULT 0,
             mtime INTEGER DEFAULT 0
         );
