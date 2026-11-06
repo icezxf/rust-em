@@ -181,6 +181,11 @@
             
             const list = document.getElementById('dir-list');
             list.innerHTML = '';
+            if (res.error) {
+                list.innerHTML = `<div class="p-4 text-center text-red-500 text-sm">${res.error}</div>`;
+                return;
+            }
+
             
             // 添加返回上一级
             if (currentPath !== '/media') {
