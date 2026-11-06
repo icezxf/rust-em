@@ -15,9 +15,7 @@
         .media-card:hover { box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.4); }
         .snap-x-mandatory { scroll-snap-type: x mandatory; }
         .snap-start { scroll-snap-align: start; }
-        /* 侧边栏平滑宽度过渡 */
         .sidebar-transition { transition: width 0.3s ease-in-out, opacity 0.2s ease-in-out; }
-        /* 详情页平滑位移过渡 */
         .modal-transition { transition: left 0.3s ease-in-out; }
         .text-shadow-strong { text-shadow: 0 1px 3px rgba(0,0,0,0.8), 0 2px 6px rgba(0,0,0,0.5); }
     </style>
@@ -42,7 +40,7 @@
     <!-- 主界面 -->
     <div id="main-view" class="hidden flex-1 flex flex-row h-full relative overflow-hidden">
         
-        <!-- 左侧边栏 (PC端挤压布局，移动端覆盖) -->
+        <!-- 左侧边栏 -->
         <div id="desktop-sidebar" class="hidden md:flex h-full bg-[#16191f] flex-col border-r border-gray-800 z-[80] shrink-0 overflow-hidden sidebar-transition w-64 opacity-100 absolute md:relative">
             <div class="w-64 p-4 pt-16 flex flex-col h-full">
                 <div class="text-xs text-gray-500 font-bold mb-3 px-2 uppercase tracking-wider whitespace-nowrap mt-2">媒体库</div>
@@ -61,7 +59,6 @@
 
         <!-- 右侧内容区 -->
         <div class="flex-1 flex flex-col h-full overflow-hidden bg-[#0f1115] relative w-full min-w-0">
-            <!-- 顶栏 (留出位置给全局按钮) -->
             <div class="px-4 py-3 md:px-8 md:py-6 pl-16 md:pl-20 flex flex-col shadow-sm z-50 shrink-0 border-b border-gray-800/50 bg-[#0f1115]/80 backdrop-blur-md">
                 <div id="content-header" class="hidden flex gap-3">
                     <button onclick="setTypeFilter('all')" id="btn-type-all" class="px-5 py-1.5 rounded-full text-sm font-medium bg-blue-600 text-white transition shadow-lg shadow-blue-500/30">全部</button>
@@ -106,20 +103,21 @@
             </div>
         </div>
 
-        <!-- 沉浸式详情页 Modal (默认全屏，展开侧边栏时右移) -->
+        <!-- 沉浸式详情页 Modal -->
         <div id="detail-modal" class="hidden fixed top-0 bottom-0 right-0 left-0 z-[70] overflow-y-auto bg-[#0b0e14] modal-transition">
             <div id="detail-fanart" class="fixed top-0 bottom-0 right-0 left-0 bg-cover bg-top backdrop-blur-heavy modal-transition opacity-40"></div>
             
-            <div class="relative min-h-screen w-full p-4 md:p-8 flex flex-col items-center">
+            <div class="relative min-h-screen w-full px-4 py-4 md:px-8 md:py-6 flex flex-col items-center">
                 <button onclick="closeDetail()" class="fixed top-4 right-4 md:top-6 md:right-6 text-white bg-black/50 hover:bg-black/80 p-3 rounded-full z-50 backdrop-blur-md transition">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
 
-                <div class="w-full max-w-5xl flex flex-col gap-6 mt-12 md:mt-24 z-10">
+                <!-- 内容上边距压缩，模块间距微调 -->
+                <div class="w-full max-w-5xl flex flex-col gap-4 md:gap-5 mt-14 md:mt-16 z-10">
                     
                     <div class="flex flex-col md:flex-row gap-6 md:gap-8 items-start">
                         <!-- 左侧海报 -->
-                        <div class="w-48 md:w-64 shrink-0 aspect-[2/3] bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border border-gray-600/30 sticky top-8">
+                        <div class="w-48 md:w-64 shrink-0 aspect-[2/3] bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border border-gray-600/30 sticky top-6">
                             <img id="detail-poster" src="" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzM3NDE1MSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjOWNhM2FmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg=='">
                         </div>
                         
@@ -140,13 +138,13 @@
                                 <span id="detail-mpaa" class="border border-gray-600 text-gray-300 px-1.5 py-0.5 rounded-md text-xs hidden"></span>
                             </div>
 
-                            <div id="detail-genres" class="flex flex-wrap gap-1.5 mb-5 hidden">
+                            <div id="detail-genres" class="flex flex-wrap gap-1.5 mb-4 hidden">
                                 <div id="detail-genres-val" class="flex flex-wrap gap-1.5"></div>
                             </div>
 
-                            <div id="detail-play-actions" class="flex flex-wrap gap-2 mb-6"></div>
+                            <div id="detail-play-actions" class="flex flex-wrap gap-2 mb-5"></div>
 
-                            <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base mb-6 whitespace-pre-wrap drop-shadow-md">暂无简介...</p>
+                            <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base mb-4 whitespace-pre-wrap drop-shadow-md">暂无简介...</p>
                             
                             <div class="flex flex-col gap-1.5 text-xs md:text-sm text-gray-300 pt-4 border-t border-gray-600/50">
                                 <div id="detail-series-box" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">系列:</span> <span id="detail-series" class="text-blue-400 font-medium drop-shadow-sm"></span></div>
@@ -162,7 +160,7 @@
                     </div>
 
                     <!-- 剧照横滑区 -->
-                    <div id="detail-stills-section" class="w-full mt-6 hidden relative group">
+                    <div id="detail-stills-section" class="w-full mt-2 hidden relative group">
                         <h3 class="text-sm text-gray-500 font-bold mb-2 uppercase tracking-wider">剧照 STILLS</h3>
                         <button onclick="scrollStills(-1)" class="absolute left-0 top-1/2 -translate-y-1/2 z-20 bg-black/60 hover:bg-black/90 text-white p-2 rounded-full backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity hidden md:block border border-gray-600/50 shadow-xl"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg></button>
                         <div id="detail-stills-list" class="flex gap-4 overflow-x-auto pb-4 no-scrollbar snap-x-mandatory scroll-smooth"></div>
@@ -170,14 +168,14 @@
                     </div>
 
                     <!-- 演员 -->
-                    <div class="w-full mt-4">
-                        <h3 class="text-sm text-gray-500 font-bold mb-3 uppercase tracking-wider">演职人员 CAST & CREW</h3>
+                    <div class="w-full mt-2">
+                        <h3 class="text-sm text-gray-500 font-bold mb-2 uppercase tracking-wider">演职人员 CAST & CREW</h3>
                         <div id="detail-actors-list" class="flex gap-4 overflow-x-auto pb-4 no-scrollbar snap-x-mandatory"></div>
                     </div>
 
                     <!-- 媒体文件 -->
-                    <div class="w-full mt-4 mb-20">
-                        <h3 class="text-sm text-gray-500 font-bold mb-3 uppercase tracking-wider">媒体文件 MEDIA FILES</h3>
+                    <div class="w-full mt-2 mb-20">
+                        <h3 class="text-sm text-gray-500 font-bold mb-2 uppercase tracking-wider">媒体文件 MEDIA FILES</h3>
                         <div class="bg-[#16191f]/80 backdrop-blur-md border border-gray-800 rounded-xl p-5 shadow-lg">
                             <div class="text-sm text-gray-400 mb-4 flex gap-6">
                                 <span>文件大小: <span id="detail-file-size" class="text-gray-200 font-medium">计算中...</span></span>
@@ -285,7 +283,6 @@
                 iconClose.classList.add('hidden');
                 iconOpen.classList.remove('hidden');
                 
-                // 收起侧边栏，详情页全屏
                 detailModal.classList.remove('md:left-64');
                 detailFanart.classList.remove('md:left-64');
             } else {
@@ -296,7 +293,6 @@
                     sidebar.classList.add('flex');
                     overlay.classList.remove('hidden');
                 } else {
-                    // 展开侧边栏，详情页右移
                     detailModal.classList.add('md:left-64');
                     detailFanart.classList.add('md:left-64');
                 }
@@ -483,7 +479,6 @@
             if (!item) return;
             currentPlayingItemId = item.id;
 
-            // 进入详情页自动折叠侧边栏
             if (window.innerWidth >= 768) {
                 const sidebar = document.getElementById('desktop-sidebar');
                 if (sidebar.classList.contains('w-64')) toggleSidebar();
