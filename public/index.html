@@ -15,7 +15,10 @@
         .media-card:hover { box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.4); }
         .snap-x-mandatory { scroll-snap-type: x mandatory; }
         .snap-start { scroll-snap-align: start; }
+        /* 侧边栏平滑宽度过渡 */
         .sidebar-transition { transition: width 0.3s ease-in-out, opacity 0.2s ease-in-out; }
+        /* 详情页平滑位移过渡 */
+        .modal-transition { transition: left 0.3s ease-in-out; }
         .text-shadow-strong { text-shadow: 0 1px 3px rgba(0,0,0,0.8), 0 2px 6px rgba(0,0,0,0.5); }
     </style>
 </head>
@@ -58,7 +61,7 @@
 
         <!-- 右侧内容区 -->
         <div class="flex-1 flex flex-col h-full overflow-hidden bg-[#0f1115] relative w-full min-w-0">
-            <!-- 顶栏 (移除了原来的折叠按钮，留出位置给全局按钮) -->
+            <!-- 顶栏 (留出位置给全局按钮) -->
             <div class="px-4 py-3 md:px-8 md:py-6 pl-16 md:pl-20 flex flex-col shadow-sm z-50 shrink-0 border-b border-gray-800/50 bg-[#0f1115]/80 backdrop-blur-md">
                 <div id="content-header" class="hidden flex gap-3">
                     <button onclick="setTypeFilter('all')" id="btn-type-all" class="px-5 py-1.5 rounded-full text-sm font-medium bg-blue-600 text-white transition shadow-lg shadow-blue-500/30">全部</button>
@@ -103,9 +106,9 @@
             </div>
         </div>
 
-        <!-- 沉浸式详情页 Modal -->
-        <div id="detail-modal" class="hidden fixed inset-0 z-[70] overflow-y-auto bg-[#0b0e14]">
-            <div id="detail-fanart" class="fixed inset-0 bg-cover bg-top backdrop-blur-heavy transition-opacity duration-500 opacity-40"></div>
+        <!-- 沉浸式详情页 Modal (默认全屏，展开侧边栏时右移) -->
+        <div id="detail-modal" class="hidden fixed top-0 bottom-0 right-0 left-0 z-[70] overflow-y-auto bg-[#0b0e14] modal-transition">
+            <div id="detail-fanart" class="fixed top-0 bottom-0 right-0 left-0 bg-cover bg-top backdrop-blur-heavy modal-transition opacity-40"></div>
             
             <div class="relative min-h-screen w-full p-4 md:p-8 flex flex-col items-center">
                 <button onclick="closeDetail()" class="fixed top-4 right-4 md:top-6 md:right-6 text-white bg-black/50 hover:bg-black/80 p-3 rounded-full z-50 backdrop-blur-md transition">
@@ -267,6 +270,8 @@
             const overlay = document.getElementById('sidebar-overlay');
             const iconClose = document.getElementById('sidebar-icon-close');
             const iconOpen = document.getElementById('sidebar-icon-open');
+            const detailModal = document.getElementById('detail-modal');
+            const detailFanart = document.getElementById('detail-fanart');
             const isOpen = sidebar.classList.contains('w-64');
 
             if (isOpen) {
@@ -279,6 +284,10 @@
                 overlay.classList.add('hidden');
                 iconClose.classList.add('hidden');
                 iconOpen.classList.remove('hidden');
+                
+                // 收起侧边栏，详情页全屏
+                detailModal.classList.remove('md:left-64');
+                detailFanart.classList.remove('md:left-64');
             } else {
                 sidebar.classList.remove('w-0', 'opacity-0');
                 sidebar.classList.add('w-64', 'opacity-100');
@@ -286,6 +295,10 @@
                     sidebar.classList.remove('hidden');
                     sidebar.classList.add('flex');
                     overlay.classList.remove('hidden');
+                } else {
+                    // 展开侧边栏，详情页右移
+                    detailModal.classList.add('md:left-64');
+                    detailFanart.classList.add('md:left-64');
                 }
                 iconClose.classList.remove('hidden');
                 iconOpen.classList.add('hidden');
@@ -322,7 +335,6 @@
         async function showMain() {
             document.getElementById('login-view').classList.add('hidden');
             document.getElementById('main-view').classList.remove('hidden');
-            // 初始化为展开状态
             const sidebar = document.getElementById('desktop-sidebar');
             if (!sidebar.classList.contains('w-64')) toggleSidebar();
             
@@ -471,7 +483,12 @@
             if (!item) return;
             currentPlayingItemId = item.id;
 
-            // 打开详情页，不自动收起侧边栏，用户可以用左上角按钮自由切换
+            // 进入详情页自动折叠侧边栏
+            if (window.innerWidth >= 768) {
+                const sidebar = document.getElementById('desktop-sidebar');
+                if (sidebar.classList.contains('w-64')) toggleSidebar();
+            }
+
             document.getElementById('detail-plot').innerText = item.plot || '暂无简介...';
             document.getElementById('detail-title').innerText = item.title || '未知';
             
