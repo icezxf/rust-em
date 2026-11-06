@@ -1,6 +1,6 @@
 use axum::{
     extract::{State, Request, Json, Query, Path as AxumPath},
-    http::{StatusCode, header},
+    http::{StatusCode, header::LOCATION},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -12,6 +12,8 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 
 static TOKENS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+
+// ================= 鉴权与登录 =================
 
 #[derive(Deserialize)]
 pub struct LoginReq { username: String, password: String }
@@ -34,9 +36,7 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
     }
 }
 
-// 支持从 Header 或 URL 参数 (针对 img 标签) 获取 Token
 pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
-    // 1. 从 Header 获取
     if let Some(auth_header) = req.headers().get("Authorization") {
         if let Some(token) = auth_header.to_str().unwrap_or("").strip_prefix("Bearer ") {
             if let Some(tokens) = TOKENS.get() {
@@ -46,7 +46,6 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
             }
         }
     }
-    // 2. 从 URL 参数获取
     if let Some(query) = req.uri().query() {
         for pair in query.split('&') {
             if let Some((key, value)) = pair.split_once('=') {
@@ -62,6 +61,8 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     }
     Err(StatusCode::UNAUTHORIZED)
 }
+
+// ================= 浏览目录与扫描入库 =================
 
 #[derive(Deserialize)]
 pub struct BrowseReq { path: String }
@@ -132,7 +133,6 @@ fn process_file(file_path: &Path, lib_type: &str, lib_id: i64, conn: &Connection
         let stem = file_path.file_stem().unwrap().to_string_lossy().to_string();
         let parent = file_path.parent().unwrap_or(Path::new(""));
         
-        // 解析 NFO
         let nfo_path = file_path.with_extension("nfo");
         let mut title = stem.clone();
         let mut plot = "".to_string();
@@ -144,7 +144,6 @@ fn process_file(file_path: &Path, lib_type: &str, lib_id: i64, conn: &Connection
             if let Some(y) = nfo.year { year = y.to_string(); }
         }
 
-        // 寻找海报和背景图
         let mut poster_path = "".to_string();
         let mut fanart_path = "".to_string();
         
@@ -169,6 +168,8 @@ fn process_file(file_path: &Path, lib_type: &str, lib_id: i64, conn: &Connection
 }
 
 pub async fn get_libraries() -> impl IntoResponse { Json(json!([])) }
+
+// ================= 前端 UI 数据读取 =================
 
 pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
@@ -202,9 +203,8 @@ pub async fn get_image(
     if let Ok(path_str) = path_opt {
         if !path_str.is_empty() {
             if let Ok(bytes) = tokio::fs::read(&path_str).await {
-                // 简单根据后缀判断，默认 jpeg
                 let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
-                return (StatusCode::OK, [(header::CONTENT_TYPE, mime)], bytes).into_response();
+                return (StatusCode::OK, [(axum::http::header::CONTENT_TYPE, mime)], bytes).into_response();
             }
         }
     }
@@ -237,14 +237,18 @@ pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
     }
 }
 
-pub async fn emby_info() -> impl IntoResponse { Json(json!({"ServerName": "Rust-Em", "Version": "0.1.0"})) }
-pub async fn emby_items() -> impl IntoResponse { Json(json!({"Items": [], "TotalRecordCount": 0})) }
-
-// 在 src/api.rs 的最下面，追加以下代码：
-
-use axum::http::header::LOCATION;
-
 // ================= Emby 协议兼容层 =================
+
+pub async fn emby_info() -> impl IntoResponse { 
+    Json(json!({
+        "ServerName": "Rust-Em",
+        "Version": "0.1.0",
+        "Id": "rust-em-server",
+        "OperatingSystem": "Linux",
+        "HasPendingRestart": false,
+        "IsShuttingDown": false
+    })) 
+}
 
 #[derive(Deserialize)]
 pub struct EmbyAuthReq {
@@ -257,7 +261,7 @@ pub struct EmbyAuthReq {
 pub async fn emby_authenticate(
     State(pool): State<Arc<Mutex<Connection>>>,
     Json(payload): Json<EmbyAuthReq>,
-) -> impl IntoResponse {
+) -> Response {
     let mut hasher = Sha256::new();
     hasher.update(&payload.password);
     let hashed_pwd = format!("{:x}", hasher.finalize());
@@ -265,71 +269,29 @@ pub async fn emby_authenticate(
     let conn = pool.lock().unwrap();
     let mut stmt = conn.prepare("SELECT id, username FROM users WHERE username = ?1 AND password = ?2").unwrap();
     let user_opt = stmt.query_row([&payload.username, &hashed_pwd], |row| {
-        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        Ok((row.get::<_, i64>(0).unwrap(), row.get::<_, String>(1).unwrap()))
     }).ok();
 
     if let Some((id, name)) = user_opt {
         let token = uuid::Uuid::new_v4().to_string();
         TOKENS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap().push(token.clone());
         
-        // Emby 标准登录响应
         (StatusCode::OK, Json(json!({
             "User": { "Id": id.to_string(), "Name": name },
             "AccessToken": token,
             "ServerId": "rust-em-server"
-        })))
+        }))).into_response()
     } else {
-        (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid credentials" })))
+        (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid credentials" }))).into_response()
     }
 }
 
-pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
-    let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT file_path FROM items WHERE id = ?1").unwrap();
-    let path_opt: Option<String> = stmt.query_row([item_id], |row| row.get(0)).ok();
-
-    if let Some(path_str) = path_opt {
-        // 告诉客户端：直接播放，不用转码
-        Json(json!({
-            "MediaSources": [{
-                "Id": item_id.to_string(),
-                "Path": path_str,
-                "Protocol": "Http",
-                "SupportsDirectPlay": true,
-                "SupportsDirectStream": true,
-                "SupportsTranscoding": false
-            }]
-        }))
-    } else {
-        (StatusCode::NOT_FOUND, Json(json!({ "error": "Item not found" }))).into_response()
-    }
-}
-
-// 核心：读取 .strm 文件内容，并返回 302 重定向
-pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> Response {
-    let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT file_path FROM items WHERE id = ?1").unwrap();
-    let path_opt: Result<String, _> = stmt.query_row([item_id], |row| row.get(0));
-
-    if let Ok(strm_path) = path_opt {
-        // 读取 .strm 文件里的真实链接
-        if let Ok(url) = tokio::fs::read_to_string(&strm_path).await {
-            let url = url.trim();
-            if url.starts_with("http") {
-                // 返回 302 重定向给播放器
-                return (StatusCode::FOUND, [(LOCATION, url)], "").into_response();
-            }
-        }
-    }
-    StatusCode::NOT_FOUND.into_response()
-}
-
-// 兼容 Emby 客户端获取媒体库列表
 pub async fn emby_items(
     State(pool): State<Arc<Mutex<Connection>>>,
 ) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path FROM items").unwrap();
+    
     let items: Vec<Value> = stmt.query_map([], |row| {
         let id: i64 = row.get(0).unwrap_or_default();
         let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
@@ -345,4 +307,50 @@ pub async fn emby_items(
     }).unwrap().filter_map(Result::ok).collect();
 
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
+}
+
+pub async fn emby_playback_info(
+    State(pool): State<Arc<Mutex<Connection>>>, 
+    AxumPath(item_id): AxumPath<i64>
+) -> Response {
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT file_path FROM items WHERE id = ?1").unwrap();
+    let path_opt: Option<String> = stmt.query_row([item_id], |row| row.get(0)).ok();
+
+    if let Some(path_str) = path_opt {
+        Json(json!({
+            "MediaSources": [{
+                "Id": item_id.to_string(),
+                "Path": path_str,
+                "Protocol": "Http",
+                "SupportsDirectPlay": true,
+                "SupportsDirectStream": true,
+                "SupportsTranscoding": false
+            }]
+        })).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, Json(json!({ "error": "Item not found" }))).into_response()
+    }
+}
+
+pub async fn emby_stream(
+    State(pool): State<Arc<Mutex<Connection>>>, 
+    AxumPath(item_id): AxumPath<i64>
+) -> Response {
+    let path_opt = {
+        let conn = pool.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT file_path FROM items WHERE id = ?1").unwrap();
+        let res: Result<String, _> = stmt.query_row([item_id], |row| row.get(0));
+        res.ok()
+    };
+
+    if let Some(strm_path) = path_opt {
+        if let Ok(url) = tokio::fs::read_to_string(&strm_path).await {
+            let url = url.trim();
+            if url.starts_with("http") {
+                return (StatusCode::FOUND, [(LOCATION, url)], "").into_response();
+            }
+        }
+    }
+    StatusCode::NOT_FOUND.into_response()
 }
