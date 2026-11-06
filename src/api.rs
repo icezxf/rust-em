@@ -14,8 +14,6 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 
 static TOKENS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
-
-// 全局缓存：Key 是 (URL+IP+UA)，Value 是 (解析后的直链, 过期时间)
 static STRM_CACHE: OnceLock<Mutex<HashMap<String, (String, Instant)>>> = OnceLock::new();
 
 // ================= 鉴权与登录 =================
@@ -51,7 +49,6 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
             }
         }
     }
-    // 支持从 URL 参数获取 Token (用于 img 标签)
     if let Some(query) = req.uri().query() {
         for pair in query.split('&') {
             if let Some((key, value)) = pair.split_once('=') {
@@ -68,7 +65,7 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     Err(StatusCode::UNAUTHORIZED)
 }
 
-// ================= 浏览目录与扫描入库 =================
+// ================= 浏览目录 =================
 
 #[derive(Deserialize)]
 pub struct BrowseReq { path: String }
@@ -105,6 +102,8 @@ pub async fn browse_dir(Query(req): Query<BrowseReq>) -> impl IntoResponse {
     Json(json!({ "current": current, "dirs": dirs, "files": files, "error": error }))
 }
 
+// ================= 媒体库管理 =================
+
 #[derive(Deserialize, Clone)]
 pub struct AddLibReq { name: String, paths: Vec<String>, #[serde(rename = "type")] lib_type: String }
 
@@ -127,6 +126,69 @@ pub async fn add_library(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
                 }
             } else if path.is_file() {
                 process_file(path, &payload.lib_type, lib_id, &conn);
+            }
+        }
+    }).await.unwrap();
+
+    Json(json!({"status": "scanning"}))
+}
+
+pub async fn get_libraries(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT id, name, type FROM libraries").unwrap();
+    let libs: Vec<Value> = stmt.query_map([], |row| {
+        Ok(json!({
+            "id": row.get::<_, i64>(0).unwrap_or_default(),
+            "name": row.get::<_, String>(1).unwrap_or_default(),
+            "type": row.get::<_, String>(2).unwrap_or_default(),
+        }))
+    }).unwrap().filter_map(Result::ok).collect();
+
+    Json(json!({ "libraries": libs }))
+}
+
+pub async fn delete_library(
+    State(pool): State<Arc<Mutex<Connection>>>, 
+    AxumPath(id): AxumPath<i64>
+) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    // 先删关联的媒体项，再删媒体库
+    let _ = conn.execute("DELETE FROM items WHERE library_id = ?1", [id]);
+    let _ = conn.execute("DELETE FROM libraries WHERE id = ?1", [id]);
+    Json(json!({"status": "success"}))
+}
+
+pub async fn rescan_library(
+    State(pool): State<Arc<Mutex<Connection>>>, 
+    AxumPath(id): AxumPath<i64>
+) -> impl IntoResponse {
+    let pool_clone = pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool_clone.lock().unwrap();
+        
+        // 获取库信息
+        let (name, paths_json, lib_type) = match conn.query_row(
+            "SELECT name, path, type FROM libraries WHERE id = ?1", 
+            [id], 
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        ) {
+            Ok(v) => v,
+            Err(_) => return, // 库不存在
+        };
+
+        let paths: Vec<String> = serde_json::from_str(&paths_json).unwrap_or_default();
+        println!("🔄 重新扫描媒体库: {}", name);
+
+        for path_str in paths {
+            let path = Path::new(&path_str);
+            if path.is_dir() {
+                for entry in walkdir::WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+                    if entry.file_type().is_file() {
+                        process_file(entry.path(), &lib_type, id, &conn);
+                    }
+                }
+            } else if path.is_file() {
+                process_file(path, &lib_type, id, &conn);
             }
         }
     }).await.unwrap();
@@ -173,14 +235,38 @@ fn process_file(file_path: &Path, lib_type: &str, lib_id: i64, conn: &Connection
     }
 }
 
-pub async fn get_libraries() -> impl IntoResponse { Json(json!([])) }
+// ================= 媒体项获取 (支持筛选) =================
 
-// ================= 前端 UI 数据读取 =================
+#[derive(Deserialize)]
+pub struct ItemQuery {
+    library_id: Option<i64>,
+    lib_type: Option<String>,
+}
 
-pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
+pub async fn get_items(
+    State(pool): State<Arc<Mutex<Connection>>>,
+    Query(query): Query<ItemQuery>,
+) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path FROM items").unwrap();
-    let items: Vec<Value> = stmt.query_map([], |row| {
+    
+    // 动态构建 SQL
+    let mut sql = "SELECT id, title, type, year, plot, poster_path FROM items WHERE 1=1".to_string();
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if let Some(lid) = query.library_id {
+        sql.push_str(" AND library_id = ?");
+        params.push(Box::new(lid));
+    }
+    if let Some(lt) = query.lib_type {
+        sql.push_str(" AND type = ?");
+        params.push(Box::new(lt));
+    }
+    sql.push_str(" ORDER BY title ASC");
+
+    let mut stmt = conn.prepare(&sql).unwrap();
+    let params_ref: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    
+    let items: Vec<Value> = stmt.query_map(params_ref.as_slice(), |row| {
         let id: i64 = row.get(0).unwrap_or_default();
         let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
         Ok(json!({
@@ -203,7 +289,6 @@ pub async fn get_image(
     let path_opt = {
         let conn = pool.lock().unwrap();
         let query = if img_type == "poster" { "SELECT poster_path FROM items WHERE id = ?1" } else { "SELECT fanart_path FROM items WHERE id = ?1" };
-        
         let mut stmt = conn.prepare(query).unwrap();
         let res: Result<String, _> = stmt.query_row([id], |row| row.get(0));
         res.ok()
@@ -345,13 +430,11 @@ pub async fn emby_playback_info(
     }
 }
 
-// 【终极版本】：带缓存机制解析 OpenList/网盘 直链
 pub async fn emby_stream(
     State(pool): State<Arc<Mutex<Connection>>>, 
     AxumPath(item_id): AxumPath<i64>,
-    headers: HeaderMap, // 提取请求头，用于区分不同客户端
+    headers: HeaderMap,
 ) -> Response {
-    // 1. 从数据库获取 .strm 文件的路径
     let path_opt = {
         let conn = pool.lock().unwrap();
         let mut stmt = conn.prepare("SELECT file_path FROM items WHERE id = ?1").unwrap();
@@ -363,7 +446,6 @@ pub async fn emby_stream(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    // 2. 读取 .strm 里的原始 URL
     let Ok(url) = tokio::fs::read_to_string(&strm_path).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -373,44 +455,36 @@ pub async fn emby_stream(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    // 3. 构建缓存 Key（结合 UA 和 IP，防止不同客户端互相干扰）
     let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     let cache_key = format!("{}|{}|{}", url, ip, ua);
 
-    // 4. 检查缓存
     let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     {
         let mut cache_lock = cache.lock().unwrap();
         if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) {
             if Instant::now() < *expire_at {
-                // 缓存命中，直接返回 302
                 return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response();
             } else {
                 cache_lock.remove(&cache_key);
             }
         }
-        // 防止内存泄漏清理：如果超过 512 个缓存，清理过期的
         if cache_lock.len() > 512 {
             cache_lock.retain(|_, (_, expire)| Instant::now() < *expire);
         }
     }
 
-    // 5. 缓存未命中，请求 OpenList 获取真实直链
     let client = match reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none()) // 禁止自动跟随，捕获 302
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(15))
         .build() {
             Ok(c) => c,
             Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         };
 
-    let mut final_url = url.clone(); // 兜底策略：解析失败则返回原链接
+    let mut final_url = url.clone();
 
-    if let Ok(resp) = client.get(&url)
-        .header(USER_AGENT, ua)
-        .send().await 
-    {
+    if let Ok(resp) = client.get(&url).header(USER_AGENT, ua).send().await {
         if resp.status().is_redirection() {
             if let Some(location) = resp.headers().get("location") {
                 if let Ok(loc_str) = location.to_str() {
@@ -420,12 +494,10 @@ pub async fn emby_stream(
         }
     }
 
-    // 6. 写入缓存（有效期 5 秒）
     {
         let mut cache_lock = cache.lock().unwrap();
         cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(5)));
     }
 
-    // 7. 返回 302 给客户端
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
 }
