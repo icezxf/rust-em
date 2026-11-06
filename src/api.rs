@@ -1,9 +1,9 @@
+cat > src/api.rs << 'EOF'
 use axum::{
-    extract::{State, Request, Query},
+    extract::{State, Request, Json, Query},
     http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -48,40 +48,43 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     Err(StatusCode::UNAUTHORIZED)
 }
 
+// 接收 GET 查询参数
 #[derive(Deserialize)]
-pub struct BrowseReq { path: Option<String> }
+pub struct BrowseReq { path: String }
 
-// 更新后的目录浏览接口
 pub async fn browse_dir(Query(req): Query<BrowseReq>) -> impl IntoResponse {
-    let base_path = req.path.unwrap_or_else(|| "/media".to_string());
-    let dir_path = Path::new(&base_path);
+    let base_path = req.path;
+    
+    let result = tokio::task::spawn_blocking(move || {
+        let dir_path = Path::new(&base_path);
+        let mut dirs = Vec::new();
+        let mut error_msg = None;
 
-    let mut dirs = Vec::new();
-    let mut error_msg = None;
-
-    // 显式匹配错误，把错误原因返回给前端
-    match std::fs::read_dir(dir_path) {
-        Ok(entries) => {
-            for entry in entries.filter_map(|e| e.ok()) {
-                if entry.path().is_dir() {
-                    dirs.push(json!({
-                        "name": entry.file_name().to_string_lossy(),
-                        "path": entry.path().to_string_lossy()
-                    }));
+        match std::fs::read_dir(dir_path) {
+            Ok(entries) => {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    if entry.path().is_dir() {
+                        dirs.push(json!({
+                            "name": entry.file_name().to_string_lossy(),
+                            "path": entry.path().to_string_lossy()
+                        }));
+                    }
                 }
             }
+            Err(e) => {
+                error_msg = Some(format!("无法读取目录 [{}]: {}", base_path, e));
+            }
         }
-        Err(e) => {
-            error_msg = Some(format!("无法读取目录 [{}]: {}", base_path, e));
-        }
-    }
-    
-    dirs.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+        
+        dirs.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+        (dirs, error_msg, base_path)
+    }).await.unwrap();
 
+    let (dirs, error, current) = result;
     Json(json!({
-        "current": dir_path.to_string_lossy(),
+        "current": current,
         "dirs": dirs,
-        "error": error_msg
+        "error": error
     }))
 }
 
@@ -167,3 +170,4 @@ pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
 
 pub async fn emby_info() -> impl IntoResponse { Json(json!({"ServerName": "Rust-Em", "Version": "0.1.0"})) }
 pub async fn emby_items() -> impl IntoResponse { Json(json!({"Items": [], "TotalRecordCount": 0})) }
+EOF
