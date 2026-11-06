@@ -30,23 +30,19 @@
         </div>
     </div>
 
+    <!-- 全局唯一的侧边栏控制按钮 (最上层) -->
+    <button id="global-sidebar-btn" onclick="toggleSidebar()" class="fixed top-4 left-4 md:top-6 md:left-6 z-[90] text-gray-400 hover:text-white bg-[#16191f]/80 backdrop-blur-md p-2 rounded-lg transition border border-gray-700/50 hover:border-gray-500 shadow-xl">
+        <svg id="sidebar-icon-close" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
+        <svg id="sidebar-icon-open" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+    </button>
+
     <!-- 主界面 -->
     <div id="main-view" class="hidden flex-1 flex flex-row h-full relative overflow-hidden">
         
-        <!-- 左侧边栏 -->
-        <div id="desktop-sidebar" class="hidden md:flex h-full bg-[#16191f] flex-col border-r border-gray-800 z-[60] shrink-0 overflow-hidden sidebar-transition w-64 opacity-100">
-            <div class="w-64 p-4 flex flex-col h-full">
-                <div class="flex justify-between items-center mb-8 px-2">
-                    <h1 class="text-xl font-bold text-blue-500 flex items-center gap-2 whitespace-nowrap">
-                        <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-                        Rust-Em
-                    </h1>
-                    <button onclick="toggleSidebar(false)" class="text-gray-400 hover:text-white shrink-0">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
-                    </button>
-                </div>
-                
-                <div class="text-xs text-gray-500 font-bold mb-3 px-2 uppercase tracking-wider whitespace-nowrap">媒体库</div>
+        <!-- 左侧边栏 (PC端挤压布局，移动端覆盖) -->
+        <div id="desktop-sidebar" class="hidden md:flex h-full bg-[#16191f] flex-col border-r border-gray-800 z-[80] shrink-0 overflow-hidden sidebar-transition w-64 opacity-100 absolute md:relative">
+            <div class="w-64 p-4 pt-16 flex flex-col h-full">
+                <div class="text-xs text-gray-500 font-bold mb-3 px-2 uppercase tracking-wider whitespace-nowrap mt-2">媒体库</div>
                 <div id="sidebar-libs" class="flex flex-col gap-1 mb-6 overflow-y-auto no-scrollbar"></div>
                 
                 <button onclick="switchTab('settings')" class="flex items-center gap-3 text-left px-3 py-2.5 hover:bg-gray-800 rounded-lg mb-2 transition mt-auto text-gray-400 hover:text-white whitespace-nowrap">
@@ -58,21 +54,16 @@
             </div>
         </div>
 
-        <div id="sidebar-overlay" onclick="toggleSidebar(false)" class="hidden fixed inset-0 bg-black/60 z-[55] md:hidden"></div>
+        <div id="sidebar-overlay" onclick="toggleSidebar()" class="hidden fixed inset-0 bg-black/60 z-[75] md:hidden"></div>
 
         <!-- 右侧内容区 -->
-        <div class="flex-1 flex flex-col h-full overflow-hidden bg-[#0f1115] relative w-full">
-            <div class="px-4 py-3 md:px-8 md:py-6 flex flex-col shadow-sm z-50 shrink-0 border-b border-gray-800/50 bg-[#0f1115]/80 backdrop-blur-md">
-                <div class="flex items-center gap-4">
-                    <button onclick="toggleSidebar(true)" id="open-sidebar-btn" class="text-gray-400 hover:text-white bg-[#16191f] p-2 rounded-lg transition border border-gray-700/50 hover:border-gray-500">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
-                    </button>
-                    
-                    <div id="content-header" class="hidden flex gap-3">
-                        <button onclick="setTypeFilter('all')" id="btn-type-all" class="px-5 py-1.5 rounded-full text-sm font-medium bg-blue-600 text-white transition shadow-lg shadow-blue-500/30">全部</button>
-                        <button onclick="setTypeFilter('movies')" id="btn-type-movies" class="px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700">电影</button>
-                        <button onclick="setTypeFilter('tvshows')" id="btn-type-tvshows" class="px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700">剧集</button>
-                    </div>
+        <div class="flex-1 flex flex-col h-full overflow-hidden bg-[#0f1115] relative w-full min-w-0">
+            <!-- 顶栏 (移除了原来的折叠按钮，留出位置给全局按钮) -->
+            <div class="px-4 py-3 md:px-8 md:py-6 pl-16 md:pl-20 flex flex-col shadow-sm z-50 shrink-0 border-b border-gray-800/50 bg-[#0f1115]/80 backdrop-blur-md">
+                <div id="content-header" class="hidden flex gap-3">
+                    <button onclick="setTypeFilter('all')" id="btn-type-all" class="px-5 py-1.5 rounded-full text-sm font-medium bg-blue-600 text-white transition shadow-lg shadow-blue-500/30">全部</button>
+                    <button onclick="setTypeFilter('movies')" id="btn-type-movies" class="px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700">电影</button>
+                    <button onclick="setTypeFilter('tvshows')" id="btn-type-tvshows" class="px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700">剧集</button>
                 </div>
             </div>
 
@@ -117,13 +108,12 @@
             <div id="detail-fanart" class="fixed inset-0 bg-cover bg-top backdrop-blur-heavy transition-opacity duration-500 opacity-40"></div>
             
             <div class="relative min-h-screen w-full p-4 md:p-8 flex flex-col items-center">
-                <button onclick="closeDetail()" class="fixed top-4 right-4 md:top-8 md:right-8 text-white bg-black/50 hover:bg-black/80 p-3 rounded-full z-50 backdrop-blur-md transition">
+                <button onclick="closeDetail()" class="fixed top-4 right-4 md:top-6 md:right-6 text-white bg-black/50 hover:bg-black/80 p-3 rounded-full z-50 backdrop-blur-md transition">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
 
                 <div class="w-full max-w-5xl flex flex-col gap-6 mt-12 md:mt-24 z-10">
                     
-                    <!-- 顶部信息区：左侧海报，右侧内容（含完整简介） -->
                     <div class="flex flex-col md:flex-row gap-6 md:gap-8 items-start">
                         <!-- 左侧海报 -->
                         <div class="w-48 md:w-64 shrink-0 aspect-[2/3] bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border border-gray-600/30 sticky top-8">
@@ -132,12 +122,10 @@
                         
                         <!-- 右侧信息区 -->
                         <div class="flex-1 flex flex-col pt-1 w-full text-shadow-strong">
-                            <!-- 标题 -->
                             <div class="flex items-center gap-3 mb-2">
                                 <h1 id="detail-title" class="text-2xl md:text-3xl font-black text-white tracking-tight drop-shadow-md">影片标题</h1>
                             </div>
                             
-                            <!-- 元数据 -->
                             <div class="flex flex-wrap items-center gap-2 mb-4 text-xs md:text-sm font-medium text-gray-400">
                                 <span id="detail-num" class="hidden border border-blue-500/50 bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-md font-mono font-bold"></span>
                                 <span id="detail-year" class="bg-gray-800/60 px-2 py-0.5 rounded-md text-gray-200">未知年份</span>
@@ -149,18 +137,14 @@
                                 <span id="detail-mpaa" class="border border-gray-600 text-gray-300 px-1.5 py-0.5 rounded-md text-xs hidden"></span>
                             </div>
 
-                            <!-- 类型标签 -->
                             <div id="detail-genres" class="flex flex-wrap gap-1.5 mb-5 hidden">
                                 <div id="detail-genres-val" class="flex flex-wrap gap-1.5"></div>
                             </div>
 
-                            <!-- 播放按钮 -->
                             <div id="detail-play-actions" class="flex flex-wrap gap-2 mb-6"></div>
 
-                            <!-- 完整简介（不加高度限制，自然撑开） -->
                             <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base mb-6 whitespace-pre-wrap drop-shadow-md">暂无简介...</p>
                             
-                            <!-- 详细信息（用细线隔开，避免悬空） -->
                             <div class="flex flex-col gap-1.5 text-xs md:text-sm text-gray-300 pt-4 border-t border-gray-600/50">
                                 <div id="detail-series-box" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">系列:</span> <span id="detail-series" class="text-blue-400 font-medium drop-shadow-sm"></span></div>
                                 <div id="detail-label-box" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">厂牌:</span> <span id="detail-label" class="text-blue-400 font-medium drop-shadow-sm"></span></div>
@@ -278,19 +262,14 @@
 
         if (token) showMain();
 
-        function toggleSidebar(open) {
+        function toggleSidebar() {
             const sidebar = document.getElementById('desktop-sidebar');
             const overlay = document.getElementById('sidebar-overlay');
+            const iconClose = document.getElementById('sidebar-icon-close');
+            const iconOpen = document.getElementById('sidebar-icon-open');
+            const isOpen = sidebar.classList.contains('w-64');
 
-            if (open) {
-                sidebar.classList.remove('w-0', 'opacity-0');
-                sidebar.classList.add('w-64', 'opacity-100');
-                if (window.innerWidth < 768) {
-                    sidebar.classList.remove('hidden');
-                    sidebar.classList.add('flex');
-                    overlay.classList.remove('hidden');
-                }
-            } else {
+            if (isOpen) {
                 sidebar.classList.remove('w-64', 'opacity-100');
                 sidebar.classList.add('w-0', 'opacity-0');
                 if (window.innerWidth < 768) {
@@ -298,6 +277,18 @@
                     sidebar.classList.remove('flex');
                 }
                 overlay.classList.add('hidden');
+                iconClose.classList.add('hidden');
+                iconOpen.classList.remove('hidden');
+            } else {
+                sidebar.classList.remove('w-0', 'opacity-0');
+                sidebar.classList.add('w-64', 'opacity-100');
+                if (window.innerWidth < 768) {
+                    sidebar.classList.remove('hidden');
+                    sidebar.classList.add('flex');
+                    overlay.classList.remove('hidden');
+                }
+                iconClose.classList.remove('hidden');
+                iconOpen.classList.add('hidden');
             }
         }
 
@@ -331,7 +322,10 @@
         async function showMain() {
             document.getElementById('login-view').classList.add('hidden');
             document.getElementById('main-view').classList.remove('hidden');
-            if (window.innerWidth >= 768) toggleSidebar(true);
+            // 初始化为展开状态
+            const sidebar = document.getElementById('desktop-sidebar');
+            if (!sidebar.classList.contains('w-64')) toggleSidebar();
+            
             await fetchLibraries();
             switchTab('library');
         }
@@ -349,7 +343,10 @@
             } else if (tab === 'settings') {
                 renderSettingsLibraries();
             }
-            if (window.innerWidth < 768) toggleSidebar(false);
+            if (window.innerWidth < 768) {
+                const sidebar = document.getElementById('desktop-sidebar');
+                if (sidebar.classList.contains('w-64')) toggleSidebar();
+            }
         }
 
         async function fetchLibraries() {
@@ -474,10 +471,7 @@
             if (!item) return;
             currentPlayingItemId = item.id;
 
-            if (window.innerWidth >= 768) {
-                toggleSidebar(false);
-            }
-
+            // 打开详情页，不自动收起侧边栏，用户可以用左上角按钮自由切换
             document.getElementById('detail-plot').innerText = item.plot || '暂无简介...';
             document.getElementById('detail-title').innerText = item.title || '未知';
             
