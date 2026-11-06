@@ -239,3 +239,110 @@ pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
 
 pub async fn emby_info() -> impl IntoResponse { Json(json!({"ServerName": "Rust-Em", "Version": "0.1.0"})) }
 pub async fn emby_items() -> impl IntoResponse { Json(json!({"Items": [], "TotalRecordCount": 0})) }
+
+// 在 src/api.rs 的最下面，追加以下代码：
+
+use axum::http::header::LOCATION;
+
+// ================= Emby 协议兼容层 =================
+
+#[derive(Deserialize)]
+pub struct EmbyAuthReq {
+    #[serde(rename = "Username")]
+    pub username: String,
+    #[serde(rename = "Pw")]
+    pub password: String,
+}
+
+pub async fn emby_authenticate(
+    State(pool): State<Arc<Mutex<Connection>>>,
+    Json(payload): Json<EmbyAuthReq>,
+) -> impl IntoResponse {
+    let mut hasher = Sha256::new();
+    hasher.update(&payload.password);
+    let hashed_pwd = format!("{:x}", hasher.finalize());
+
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT id, username FROM users WHERE username = ?1 AND password = ?2").unwrap();
+    let user_opt = stmt.query_row([&payload.username, &hashed_pwd], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    }).ok();
+
+    if let Some((id, name)) = user_opt {
+        let token = uuid::Uuid::new_v4().to_string();
+        TOKENS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap().push(token.clone());
+        
+        // Emby 标准登录响应
+        (StatusCode::OK, Json(json!({
+            "User": { "Id": id.to_string(), "Name": name },
+            "AccessToken": token,
+            "ServerId": "rust-em-server"
+        })))
+    } else {
+        (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid credentials" })))
+    }
+}
+
+pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT file_path FROM items WHERE id = ?1").unwrap();
+    let path_opt: Option<String> = stmt.query_row([item_id], |row| row.get(0)).ok();
+
+    if let Some(path_str) = path_opt {
+        // 告诉客户端：直接播放，不用转码
+        Json(json!({
+            "MediaSources": [{
+                "Id": item_id.to_string(),
+                "Path": path_str,
+                "Protocol": "Http",
+                "SupportsDirectPlay": true,
+                "SupportsDirectStream": true,
+                "SupportsTranscoding": false
+            }]
+        }))
+    } else {
+        (StatusCode::NOT_FOUND, Json(json!({ "error": "Item not found" }))).into_response()
+    }
+}
+
+// 核心：读取 .strm 文件内容，并返回 302 重定向
+pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> Response {
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT file_path FROM items WHERE id = ?1").unwrap();
+    let path_opt: Result<String, _> = stmt.query_row([item_id], |row| row.get(0));
+
+    if let Ok(strm_path) = path_opt {
+        // 读取 .strm 文件里的真实链接
+        if let Ok(url) = tokio::fs::read_to_string(&strm_path).await {
+            let url = url.trim();
+            if url.starts_with("http") {
+                // 返回 302 重定向给播放器
+                return (StatusCode::FOUND, [(LOCATION, url)], "").into_response();
+            }
+        }
+    }
+    StatusCode::NOT_FOUND.into_response()
+}
+
+// 兼容 Emby 客户端获取媒体库列表
+pub async fn emby_items(
+    State(pool): State<Arc<Mutex<Connection>>>,
+) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path FROM items").unwrap();
+    let items: Vec<Value> = stmt.query_map([], |row| {
+        let id: i64 = row.get(0).unwrap_or_default();
+        let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
+        Ok(json!({
+            "Id": id.to_string(),
+            "Name": row.get::<_, String>(1).unwrap_or_default(),
+            "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
+            "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
+            "Overview": row.get::<_, String>(4).unwrap_or_default(),
+            "ImageTags": if has_poster { json!({"Primary": "tag"}) } else { json!({}) },
+            "MediaSources": [{ "Id": id.to_string(), "SupportsDirectPlay": true }]
+        }))
+    }).unwrap().filter_map(Result::ok).collect();
+
+    Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
+}
