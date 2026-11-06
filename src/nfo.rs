@@ -7,14 +7,26 @@ const MAX_NFO_SIZE: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct NfoThumb { #[serde(rename = "$text")] pub text: String }
+
 #[derive(Debug, Deserialize, Clone, Default)]
-pub struct NfoFanart { #[serde(rename = "thumb", default)] pub thumbs: Vec<NfoThumb> }
+pub struct NfoFanartObj { #[serde(rename = "thumb", default)] pub thumbs: Vec<NfoThumb> }
+
+// 兼容 fanart 是纯字符串或嵌套对象
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum NfoFanartType {
+    Str(String),
+    Obj(NfoFanartObj),
+}
+impl Default for NfoFanartType { fn default() -> Self { NfoFanartType::Str(String::new()) } }
+
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct NfoActor {
     pub name: Option<String>,
     pub role: Option<String>,
     pub thumb: Option<String>,
 }
+
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct NfoUniqueId {
     #[serde(rename = "@type")] pub id_type: Option<String>,
@@ -22,23 +34,37 @@ pub struct NfoUniqueId {
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
+pub struct NfoSet { pub name: Option<String> }
+
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct NfoMovie {
     pub title: Option<String>,
-    pub originaltitle: Option<String>,
+    #[serde(alias = "original_title")] pub originaltitle: Option<String>,
     pub plot: Option<String>,
-    pub tagline: Option<String>,
+    #[serde(alias = "overview")] pub tagline: Option<String>,
     pub year: Option<u16>,
     pub premiered: Option<String>,
+    #[serde(alias = "releaseDate")] pub releasedate: Option<String>,
     pub runtime: Option<u32>,
     pub rating: Option<f64>,
     pub mpaa: Option<String>,
+    pub label: Option<String>,
+    pub series: Option<String>,
+    pub set: Option<NfoSet>,
+    
+    // 各种奇怪的图片标签
+    pub poster: Option<String>,
+    pub cover: Option<String>,
+    pub fanart: Option<NfoFanartType>,
+    #[serde(rename = "thumb", default)] pub thumbs: Vec<NfoThumb>,
+
     #[serde(rename = "genre", default)] pub genres: Vec<String>,
+    #[serde(rename = "tag", default)] pub tags: Vec<String>,
     #[serde(rename = "director", default)] pub directors: Vec<String>,
     #[serde(rename = "studio", default)] pub studios: Vec<String>,
     #[serde(rename = "actor", default)] pub actors: Vec<NfoActor>,
     #[serde(rename = "uniqueid", default)] pub unique_ids: Vec<NfoUniqueId>,
-    #[serde(rename = "thumb", default)] pub thumbs: Vec<NfoThumb>,
-    pub fanart: Option<NfoFanart>,
+    #[serde(rename = "website", default)] pub websites: Vec<String>,
 }
 
 pub fn read_nfo(path: &std::path::Path) -> Option<NfoMovie> {
