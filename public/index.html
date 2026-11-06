@@ -6,6 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <title>Rust-Em</title>
     <script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@1,300&display=swap" rel="stylesheet">
     <style>
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -114,7 +115,7 @@
                     
                     <div class="flex-1 flex flex-col justify-end pb-2">
                         <h1 id="detail-title" class="text-4xl md:text-6xl font-black text-white mb-2 tracking-tight drop-shadow-lg">影片标题</h1>
-                        <p id="detail-tagline" class="text-gray-400 italic text-lg mb-4 hidden"></p>
+                        <div id="detail-tagline-box" class="hidden mb-6 mt-2"><div class="flex items-start gap-1 text-gray-300 text-lg md:text-xl" style="font-family: 'Merriweather', serif; font-style: italic;"><span class="text-3xl text-gray-500 leading-none mt-1">“</span><span id="detail-tagline" class="text-center px-2"></span><span class="text-3xl text-gray-500 leading-none mt-1 self-end">”</span></div></div>
                         
                         <div class="flex flex-wrap items-center gap-3 mb-6 text-sm font-medium">
                             <span id="detail-year" class="text-gray-300">2024</span>
@@ -350,8 +351,8 @@
                 document.getElementById('detail-runtime').innerText = `${h > 0 ? h + 'h ' : ''}${m}min`;
             } else { document.getElementById('detail-runtime').innerText = '未知'; }
 
-            const tagEl = document.getElementById('detail-tagline');
-            if (item.tagline) { tagEl.innerText = item.tagline; tagEl.classList.remove('hidden'); } else { tagEl.classList.add('hidden'); }
+            const tagBox = document.getElementById('detail-tagline-box');
+            if (item.tagline) { document.getElementById('detail-tagline').innerText = item.tagline; tagBox.classList.remove('hidden'); } else { tagBox.classList.add('hidden'); }
             const mpaaEl = document.getElementById('detail-mpaa');
             if (item.mpaa) { mpaaEl.innerText = item.mpaa; mpaaEl.classList.remove('hidden'); } else { mpaaEl.classList.add('hidden'); }
 
