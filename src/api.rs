@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, OnceLock};
 use rusqlite::Connection;
@@ -37,8 +37,11 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
 pub async fn auth(State(_pool): State<Arc<Mutex<Connection>>>, req: Request, next: Next) -> Result<Response, StatusCode> {
     if let Some(auth_header) = req.headers().get("Authorization") {
         if let Some(token) = auth_header.to_str().unwrap_or("").strip_prefix("Bearer ") {
-            if TOKENS.get().unwrap_or(&Mutex::new(vec![])).lock().unwrap().contains(&token.to_string()) {
-                return Ok(next.run(req).await);
+            // 修复：通过 if let 绑定，避免借用临时值
+            if let Some(tokens) = TOKENS.get() {
+                if tokens.lock().unwrap().contains(&token.to_string()) {
+                    return Ok(next.run(req).await);
+                }
             }
         }
     }
