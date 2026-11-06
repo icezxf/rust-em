@@ -1,4 +1,3 @@
-cat > src/api.rs << 'EOF'
 use axum::{
     extract::{State, Request, Json, Query},
     http::StatusCode,
@@ -48,7 +47,6 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     Err(StatusCode::UNAUTHORIZED)
 }
 
-// 接收 GET 查询参数
 #[derive(Deserialize)]
 pub struct BrowseReq { path: String }
 
@@ -170,4 +168,3 @@ pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
 
 pub async fn emby_info() -> impl IntoResponse { Json(json!({"ServerName": "Rust-Em", "Version": "0.1.0"})) }
 pub async fn emby_items() -> impl IntoResponse { Json(json!({"Items": [], "TotalRecordCount": 0})) }
-EOF
