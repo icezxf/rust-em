@@ -12,6 +12,7 @@ pub struct NfoActor {
 #[derive(Debug, Clone, Default)]
 pub struct NfoMovie {
     pub title: Option<String>,
+    pub num: Option<String>,
     pub plot: Option<String>,
     pub year: Option<String>,
     pub premiered: Option<String>,
@@ -86,6 +87,7 @@ pub fn read_nfo(path: &std::path::Path) -> Option<NfoMovie> {
 fn process_text(text: &str, tag: &str, movie: &mut NfoMovie, current_actor: &mut Option<NfoActor>) {
     match tag {
         "title" => movie.title = Some(text.to_string()),
+        "num" => movie.num = Some(text.to_string()),
         "plot" => movie.plot = Some(text.to_string()),
         "year" => movie.year = Some(text.to_string()),
         "premiered" => movie.premiered = Some(text.to_string()),
