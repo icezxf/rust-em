@@ -147,6 +147,11 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         let mtime = metadata.modified().unwrap_or(UNIX_EPOCH).duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
         let path_str = path.to_string_lossy().to_string();
 
+        // 读取 STRM 内容
+        let strm_content = std::fs::read_to_string(&path)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+
         let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
         let parent = path.parent().unwrap_or(Path::new(""));
         let nfo_candidates = vec![path.with_extension("nfo"), parent.join("movie.nfo")];
@@ -157,6 +162,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         let mut runtime = 0; let mut premiered = String::new(); let mut tagline = String::new();
         let mut studios = String::new(); let mut tmdb_id = String::new(); let mut imdb_id = String::new();
         let mut series = String::new(); let mut label = String::new(); let mut set_name = String::new();
+        let mut num = String::new(); let mut tags = String::new();
         let mut nfo_poster = String::new(); let mut nfo_fanart = String::new();
 
         for nfo in nfo_candidates {
@@ -164,7 +170,6 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                 if let Some(meta) = crate::nfo::read_nfo(&nfo) {
                     if let Some(t) = meta.title { title = t; }
                     if let Some(p) = meta.plot { plot = p; }
-                    if let Some(y) = meta.year { year = y; }
                     if let Some(r) = meta.rating { rating = r; }
                     if let Some(m) = meta.mpaa { mpaa = m; }
                     if let Some(rt) = meta.runtime { runtime = rt; }
@@ -173,8 +178,19 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                     if let Some(s) = meta.series { series = s; }
                     if let Some(l) = meta.label { label = l; }
                     if let Some(set) = meta.set { set_name = set; }
+                    if let Some(n) = meta.num { num = n; }
                     
+                    // 年份兜底逻辑：year -> premiered -> releasedate
+                    if let Some(y) = meta.year { 
+                        year = y; 
+                    } else if let Some(pr) = &meta.premiered {
+                        if pr.len() >= 4 { year = pr[0..4].to_string(); }
+                    } else if let Some(rd) = &meta.releasedate {
+                        if rd.len() >= 4 { year = rd[0..4].to_string(); }
+                    }
+
                     if !meta.genres.is_empty() { genres = meta.genres.join(" / "); }
+                    if !meta.tags.is_empty() { tags = meta.tags.join(" / "); }
                     if !meta.directors.is_empty() { directors = meta.directors.join(" / "); }
                     if !meta.studios.is_empty() { studios = meta.studios.join(" / "); }
                     
@@ -229,11 +245,11 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         {
             let conn = match pool.lock() { Ok(c) => c, Err(_) => continue };
             let _ = conn.execute(
-                "INSERT INTO items (library_id, title, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime, rating, mpaa, genres, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name) 
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
+                "INSERT INTO items (library_id, title, num, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name, strm_content) 
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)
                  ON CONFLICT(file_path) DO UPDATE SET 
-                 title=excluded.title, size=excluded.size, mtime=excluded.mtime, plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, thumb_path=excluded.thumb_path, banner_path=excluded.banner_path, rating=excluded.rating, mpaa=excluded.mpaa, genres=excluded.genres, directors=excluded.directors, actors=excluded.actors, runtime=excluded.runtime, premiered=excluded.premiered, tagline=excluded.tagline, studios=excluded.studios, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, series=excluded.series, label=excluded.label, set_name=excluded.set_name",
-                rusqlite::params![lib_id, title, path_str, lib_type, plot, year, final_poster, final_fanart, logo, thumb, banner, size, mtime, rating, mpaa, genres, directors, actors_json, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name]
+                 title=excluded.title, num=excluded.num, size=excluded.size, mtime=excluded.mtime, plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, thumb_path=excluded.thumb_path, banner_path=excluded.banner_path, rating=excluded.rating, mpaa=excluded.mpaa, genres=excluded.genres, tags=excluded.tags, directors=excluded.directors, actors=excluded.actors, runtime=excluded.runtime, premiered=excluded.premiered, tagline=excluded.tagline, studios=excluded.studios, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, series=excluded.series, label=excluded.label, set_name=excluded.set_name, strm_content=excluded.strm_content",
+                rusqlite::params![lib_id, title, num, path_str, lib_type, plot, year, final_poster, final_fanart, logo, thumb, banner, size, mtime, rating, mpaa, genres, tags, directors, actors_json, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name, strm_content]
             );
         }
     }
@@ -244,27 +260,29 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
 pub struct ItemQuery { library_id: Option<i64>, lib_type: Option<String> }
 pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<ItemQuery>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, rating, mpaa, genres, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, size, series, label, set_name FROM items WHERE 1=1".to_string();
+    let mut sql = "SELECT id, title, num, type, year, plot, poster_path, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, size, series, label, set_name, file_path, strm_content FROM items WHERE 1=1".to_string();
     if let Some(lid) = query.library_id { sql.push_str(&format!(" AND library_id = {}", lid)); }
     if let Some(lt) = query.lib_type { sql.push_str(&format!(" AND type = '{}'", lt)); }
     sql.push_str(" ORDER BY title ASC");
     
     let mut stmt = conn.prepare(&sql).unwrap();
     let items: Vec<Value> = stmt.query_map([], |row| {
-        let actors_json: String = row.get(10).unwrap_or_else(|_| "[]".to_string());
+        let actors_json: String = row.get(12).unwrap_or_else(|_| "[]".to_string());
         let actors: Value = serde_json::from_str(&actors_json).unwrap_or(json!([]));
         Ok(json!({
             "id": row.get::<_, i64>(0).unwrap_or_default(), "title": row.get::<_, String>(1).unwrap_or_default(),
-            "type": row.get::<_, String>(2).unwrap_or_default(), "year": row.get::<_, String>(3).unwrap_or_default(),
-            "plot": row.get::<_, String>(4).unwrap_or_default(), "has_poster": !row.get::<_, String>(5).unwrap_or_default().is_empty(),
-            "rating": row.get::<_, f64>(6).unwrap_or(0.0), "mpaa": row.get::<_, String>(7).unwrap_or_default(),
-            "genres": row.get::<_, String>(8).unwrap_or_default(), "directors": row.get::<_, String>(9).unwrap_or_default(),
-            "actors": actors, "runtime": row.get::<_, i32>(11).unwrap_or(0),
-            "premiered": row.get::<_, String>(12).unwrap_or_default(), "tagline": row.get::<_, String>(13).unwrap_or_default(),
-            "studios": row.get::<_, String>(14).unwrap_or_default(), "tmdb_id": row.get::<_, String>(15).unwrap_or_default(),
-            "imdb_id": row.get::<_, String>(16).unwrap_or_default(), "size": row.get::<_, i64>(17).unwrap_or(0),
-            "series": row.get::<_, String>(18).unwrap_or_default(), "label": row.get::<_, String>(19).unwrap_or_default(),
-            "set_name": row.get::<_, String>(20).unwrap_or_default()
+            "num": row.get::<_, String>(2).unwrap_or_default(), "type": row.get::<_, String>(3).unwrap_or_default(),
+            "year": row.get::<_, String>(4).unwrap_or_default(), "plot": row.get::<_, String>(5).unwrap_or_default(),
+            "has_poster": !row.get::<_, String>(6).unwrap_or_default().is_empty(), "rating": row.get::<_, f64>(7).unwrap_or(0.0),
+            "mpaa": row.get::<_, String>(8).unwrap_or_default(), "genres": row.get::<_, String>(9).unwrap_or_default(),
+            "tags": row.get::<_, String>(10).unwrap_or_default(), "directors": row.get::<_, String>(11).unwrap_or_default(),
+            "actors": actors, "runtime": row.get::<_, i32>(13).unwrap_or(0),
+            "premiered": row.get::<_, String>(14).unwrap_or_default(), "tagline": row.get::<_, String>(15).unwrap_or_default(),
+            "studios": row.get::<_, String>(16).unwrap_or_default(), "tmdb_id": row.get::<_, String>(17).unwrap_or_default(),
+            "imdb_id": row.get::<_, String>(18).unwrap_or_default(), "size": row.get::<_, i64>(19).unwrap_or(0),
+            "series": row.get::<_, String>(20).unwrap_or_default(), "label": row.get::<_, String>(21).unwrap_or_default(),
+            "set_name": row.get::<_, String>(22).unwrap_or_default(), "file_path": row.get::<_, String>(23).unwrap_or_default(),
+            "strm_content": row.get::<_, String>(24).unwrap_or_default()
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "items": items }))

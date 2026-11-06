@@ -108,41 +108,52 @@
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
 
-                <div class="flex flex-col md:flex-row gap-8 mt-12 md:mt-24 mb-10 z-10">
-                    <div class="w-48 md:w-64 shrink-0 aspect-[2/3] bg-gray-800 rounded-xl overflow-hidden shadow-2xl border border-gray-600/50">
-                        <img id="detail-poster" src="" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzM3NDE1MSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjOWNhM2FmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg=='">
-                    </div>
-                    
-                    <div class="flex-1 flex flex-col justify-end pb-2">
-                        <div class="flex items-center gap-4 mb-2">
-                            <h1 id="detail-title" class="text-4xl md:text-6xl font-black text-white tracking-tight drop-shadow-lg">影片标题</h1>
-                            <span id="detail-num" class="hidden border border-blue-500/50 bg-blue-500/20 text-blue-300 px-3 py-1 rounded-lg text-xl font-mono"></span>
+                <div class="flex flex-col md:flex-row gap-8 mt-12 md:mt-24 mb-10 z-10 w-full max-w-6xl">
+                    <!-- 左侧：海报 + 标题 + 元数据 -->
+                    <div class="w-full md:w-72 shrink-0 flex flex-col items-center md:items-start">
+                        <div class="w-56 md:w-full aspect-[2/3] bg-gray-800 rounded-xl overflow-hidden shadow-2xl border border-gray-600/50 mb-4">
+                            <img id="detail-poster" src="" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzM3NDE1MSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjOWNhM2FmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg=='">
                         </div>
                         
-                        <div id="detail-tagline-box" class="hidden mb-4 mt-2">
+                        <!-- 标题显示在海报下面 -->
+                        <div class="text-center md:text-left w-full">
+                            <h1 id="detail-title" class="text-3xl md:text-4xl font-black text-white tracking-tight drop-shadow-lg mb-2">影片标题</h1>
+                            <div class="flex items-center justify-center md:justify-start gap-2 mb-4">
+                                <span id="detail-num" class="hidden border border-blue-500/50 bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded text-sm font-mono"></span>
+                            </div>
+                            
+                            <div class="flex flex-wrap items-center justify-center md:justify-start gap-2 text-sm font-medium text-gray-400 mb-4">
+                                <span id="detail-year">未知年份</span>
+                                <span class="text-gray-600">•</span>
+                                <span class="text-yellow-400 font-bold flex items-center gap-1">
+                                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+                                    <span id="detail-rating-val">0.0</span>
+                                </span>
+                                <span class="text-gray-600">•</span>
+                                <span id="detail-runtime">未知</span>
+                                <span class="text-gray-600">•</span>
+                                <span id="detail-mpaa" class="border border-gray-500 text-gray-300 px-1.5 py-0.5 rounded text-xs"></span>
+                            </div>
+
+                            <div id="detail-genres" class="flex flex-wrap gap-1.5 mb-4 hidden justify-center md:justify-start">
+                                <div id="detail-genres-val" class="flex flex-wrap gap-1.5"></div>
+                            </div>
+                            
+                            <div class="flex flex-col gap-1 text-xs text-gray-400 mb-2">
+                                <div id="detail-series-box" class="hidden"><span class="text-gray-500">系列: </span> <span id="detail-series" class="text-blue-400"></span></div>
+                                <div id="detail-label-box" class="hidden"><span class="text-gray-500">厂牌: </span> <span id="detail-label" class="text-blue-400"></span></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 右侧：简介、按钮、Tagline -->
+                    <div class="flex-1 flex flex-col justify-start pt-2 md:pt-0">
+                        <div id="detail-tagline-box" class="hidden mb-4">
                             <div class="flex items-start gap-1 text-gray-300 text-lg md:text-xl" style="font-family: 'Merriweather', serif; font-style: italic;">
                                 <span class="text-3xl text-gray-500 leading-none mt-1">“</span>
                                 <span id="detail-tagline" class="text-center px-2"></span>
                                 <span class="text-3xl text-gray-500 leading-none mt-1 self-end">”</span>
                             </div>
-                        </div>
-                        
-                        <div class="flex flex-wrap items-center gap-3 mb-6 text-sm font-medium">
-                            <span id="detail-year" class="text-gray-300">2024</span>
-                            <span class="text-gray-500">•</span>
-                            <span class="text-yellow-400 font-bold flex items-center gap-1">
-                                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
-                                <span id="detail-rating-val">0.0</span>
-                            </span>
-                            <span class="text-gray-500">•</span>
-                            <span id="detail-runtime" class="text-gray-300"></span>
-                            <span class="text-gray-500">•</span>
-                            <span id="detail-mpaa" class="border border-gray-500 text-gray-300 px-2 py-0.5 rounded text-xs"></span>
-                        </div>
-
-                        <div id="detail-genres" class="flex flex-wrap gap-2 mb-6 hidden">
-                            <span class="text-gray-500 py-1">类型: </span> 
-                            <div id="detail-genres-val" class="flex flex-wrap gap-2"></div>
                         </div>
 
                         <div class="flex gap-3 mb-6">
@@ -150,16 +161,11 @@
                                 <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
                                 播放
                             </button>
-                            <button class="bg-gray-800/80 text-white hover:bg-gray-700 px-4 py-2 rounded-full font-bold flex items-center gap-2 transition border border-gray-600">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
-                            </button>
                         </div>
 
-                        <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base max-w-4xl line-clamp-4 hover:line-clamp-none transition-all cursor-pointer">暂无简介...</p>
+                        <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base line-clamp-4 hover:line-clamp-none transition-all cursor-pointer mb-4">暂无简介...</p>
                         
-                        <div class="flex flex-wrap items-center gap-4 mt-4 text-sm text-gray-400">
-                            <div id="detail-series-box" class="hidden"><span class="text-gray-500">系列: </span> <span id="detail-series" class="text-blue-400 cursor-pointer hover:underline"></span></div>
-                            <div id="detail-label-box" class="hidden"><span class="text-gray-500">厂牌: </span> <span id="detail-label" class="text-blue-400"></span></div>
+                        <div class="flex flex-wrap items-center gap-4 text-sm text-gray-400 mt-auto">
                             <div id="detail-directors" class="hidden"><span class="text-gray-500">导演: </span> <span class="text-gray-300" id="detail-directors-val"></span></div>
                             <div id="detail-tags" class="hidden"><span class="text-gray-500">标签: </span> <span class="text-gray-300" id="detail-tags-val"></span></div>
                         </div>
@@ -194,6 +200,18 @@
                                 <div class="text-xs text-yellow-400 font-bold mb-2 uppercase">字幕流 SUBTITLE</div>
                                 <div class="text-sm text-gray-300 mb-1">等待媒体探测</div>
                                 <div class="text-xs text-gray-500">探测后显示语言、格式</div>
+                            </div>
+                        </div>
+
+                        <!-- 新增：STRM 文件详情展示 -->
+                        <div class="mt-4 border-t border-gray-800 pt-4 flex flex-col gap-3">
+                            <div>
+                                <div class="text-xs text-gray-500 font-bold mb-1 uppercase">STRM 文件路径</div>
+                                <div id="detail-strm-path" class="text-sm font-mono text-gray-400 bg-black/30 p-2 rounded break-all select-all">暂无路径</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-gray-500 font-bold mb-1 uppercase">STRM 文件内容 (解码后)</div>
+                                <div id="detail-strm-content" class="text-sm font-mono text-gray-400 bg-black/30 p-2 rounded break-all select-all">暂无内容</div>
                             </div>
                         </div>
                     </div>
@@ -362,19 +380,20 @@
                 
                 cachedItems = data.items;
 
+                // 卡片布局重构：图片上，标题和年份在下方
                 grid.innerHTML = data.items.map(item => {
                     const imgUrl = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
                     const ratingHtml = item.rating > 0 ? `<div class="absolute bottom-2 right-2 bg-yellow-500 text-black font-bold text-xs px-2 py-0.5 rounded shadow-lg border border-yellow-400">${item.rating.toFixed(1)}</div>` : '';
                     return `
-                    <div onclick="openDetail(${item.id})" class="media-card bg-[#16191f] rounded-xl overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1 relative group border border-gray-800/50">
-                        <div class="bg-gray-800 aspect-[2/3] overflow-hidden relative">
+                    <div onclick="openDetail(${item.id})" class="media-card flex flex-col cursor-pointer transition-all duration-300 group">
+                        <div class="bg-[#16191f] rounded-xl overflow-hidden aspect-[2/3] relative border border-gray-800/50">
                             <img src="${imgUrl}" class="media-poster w-full h-full object-cover transition-transform duration-500" onerror="this.src='${defaultPosterSvg}'">
                             ${ratingHtml}
                             <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                         </div>
-                        <div class="absolute bottom-0 w-full p-3 transform translate-y-2 group-hover:translate-y-0 transition-transform duration-300 pointer-events-none">
-                            <div class="font-bold text-white text-sm truncate drop-shadow-md">${item.title}</div>
-                            <div class="text-xs text-gray-300 mt-1">${item.year || (item.type === 'movies' ? '电影' : '剧集')}</div>
+                        <div class="p-2">
+                            <div class="font-bold text-white text-sm truncate drop-shadow-md group-hover:text-blue-400 transition-colors">${item.title}</div>
+                            <div class="text-xs text-gray-400 mt-1">${item.year || (item.type === 'movies' ? '电影' : '剧集')}</div>
                         </div>
                     </div>`;
                 }).join('');
@@ -395,7 +414,6 @@
             loading.classList.remove('hidden');
             loading.innerHTML = "正在解析直链并加载...";
             
-            // 直接请求流接口，后端会返回 302 跳转到真实网盘直链
             video.src = `/Videos/${currentPlayingItemId}/stream?token=${token}`;
             
             video.play().then(() => {
@@ -425,7 +443,6 @@
 
             document.getElementById('detail-year').innerText = item.year || '未知年份';
             document.getElementById('detail-rating-val').innerText = item.rating > 0 ? item.rating.toFixed(1) : '暂无';
-            document.getElementById('detail-plot').innerText = item.plot || '暂无简介。';
             
             if (item.runtime > 0) {
                 const h = Math.floor(item.runtime / 60), m = item.runtime % 60;
@@ -440,7 +457,7 @@
 
             const genresBox = document.getElementById('detail-genres');
             if (item.genres) {
-                document.getElementById('detail-genres-val').innerHTML = item.genres.split(' / ').map(g => `<span class="bg-gray-800 border border-gray-600 text-gray-300 px-3 py-1 rounded-full text-xs">${g}</span>`).join('');
+                document.getElementById('detail-genres-val').innerHTML = item.genres.split(' / ').map(g => `<span class="bg-gray-800 border border-gray-600 text-gray-300 px-2 py-0.5 rounded-full text-[10px]">${g}</span>`).join('');
                 genresBox.classList.remove('hidden'); genresBox.classList.add('flex');
             } else { genresBox.classList.add('hidden'); }
 
@@ -485,6 +502,14 @@
 
             const sizeEl = document.getElementById('detail-file-size');
             if (item.size > 0) { sizeEl.innerText = `${(item.size / (1024 * 1024 * 1024)).toFixed(2)} GB`; } else { sizeEl.innerText = '未知'; }
+
+            // 渲染 STRM 路径和内容
+            document.getElementById('detail-strm-path').innerText = item.file_path || '暂无路径';
+            let strmContent = item.strm_content || '暂无内容';
+            try {
+                strmContent = decodeURIComponent(strmContent);
+            } catch(e) {}
+            document.getElementById('detail-strm-content').innerText = strmContent;
 
             document.getElementById('detail-modal').classList.remove('hidden');
             document.body.style.overflow = 'hidden';
