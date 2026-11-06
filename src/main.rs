@@ -1,43 +1,244 @@
-mod db;
-mod api;
-mod nfo;
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>Rust-Em</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white font-sans h-screen flex flex-col md:flex-row overflow-hidden">
+    <div id="login-view" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 px-4">
+        <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-sm">
+            <h2 class="text-2xl mb-6 text-center font-bold text-blue-400">Rust-Em</h2>
+            <input id="username" type="text" placeholder="用户名" class="w-full p-3 mb-4 bg-gray-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
+            <input id="password" type="password" placeholder="密码" class="w-full p-3 mb-6 bg-gray-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
+            <button onclick="login()" class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold transition">登录</button>
+        </div>
+    </div>
 
-use axum::{routing::{get, post}, Router, middleware};
-use tower_http::{services::ServeDir, cors::CorsLayer};
-use std::sync::{Arc, Mutex};
+    <div id="main-view" class="hidden flex-1 flex flex-col md:flex-row h-full">
+        <div class="hidden md:flex w-64 bg-gray-800 p-4 flex-col border-r border-gray-700">
+            <h1 class="text-xl font-bold mb-8 text-blue-400 px-2">🎬 Rust-Em</h1>
+            <button onclick="switchTab('library')" class="text-left px-4 py-3 hover:bg-gray-700 rounded-lg mb-2 transition">媒体库</button>
+            <button onclick="switchTab('settings')" class="text-left px-4 py-3 hover:bg-gray-700 rounded-lg mb-2 transition">设置</button>
+            <button onclick="logout()" class="mt-auto text-left px-4 py-3 text-red-400 hover:bg-gray-700 rounded-lg transition">退出登录</button>
+        </div>
+        <div class="md:hidden bg-gray-800 p-4 flex justify-between items-center shadow-md z-10">
+            <h1 class="text-xl font-bold text-blue-400" id="mobile-title">媒体库</h1>
+            <button onclick="logout()" class="text-gray-400 text-sm">退出</button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-4 md:p-8 pb-20 md:pb-8">
+            <div id="tab-library" class="hidden">
+                <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-4"></div>
+            </div>
+            <div id="tab-settings" class="hidden max-w-2xl mx-auto">
+                <div class="bg-gray-800 p-5 md:p-6 rounded-xl shadow-lg mb-6">
+                    <h3 class="text-lg font-bold mb-4 text-blue-300 border-b border-gray-700 pb-2">添加媒体库</h3>
+                    <input id="lib-name" placeholder="媒体库名称" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none">
+                    <select id="lib-type" class="p-3 mb-4 bg-gray-700 rounded-lg w-full outline-none">
+                        <option value="movies">电影</option>
+                        <option value="tvshows">电视剧</option>
+                    </select>
+                    <div class="mb-4">
+                        <label class="block text-sm text-gray-400 mb-2">已选路径:</label>
+                        <div id="selected-paths" class="flex flex-col gap-2 mb-2"></div>
+                        <button onclick="openPathPicker()" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-sm transition w-full border border-gray-600 border-dashed">+ 添加路径</button>
+                    </div>
+                    <button onclick="addLibrary()" class="w-full bg-green-600 hover:bg-green-700 px-4 py-3 rounded-lg font-bold mt-2 transition">保存并扫描</button>
+                </div>
+            </div>
+        </div>
+        <div class="md:hidden fixed bottom-0 w-full bg-gray-800 border-t border-gray-700 flex justify-around p-3 pb-safe z-20">
+            <button onclick="switchTab('library')" class="flex flex-col items-center text-blue-400">
+                <span class="text-xl">🎬</span><span class="text-xs mt-1">媒体库</span>
+            </button>
+            <button onclick="switchTab('settings')" class="flex flex-col items-center text-gray-400 hover:text-white">
+                <span class="text-xl">⚙️</span><span class="text-xs mt-1">设置</span>
+            </button>
+        </div>
+    </div>
 
-#[tokio::main]
-async fn main() {
-    std::fs::create_dir_all("/app/data").ok();
-    let conn = rusqlite::Connection::open("/app/data/rust_em.db").unwrap();
-    db::init_db(&conn);
-    let db_pool = Arc::new(Mutex::new(conn));
+    <div id="path-modal" class="hidden fixed inset-0 z-50 bg-black bg-opacity-75 flex items-end md:items-center justify-center">
+        <div class="bg-gray-800 w-full md:w-2/3 lg:w-1/2 md:rounded-xl rounded-t-xl shadow-2xl flex flex-col h-[85vh] md:h-[75vh]">
+            <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800 rounded-t-xl">
+                <h3 class="font-bold truncate text-sm md:text-base text-blue-300" id="current-path">/media</h3>
+                <button onclick="closePathPicker()" class="text-gray-400 hover:text-white px-2">✕</button>
+            </div>
+            <div id="dir-list" class="flex-1 overflow-y-auto p-2"></div>
+            <div class="p-4 border-t border-gray-700 flex gap-2">
+                <button onclick="selectCurrentPath()" class="flex-1 bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold">选中当前并关闭</button>
+                <button onclick="closePathPicker()" class="flex-1 bg-green-600 hover:bg-green-700 py-3 rounded-lg font-bold">确认勾选并关闭</button>
+            </div>
+        </div>
+    </div>
 
-    let protected_routes = Router::new()
-        .route("/libraries", post(api::add_library).get(api::get_libraries))
-        .route("/items", get(api::get_items))
-        // 这里必须确认是 post
-        .route("/browse", post(api::browse_dir))
-        .route("/user/update", post(api::update_user))
-        .layer(middleware::from_fn(api::auth))
-        .with_state(db_pool.clone());
+    <script>
+        let token = localStorage.getItem('token');
+        let currentPath = '/media';
+        let selectedPaths = [];
 
-    let public_routes = Router::new()
-        .route("/login", post(api::login))
-        .with_state(db_pool.clone());
+        if (token) showMain();
 
-    let api_routes = Router::new()
-        .merge(public_routes)
-        .merge(protected_routes);
+        async function api(path, method = 'GET', body = null) {
+            const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+            const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : null });
+            const text = await res.text();
+            if (!res.ok) {
+                if (res.status === 401) { logout(); }
+                return { error: `HTTP ${res.status}: ${text || '无返回内容'}` };
+            }
+            if (!text) return {};
+            return JSON.parse(text);
+        }
 
-    let app = Router::new()
-        .nest("/api", api_routes)
-        .route("/System/Info", get(api::emby_info))
-        .route("/Users/{userId}/Items", get(api::emby_items))
-        .fallback_service(ServeDir::new("public"))
-        .layer(CorsLayer::permissive());
+        async function login() {
+            const u = document.getElementById('username').value;
+            const p = document.getElementById('password').value;
+            const res = await fetch('/api/login', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ username: u, password: p })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                token = data.token; localStorage.setItem('token', token); showMain();
+            } else alert('登录失败');
+        }
+        
+        function logout() { localStorage.removeItem('token'); location.reload(); }
+        function showMain() {
+            document.getElementById('login-view').classList.add('hidden');
+            document.getElementById('main-view').classList.remove('hidden');
+            switchTab('library');
+        }
+        function switchTab(tab) {
+            document.getElementById('tab-library').classList.add('hidden');
+            document.getElementById('tab-settings').classList.add('hidden');
+            document.getElementById(`tab-${tab}`).classList.remove('hidden');
+            if(window.innerWidth < 768) {
+                document.getElementById('mobile-title').innerText = tab === 'library' ? '媒体库' : '设置';
+            }
+        }
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8096").await.unwrap();
-    println!("🚀 rust-em running on 8096");
-    axum::serve(listener, app).await.unwrap();
-}
+        async function openPathPicker() {
+            document.getElementById('path-modal').classList.remove('hidden');
+            await browseDir(currentPath);
+        }
+        function closePathPicker() {
+            document.getElementById('path-modal').classList.add('hidden');
+        }
+
+        async function browseDir(path) {
+            const list = document.getElementById('dir-list');
+            list.innerHTML = `<div class="p-4 text-center text-gray-500">加载中...</div>`;
+            
+            // 【核心修改】：改用 GET 请求，带时间戳防缓存
+            const url = `/api/browse?path=${encodeURIComponent(path)}&t=${Date.now()}`;
+            const res = await api(url, "GET");
+            
+            // 弹窗显示真实请求和返回
+            alert("前端请求路径: " + path + "\n\n后端返回:\n" + JSON.stringify(res, null, 2));
+
+            if (res.error) {
+                list.innerHTML = `<div class="p-4 text-center text-red-500 text-sm font-bold bg-red-900 bg-opacity-20 rounded">错误:<br>${res.error}</div>`;
+                return;
+            }
+
+            currentPath = res.current || path;
+            document.getElementById('current-path').innerText = currentPath;
+            list.innerHTML = '';
+
+            if (currentPath !== '/media') {
+                const parent = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/media';
+                const backBtn = document.createElement('div');
+                backBtn.className = "p-3 border-b border-gray-700 cursor-pointer hover:bg-gray-700 flex items-center text-gray-400 font-bold";
+                backBtn.innerHTML = "⬅ 返回上一级";
+                backBtn.onclick = () => browseDir(parent);
+                list.appendChild(backBtn);
+            }
+
+            if (!res.dirs || res.dirs.length === 0) {
+                const emptyMsg = document.createElement('div');
+                emptyMsg.className = "p-6 text-center text-gray-400";
+                emptyMsg.innerText = "当前目录下没有子文件夹。";
+                list.appendChild(emptyMsg);
+                return;
+            }
+
+            res.dirs.forEach(d => {
+                const row = document.createElement('div');
+                row.className = "p-3 border-b border-gray-700 flex justify-between items-center hover:bg-gray-700 cursor-pointer transition";
+                row.onclick = (e) => {
+                    if (e.target.tagName === 'INPUT') return;
+                    browseDir(d.path);
+                };
+
+                const leftArea = document.createElement('div');
+                leftArea.className = "flex items-center flex-1 overflow-hidden pointer-events-none";
+                leftArea.innerHTML = `<span class="text-yellow-500 mr-2">📁</span> <span class="truncate">${d.name}</span>`;
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = "w-5 h-5 accent-blue-500 cursor-pointer flex-shrink-0 ml-2";
+                checkbox.checked = selectedPaths.includes(d.path);
+                checkbox.onchange = (e) => togglePath(d.path, e.target.checked);
+
+                row.appendChild(leftArea);
+                row.appendChild(checkbox);
+                list.appendChild(row);
+            });
+        }
+
+        function togglePath(path, isChecked) {
+            if (isChecked) {
+                if (!selectedPaths.includes(path)) selectedPaths.push(path);
+            } else {
+                selectedPaths = selectedPaths.filter(p => p !== path);
+            }
+            renderSelectedPaths();
+        }
+
+        function selectCurrentPath() {
+            if (!selectedPaths.includes(currentPath)) {
+                selectedPaths.push(currentPath);
+                renderSelectedPaths();
+            }
+            closePathPicker();
+        }
+
+        function renderSelectedPaths() {
+            const container = document.getElementById('selected-paths');
+            if (selectedPaths.length === 0) {
+                container.innerHTML = `<div class="text-gray-500 text-sm italic">暂无路径</div>`;
+                return;
+            }
+            container.innerHTML = selectedPaths.map(p => `
+                <div class="flex justify-between items-center bg-gray-700 p-2 rounded text-sm">
+                    <span class="truncate mr-2" title="${p}">${p}</span>
+                    <button onclick="removePath('${p}')" class="text-red-400 hover:text-red-300 px-2">删除</button>
+                </div>
+            `).join('');
+        }
+
+        function removePath(path) {
+            selectedPaths = selectedPaths.filter(p => p !== path);
+            renderSelectedPaths();
+        }
+
+        async function addLibrary() {
+            const name = document.getElementById('lib-name').value;
+            const type = document.getElementById('lib-type').value;
+            if (!name || selectedPaths.length === 0) return alert('请填写名称并至少选择一个路径');
+            
+            const res = await api('/api/libraries', 'POST', { name, paths: selectedPaths, type });
+            if (res.error) return alert(res.error);
+            
+            alert('媒体库已保存，后台开始扫描...');
+            selectedPaths = [];
+            renderSelectedPaths();
+            document.getElementById('lib-name').value = '';
+            switchTab('library');
+        }
+    </script>
+</body>
+</html>
