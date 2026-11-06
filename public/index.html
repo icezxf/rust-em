@@ -15,7 +15,6 @@
         .media-card:hover { box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.4); }
         .snap-x-mandatory { scroll-snap-type: x mandatory; }
         .snap-start { scroll-snap-align: start; }
-        /* 侧边栏平滑宽度过渡 */
         .sidebar-transition { transition: width 0.3s ease-in-out, opacity 0.2s ease-in-out; }
     </style>
 </head>
@@ -35,14 +34,12 @@
         
         <!-- 左侧边栏 -->
         <div id="desktop-sidebar" class="hidden md:flex h-full bg-[#16191f] flex-col border-r border-gray-800 z-[60] shrink-0 overflow-hidden sidebar-transition w-64 opacity-100">
-            <!-- 内部固定宽度，防止文字换行 -->
             <div class="w-64 p-4 flex flex-col h-full">
                 <div class="flex justify-between items-center mb-8 px-2">
                     <h1 class="text-xl font-bold text-blue-500 flex items-center gap-2 whitespace-nowrap">
                         <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
                         Rust-Em
                     </h1>
-                    <!-- 收起按钮 -->
                     <button onclick="toggleSidebar(false)" class="text-gray-400 hover:text-white shrink-0">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
                     </button>
@@ -60,16 +57,12 @@
             </div>
         </div>
 
-        <!-- 移动端遮罩层 -->
         <div id="sidebar-overlay" onclick="toggleSidebar(false)" class="hidden fixed inset-0 bg-black/60 z-[55] md:hidden"></div>
 
         <!-- 右侧内容区 -->
         <div class="flex-1 flex flex-col h-full overflow-hidden bg-[#0f1115] relative w-full">
-            
-            <!-- 顶部栏 -->
             <div class="px-4 py-3 md:px-8 md:py-6 flex flex-col shadow-sm z-50 shrink-0 border-b border-gray-800/50 bg-[#0f1115]/80 backdrop-blur-md">
                 <div class="flex items-center gap-4">
-                    <!-- 悬浮展开按钮 -->
                     <button onclick="toggleSidebar(true)" id="open-sidebar-btn" class="text-gray-400 hover:text-white bg-[#16191f] p-2 rounded-lg transition border border-gray-700/50 hover:border-gray-500">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
                     </button>
@@ -123,12 +116,10 @@
             <div id="detail-fanart" class="fixed inset-0 bg-cover bg-top backdrop-blur-heavy transition-opacity duration-500 opacity-40"></div>
             
             <div class="relative min-h-screen w-full p-4 md:p-8 flex flex-col items-center">
-                <!-- 关闭详情页 -->
                 <button onclick="closeDetail()" class="fixed top-4 right-4 md:top-8 md:right-8 text-white bg-black/50 hover:bg-black/80 p-3 rounded-full z-50 backdrop-blur-md transition">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
 
-                <!-- 核心内容容器 -->
                 <div class="w-full max-w-5xl flex flex-col gap-6 mt-12 md:mt-24 z-10">
                     
                     <div class="flex flex-col md:flex-row gap-8 items-start">
@@ -138,13 +129,16 @@
                         </div>
                         
                         <!-- 右侧信息区 -->
-                        <div class="flex-1 flex flex-col pt-2">
+                        <div class="flex-1 flex flex-col pt-2 w-full">
+                            <!-- 标题栏 (去掉了 num) -->
                             <div class="flex items-center gap-3 mb-2">
                                 <h1 id="detail-title" class="text-3xl md:text-5xl font-black text-white tracking-tight drop-shadow-md">影片标题</h1>
-                                <span id="detail-num" class="hidden border border-blue-500/50 bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded text-sm font-mono mt-1"></span>
                             </div>
                             
+                            <!-- 标签栏 (num 放进来了) -->
                             <div class="flex flex-wrap items-center gap-3 mb-6 text-sm font-medium text-gray-400">
+                                <!-- 番号在这里显示，蓝色高亮 -->
+                                <span id="detail-num" class="hidden border border-blue-500/50 bg-blue-500/20 text-blue-300 px-2.5 py-1 rounded-md font-mono font-bold"></span>
                                 <span id="detail-year" class="bg-gray-800/80 px-2.5 py-1 rounded-md text-gray-200">未知年份</span>
                                 <span class="text-yellow-400 font-bold flex items-center gap-1 bg-gray-800/80 px-2.5 py-1 rounded-md">
                                     <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
@@ -162,12 +156,13 @@
 
                             <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base max-h-40 overflow-y-auto pr-2 mb-4 whitespace-pre-wrap">暂无简介...</p>
                             
-                            <div class="flex flex-col gap-1 text-sm text-gray-400 mt-auto border-t border-gray-800/50 pt-4">
-                                <div id="detail-series-box" class="hidden"><span class="text-gray-500">系列: </span> <span id="detail-series" class="text-blue-400"></span></div>
-                                <div id="detail-label-box" class="hidden"><span class="text-gray-500">厂牌: </span> <span id="detail-label" class="text-blue-400"></span></div>
-                                <div id="detail-studio-box" class="hidden"><span class="text-gray-500">制作商: </span> <span id="detail-studios" class="text-gray-300"></span></div>
-                                <div id="detail-directors" class="hidden"><span class="text-gray-500">导演: </span> <span class="text-gray-300" id="detail-directors-val"></span></div>
-                                <div id="detail-tags" class="hidden"><span class="text-gray-500">标签: </span> <span class="text-gray-300" id="detail-tags-val"></span></div>
+                            <!-- 信息块：毛玻璃背景，标签胶囊 -->
+                            <div class="flex flex-col gap-2 text-sm text-gray-300 mt-4 bg-[#0f1115]/60 backdrop-blur-md p-4 rounded-xl border border-gray-700/50 shadow-lg">
+                                <div id="detail-series-box" class="hidden"><span class="text-gray-500">系列: </span> <span id="detail-series" class="text-blue-400 font-medium"></span></div>
+                                <div id="detail-label-box" class="hidden"><span class="text-gray-500">厂牌: </span> <span id="detail-label" class="text-blue-400 font-medium"></span></div>
+                                <div id="detail-studio-box" class="hidden"><span class="text-gray-500">制作商: </span> <span id="detail-studios" class="text-gray-200 font-medium"></span></div>
+                                <div id="detail-directors" class="hidden"><span class="text-gray-500">导演: </span> <span class="text-gray-200 font-medium" id="detail-directors-val"></span></div>
+                                <div id="detail-tags" class="hidden items-start mt-1"><span class="text-gray-500 shrink-0 mr-2 mt-0.5">标签: </span> <div class="flex flex-wrap gap-1.5" id="detail-tags-val"></div></div>
                             </div>
                         </div>
                     </div>
@@ -329,7 +324,6 @@
         async function showMain() {
             document.getElementById('login-view').classList.add('hidden');
             document.getElementById('main-view').classList.remove('hidden');
-            // 确保在宽屏初始时，侧边栏是展开的
             if (window.innerWidth >= 768) toggleSidebar(true);
             await fetchLibraries();
             switchTab('library');
@@ -407,7 +401,6 @@
                 
                 cachedItems = data.items;
 
-                // 防崩处理：强转数字，防止 null 或 undefined 阻断渲染
                 grid.innerHTML = data.items.map(item => {
                     const imgUrl = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
                     const ratingVal = Number(item.rating) || 0;
@@ -474,15 +467,14 @@
             if (!item) return;
             currentPlayingItemId = item.id;
 
-            // 进入详情页自动收起侧边栏
             if (window.innerWidth >= 768) {
                 toggleSidebar(false);
             }
 
-            // 先渲染简介（防阻断）
             document.getElementById('detail-plot').innerText = item.plot || '暂无简介...';
-
             document.getElementById('detail-title').innerText = item.title || '未知';
+            
+            // 番号移至胶囊栏
             const numEl = document.getElementById('detail-num');
             if (item.num) { numEl.innerText = item.num; numEl.classList.remove('hidden'); } else { numEl.classList.add('hidden'); }
 
@@ -520,7 +512,16 @@
                 else { el.classList.add('hidden'); }
             };
             updateTextBlock('detail-directors', 'detail-directors-val', item.directors);
-            updateTextBlock('detail-tags', 'detail-tags-val', item.tags);
+            
+            // 标签：分拆成独立小胶囊显示
+            const tagsBox = document.getElementById('detail-tags');
+            const tagsValBox = document.getElementById('detail-tags-val');
+            if (item.tags) {
+                tagsValBox.innerHTML = item.tags.split(' / ').map(t => `<span class="bg-gray-800/80 border border-gray-600/30 text-gray-400 px-2 py-0.5 rounded-md text-xs whitespace-nowrap">${t}</span>`).join('');
+                tagsBox.classList.remove('hidden'); tagsBox.classList.add('flex');
+            } else {
+                tagsBox.classList.add('hidden');
+            }
 
             const parts = item.parts || [];
             const playActions = document.getElementById('detail-play-actions');
