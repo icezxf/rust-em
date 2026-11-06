@@ -91,17 +91,15 @@
         if (token) showMain();
 
         async function api(path, method = 'GET', body = null) {
-            console.log(`[API 请求] ${method} ${path}`, body || '');
             const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
             const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : null });
-            if (!res.ok) {
-                if (res.status === 401) { logout(); throw new Error("登录已过期"); }
-                const text = await res.text();
-                throw new Error(`HTTP ${res.status}: ${text}`);
-            }
             const text = await res.text();
+            if (!res.ok) {
+                if (res.status === 401) { logout(); }
+                return { error: `HTTP ${res.status}: ${text}` };
+            }
             if (!text) return {};
-            return JSON.parse(text);
+            try { return JSON.parse(text); } catch (e) { return { error: "JSON解析失败: " + text }; }
         }
 
         async function login() {
@@ -140,72 +138,59 @@
             document.getElementById('path-modal').classList.add('hidden');
         }
 
-        // 完全重写：使用原生 DOM 构建列表，杜绝任何字符串转义问题
+        // 带完整调试信息的渲染逻辑
         async function browseDir(path) {
-            console.log(`[浏览目录] 准备进入: ${path}`);
             const list = document.getElementById('dir-list');
             list.innerHTML = `<div class="p-4 text-center text-gray-500">加载中...</div>`;
             
-            try {
-                const res = await api(`/api/browse`, "POST", { path: path });
-                console.log(`[浏览目录] 后端返回:`, res);
-                
-                currentPath = res.current || path;
-                document.getElementById('current-path').innerText = currentPath;
-
-                if (res.error) {
-                    list.innerHTML = `<div class="p-4 text-center text-red-500 text-sm">${res.error}</div>`;
-                    return;
-                }
-
-                // 清空列表，开始用 DOM API 渲染
-                list.innerHTML = '';
-
-                // 1. 渲染返回上一级
-                if (currentPath !== '/media') {
-                    const parent = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/media';
-                    const backBtn = document.createElement('div');
-                    backBtn.className = "p-3 border-b border-gray-700 cursor-pointer hover:bg-gray-700 flex items-center text-gray-400 font-bold";
-                    backBtn.innerHTML = "⬅ 返回上一级";
-                    backBtn.onclick = () => browseDir(parent);
-                    list.appendChild(backBtn);
-                }
-
-                // 2. 渲染子目录
-                if (!res.dirs || res.dirs.length === 0) {
-                    const emptyMsg = document.createElement('div');
-                    emptyMsg.className = "p-6 text-center text-gray-400";
-                    emptyMsg.innerText = "当前目录下没有子文件夹。";
-                    list.appendChild(emptyMsg);
-                } else {
-                    res.dirs.forEach(d => {
-                        // 外框
-                        const row = document.createElement('div');
-                        row.className = "p-3 border-b border-gray-700 flex justify-between items-center hover:bg-gray-700 transition";
-
-                        // 左侧可点击区域
-                        const leftArea = document.createElement('div');
-                        leftArea.className = "flex items-center flex-1 cursor-pointer overflow-hidden";
-                        leftArea.innerHTML = `<span class="text-yellow-500 mr-2">📁</span> <span class="truncate">${d.name}</span>`;
-                        // 绑定点击事件（使用闭包锁定 d.path）
-                        leftArea.onclick = () => browseDir(d.path);
-
-                        // 右侧复选框
-                        const checkbox = document.createElement('input');
-                        checkbox.type = 'checkbox';
-                        checkbox.className = "w-5 h-5 accent-blue-500 cursor-pointer flex-shrink-0 ml-2";
-                        checkbox.checked = selectedPaths.includes(d.path);
-                        checkbox.onchange = (e) => togglePath(d.path, e.target.checked);
-
-                        row.appendChild(leftArea);
-                        row.appendChild(checkbox);
-                        list.appendChild(row);
-                    });
-                }
-            } catch (err) {
-                console.error(`[浏览目录] 发生错误:`, err);
-                list.innerHTML = `<div class="p-4 text-center text-red-500 text-sm font-bold">错误详情:<br>${err.message}</div>`;
+            const res = await api(`/api/browse`, "POST", { path: path });
+            
+            // 如果报错，直接展示
+            if (res.error) {
+                list.innerHTML = `<div class="p-4 text-center text-red-500 text-sm font-bold bg-red-900 bg-opacity-20 rounded">错误:<br>${res.error}</div>`;
+                return;
             }
+
+            currentPath = res.current || path;
+            document.getElementById('current-path').innerText = currentPath;
+
+            // 【调试框】展示后端到底返回了什么
+            list.innerHTML = `
+                <div class="m-2 p-2 bg-gray-900 border border-green-700 rounded text-xs text-green-400 font-mono overflow-auto">
+                    <div>API 返回状态: OK</div>
+                    <div>当前路径: ${res.current}</div>
+                    <div>包含子文件夹数量: ${res.dirs ? res.dirs.length : '0'}</div>
+                </div>
+            `;
+
+            if (!res.dirs || res.dirs.length === 0) {
+                const emptyMsg = document.createElement('div');
+                emptyMsg.className = "p-4 text-center text-gray-400 text-sm";
+                emptyMsg.innerText = "此目录下没有子文件夹。如果媒体文件在此，直接点下方蓝色按钮。";
+                list.appendChild(emptyMsg);
+                return;
+            }
+
+            // 渲染列表
+            res.dirs.forEach(d => {
+                const row = document.createElement('div');
+                row.className = "p-3 border-b border-gray-700 flex justify-between items-center hover:bg-gray-700 transition";
+
+                const leftArea = document.createElement('div');
+                leftArea.className = "flex items-center flex-1 cursor-pointer overflow-hidden";
+                leftArea.innerHTML = `<span class="text-yellow-500 mr-2">📁</span> <span class="truncate">${d.name}</span>`;
+                leftArea.onclick = () => browseDir(d.path);
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = "w-5 h-5 accent-blue-500 cursor-pointer flex-shrink-0 ml-2";
+                checkbox.checked = selectedPaths.includes(d.path);
+                checkbox.onchange = (e) => togglePath(d.path, e.target.checked);
+
+                row.appendChild(leftArea);
+                row.appendChild(checkbox);
+                list.appendChild(row);
+            });
         }
 
         function togglePath(path, isChecked) {
@@ -249,16 +234,14 @@
             const type = document.getElementById('lib-type').value;
             if (!name || selectedPaths.length === 0) return alert('请填写名称并至少选择一个路径');
             
-            try {
-                await api('/api/libraries', 'POST', { name, paths: selectedPaths, type });
-                alert('媒体库已保存，后台开始扫描...');
-                selectedPaths = [];
-                renderSelectedPaths();
-                document.getElementById('lib-name').value = '';
-                switchTab('library');
-            } catch (e) {
-                alert(e.message);
-            }
+            const res = await api('/api/libraries', 'POST', { name, paths: selectedPaths, type });
+            if (res.error) return alert(res.error);
+            
+            alert('媒体库已保存，后台开始扫描...');
+            selectedPaths = [];
+            renderSelectedPaths();
+            document.getElementById('lib-name').value = '';
+            switchTab('library');
         }
     </script>
 </body>
