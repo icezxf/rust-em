@@ -157,10 +157,7 @@
                         </div>
 
                         <div class="flex gap-3 mb-6">
-                            <button onclick="playVideo()" class="bg-white text-black hover:bg-gray-200 px-6 py-2 rounded-full font-bold flex items-center gap-2 transition shadow-lg shadow-white/20">
-                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
-                                播放
-                            </button>
+                        <div id="detail-play-actions" class="flex flex-wrap gap-2 mb-6"></div>
                         </div>
 
                         <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base line-clamp-4 hover:line-clamp-none transition-all cursor-pointer mb-4">暂无简介...</p>
@@ -400,7 +397,7 @@
             } catch (e) { console.error(e); }
         }
 
-        function playVideo() {
+        function playVideo(partIndex = 0) {
             if (!currentPlayingItemId) return;
             const playerModal = document.getElementById('video-player-modal');
             const video = document.getElementById('main-video');
@@ -414,7 +411,7 @@
             loading.classList.remove('hidden');
             loading.innerHTML = "正在解析直链并加载...";
             
-            video.src = `/Videos/${currentPlayingItemId}/stream?token=${token}`;
+            video.src = `/Videos/${currentPlayingItemId}/stream?token=${token}&part=${partIndex}`;
             
             video.play().then(() => {
                 loading.classList.add('hidden');
@@ -443,6 +440,21 @@
 
             document.getElementById('detail-year').innerText = item.year || '未知年份';
             document.getElementById('detail-rating-val').innerText = item.rating > 0 ? item.rating.toFixed(1) : '暂无';
+            const parts = item.parts || [];
+            const playActions = document.getElementById('detail-play-actions');
+            if (parts.length <= 1) {
+                playActions.innerHTML = `
+                <button onclick="playVideo(0)" class="bg-white text-black hover:bg-gray-200 px-6 py-2 rounded-full font-bold flex items-center gap-2 transition shadow-lg shadow-white/20">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
+                    播放
+                </button>`;
+            } else {
+                playActions.innerHTML = parts.map((_, i) => `
+                <button onclick="playVideo(${i})" class="bg-white text-black hover:bg-gray-200 px-5 py-2 rounded-full font-bold flex items-center gap-2 transition shadow-lg shadow-white/20">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
+                    播放 CD${i + 1}
+                </button>`).join('');
+            }
             
             if (item.runtime > 0) {
                 const h = Math.floor(item.runtime / 60), m = item.runtime % 60;
