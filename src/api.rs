@@ -46,6 +46,7 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
             }
         }
     }
+    // 支持从 URL 参数获取 Token (用于 img 标签)
     if let Some(query) = req.uri().query() {
         for pair in query.split('&') {
             if let Some((key, value)) = pair.split_once('=') {
@@ -190,17 +191,27 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoR
     Json(json!({ "items": items }))
 }
 
+// 【已修复】锁跨越 await 的问题
 pub async fn get_image(
     State(pool): State<Arc<Mutex<Connection>>>,
     AxumPath((id, img_type)): AxumPath<(i64, String)>,
-) -> impl IntoResponse {
-    let conn = pool.lock().unwrap();
-    let query = if img_type == "poster" { "SELECT poster_path FROM items WHERE id = ?1" } else { "SELECT fanart_path FROM items WHERE id = ?1" };
+) -> Response {
+    // 1. 在大括号内获取锁并查询路径，确保锁在 await 之前被释放
+    let path_opt = {
+        let conn = pool.lock().unwrap();
+        let query = if img_type == "poster" { 
+            "SELECT poster_path FROM items WHERE id = ?1" 
+        } else { 
+            "SELECT fanart_path FROM items WHERE id = ?1" 
+        };
+        
+        let mut stmt = conn.prepare(query).unwrap();
+        let res: Result<String, _> = stmt.query_row([id], |row| row.get(0));
+        res.ok()
+    };
     
-    let mut stmt = conn.prepare(query).unwrap();
-    let path_opt: Result<String, _> = stmt.query_row([id], |row| row.get(0));
-    
-    if let Ok(path_str) = path_opt {
+    // 2. 锁已释放，可以安全地执行异步文件读取
+    if let Some(path_str) = path_opt {
         if !path_str.is_empty() {
             if let Ok(bytes) = tokio::fs::read(&path_str).await {
                 let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
@@ -313,9 +324,12 @@ pub async fn emby_playback_info(
     State(pool): State<Arc<Mutex<Connection>>>, 
     AxumPath(item_id): AxumPath<i64>
 ) -> Response {
-    let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT file_path FROM items WHERE id = ?1").unwrap();
-    let path_opt: Option<String> = stmt.query_row([item_id], |row| row.get(0)).ok();
+    let path_opt = {
+        let conn = pool.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT file_path FROM items WHERE id = ?1").unwrap();
+        let res: Result<String, _> = stmt.query_row([item_id], |row| row.get(0));
+        res.ok()
+    };
 
     if let Some(path_str) = path_opt {
         Json(json!({
