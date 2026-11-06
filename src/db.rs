@@ -17,8 +17,12 @@ pub fn init_db(conn: &Connection) {
             id INTEGER PRIMARY KEY,
             library_id INTEGER,
             title TEXT,
-            file_path TEXT,
-            type TEXT
+            file_path TEXT UNIQUE,
+            type TEXT,
+            plot TEXT,
+            year TEXT,
+            poster_path TEXT,
+            fanart_path TEXT
         );
         INSERT OR IGNORE INTO users (username, password) VALUES ('admin', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918');"
     ).unwrap();
