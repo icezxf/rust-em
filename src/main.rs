@@ -16,9 +16,8 @@ async fn main() {
         .route("/login", post(api::login))
         .route("/libraries", post(api::add_library).get(api::get_libraries))
         .route("/items", get(api::get_items))
-        // 修复：不需要用 from_fn_with_state，直接用 from_fn
         .layer(middleware::from_fn(api::auth))
-        .with_state(db_pool.clone());
+        .with_state(db_pool);
 
     let app = Router::new()
         .nest("/api", api_routes)

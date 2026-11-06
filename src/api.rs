@@ -1,6 +1,6 @@
 use axum::{
-    extract::State,
-    http::{StatusCode, Request},
+    extract::{State, Request}, // 修复：使用 axum::extract::Request
+    http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
@@ -34,7 +34,6 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
     }
 }
 
-// 修复：去掉了 State 参数，直接使用全局静态变量
 pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     if let Some(auth_header) = req.headers().get("Authorization") {
         if let Some(token) = auth_header.to_str().unwrap_or("").strip_prefix("Bearer ") {
@@ -91,7 +90,6 @@ fn scan_strm(path: &str, lib_type: &str, pool: Arc<Mutex<Connection>>) {
                 if let Some(t) = nfo.title { title = t; }
             }
             
-            // 修复：用 params! 宏解决类型和生命周期问题
             let path_str = file_path.to_string_lossy().to_string();
             let _ = conn.execute(
                 "INSERT INTO items (library_id, title, file_path, type) VALUES (1, ?1, ?2, ?3)",
