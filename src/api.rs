@@ -1,17 +1,22 @@
 use axum::{
     extract::{State, Request, Json, Query, Path as AxumPath},
-    http::{StatusCode, header::LOCATION},
+    http::{StatusCode, header::{LOCATION, USER_AGENT, CONTENT_TYPE}, HeaderMap},
     middleware::Next,
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
 static TOKENS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+
+// 全局缓存：Key 是 (URL+IP+UA)，Value 是 (解析后的直链, 过期时间)
+static STRM_CACHE: OnceLock<Mutex<HashMap<String, (String, Instant)>>> = OnceLock::new();
 
 // ================= 鉴权与登录 =================
 
@@ -191,31 +196,24 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoR
     Json(json!({ "items": items }))
 }
 
-// 【已修复】锁跨越 await 的问题
 pub async fn get_image(
     State(pool): State<Arc<Mutex<Connection>>>,
     AxumPath((id, img_type)): AxumPath<(i64, String)>,
 ) -> Response {
-    // 1. 在大括号内获取锁并查询路径，确保锁在 await 之前被释放
     let path_opt = {
         let conn = pool.lock().unwrap();
-        let query = if img_type == "poster" { 
-            "SELECT poster_path FROM items WHERE id = ?1" 
-        } else { 
-            "SELECT fanart_path FROM items WHERE id = ?1" 
-        };
+        let query = if img_type == "poster" { "SELECT poster_path FROM items WHERE id = ?1" } else { "SELECT fanart_path FROM items WHERE id = ?1" };
         
         let mut stmt = conn.prepare(query).unwrap();
         let res: Result<String, _> = stmt.query_row([id], |row| row.get(0));
         res.ok()
     };
     
-    // 2. 锁已释放，可以安全地执行异步文件读取
     if let Some(path_str) = path_opt {
         if !path_str.is_empty() {
             if let Ok(bytes) = tokio::fs::read(&path_str).await {
                 let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
-                return (StatusCode::OK, [(axum::http::header::CONTENT_TYPE, mime)], bytes).into_response();
+                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
             }
         }
     }
@@ -347,10 +345,13 @@ pub async fn emby_playback_info(
     }
 }
 
+// 【终极版本】：带缓存机制解析 OpenList/网盘 直链
 pub async fn emby_stream(
     State(pool): State<Arc<Mutex<Connection>>>, 
-    AxumPath(item_id): AxumPath<i64>
+    AxumPath(item_id): AxumPath<i64>,
+    headers: HeaderMap, // 提取请求头，用于区分不同客户端
 ) -> Response {
+    // 1. 从数据库获取 .strm 文件的路径
     let path_opt = {
         let conn = pool.lock().unwrap();
         let mut stmt = conn.prepare("SELECT file_path FROM items WHERE id = ?1").unwrap();
@@ -358,13 +359,73 @@ pub async fn emby_stream(
         res.ok()
     };
 
-    if let Some(strm_path) = path_opt {
-        if let Ok(url) = tokio::fs::read_to_string(&strm_path).await {
-            let url = url.trim();
-            if url.starts_with("http") {
-                return (StatusCode::FOUND, [(LOCATION, url)], "").into_response();
+    let Some(strm_path) = path_opt else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    // 2. 读取 .strm 里的原始 URL
+    let Ok(url) = tokio::fs::read_to_string(&strm_path).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let url = url.trim().to_string();
+
+    if !url.starts_with("http") {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    // 3. 构建缓存 Key（结合 UA 和 IP，防止不同客户端互相干扰）
+    let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("unknown");
+    let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
+    let cache_key = format!("{}|{}|{}", url, ip, ua);
+
+    // 4. 检查缓存
+    let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    {
+        let mut cache_lock = cache.lock().unwrap();
+        if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) {
+            if Instant::now() < *expire_at {
+                // 缓存命中，直接返回 302
+                return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response();
+            } else {
+                cache_lock.remove(&cache_key);
+            }
+        }
+        // 防止内存泄漏清理：如果超过 512 个缓存，清理过期的
+        if cache_lock.len() > 512 {
+            cache_lock.retain(|_, (_, expire)| Instant::now() < *expire);
+        }
+    }
+
+    // 5. 缓存未命中，请求 OpenList 获取真实直链
+    let client = match reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none()) // 禁止自动跟随，捕获 302
+        .timeout(Duration::from_secs(15))
+        .build() {
+            Ok(c) => c,
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        };
+
+    let mut final_url = url.clone(); // 兜底策略：解析失败则返回原链接
+
+    if let Ok(resp) = client.get(&url)
+        .header(USER_AGENT, ua)
+        .send().await 
+    {
+        if resp.status().is_redirection() {
+            if let Some(location) = resp.headers().get("location") {
+                if let Ok(loc_str) = location.to_str() {
+                    final_url = loc_str.to_string();
+                }
             }
         }
     }
-    StatusCode::NOT_FOUND.into_response()
+
+    // 6. 写入缓存（有效期 5 秒）
+    {
+        let mut cache_lock = cache.lock().unwrap();
+        cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(5)));
+    }
+
+    // 7. 返回 302 给客户端
+    (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
 }
