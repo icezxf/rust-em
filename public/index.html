@@ -6,93 +6,136 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <title>Rust-Em</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .backdrop-blur-heavy {
+            backdrop-filter: blur(24px) brightness(0.3);
+            -webkit-backdrop-filter: blur(24px) brightness(0.3);
+        }
+        .media-card:hover .media-poster { transform: scale(1.05); }
+        .media-card:hover { box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.4); }
+    </style>
 </head>
-<body class="bg-gray-900 text-white font-sans h-screen flex flex-col md:flex-row overflow-hidden">
+<body class="bg-[#0f1115] text-gray-200 font-sans h-screen flex flex-col md:flex-row overflow-hidden">
     <!-- 登录页 -->
-    <div id="login-view" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 px-4">
-        <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-sm">
-            <h2 class="text-2xl mb-6 text-center font-bold text-blue-400">Rust-Em</h2>
-            <input id="username" type="text" placeholder="用户名" class="w-full p-3 mb-4 bg-gray-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
-            <input id="password" type="password" placeholder="密码" class="w-full p-3 mb-6 bg-gray-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500">
-            <button onclick="login()" class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold transition">登录</button>
+    <div id="login-view" class="fixed inset-0 z-50 flex items-center justify-center bg-[#0f1115] px-4">
+        <div class="bg-[#1a1d24] p-8 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-800">
+            <h2 class="text-2xl mb-8 text-center font-bold text-white tracking-wider">RUST-EM</h2>
+            <input id="username" type="text" placeholder="用户名" class="w-full p-3 mb-4 bg-[#0f1115] rounded-lg outline-none text-white border border-gray-700 focus:border-blue-500 transition-colors">
+            <input id="password" type="password" placeholder="密码" class="w-full p-3 mb-6 bg-[#0f1115] rounded-lg outline-none text-white border border-gray-700 focus:border-blue-500 transition-colors">
+            <button onclick="login()" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-lg font-bold text-white transition-colors">登录</button>
         </div>
     </div>
 
     <!-- 主界面 -->
     <div id="main-view" class="hidden flex-1 flex flex-col md:flex-row h-full">
         <!-- PC 侧边栏 -->
-        <div class="hidden md:flex w-64 bg-gray-800 p-4 flex-col border-r border-gray-700 overflow-y-auto">
-            <h1 class="text-xl font-bold mb-6 text-blue-400 px-2">🎬 Rust-Em</h1>
+        <div class="hidden md:flex w-64 bg-[#16191f] p-4 flex-col border-r border-gray-800 z-20">
+            <h1 class="text-xl font-bold mb-8 text-blue-500 px-2 flex items-center gap-2">
+                <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                Rust-Em
+            </h1>
             
-            <div class="text-xs text-gray-500 font-bold mb-2 px-2 uppercase tracking-wider">媒体库</div>
-            <div id="sidebar-libs" class="flex flex-col gap-1 mb-6">
-                <!-- 动态渲染侧边栏库列表 -->
-            </div>
-
-            <button onclick="switchTab('settings')" class="text-left px-4 py-3 hover:bg-gray-700 rounded-lg mb-2 transition mt-auto border-t border-gray-700">⚙️ 设置</button>
-            <button onclick="logout()" class="text-left px-4 py-3 text-red-400 hover:bg-gray-700 rounded-lg transition">🚪 退出登录</button>
+            <div class="text-xs text-gray-500 font-bold mb-3 px-2 uppercase tracking-wider">媒体库</div>
+            <div id="sidebar-libs" class="flex flex-col gap-1 mb-6 overflow-y-auto"></div>
+            
+            <button onclick="switchTab('settings')" class="flex items-center gap-3 text-left px-3 py-2.5 hover:bg-gray-800 rounded-lg mb-2 transition mt-auto text-gray-400 hover:text-white">
+                <span>⚙️</span> 系统设置
+            </button>
+            <button onclick="logout()" class="flex items-center gap-3 text-left px-3 py-2.5 text-red-400 hover:bg-gray-800 rounded-lg transition">
+                <span>🚪</span> 退出登录
+            </button>
         </div>
 
         <!-- 移动端顶栏 -->
-        <div class="md:hidden bg-gray-800 p-4 flex flex-col shadow-md z-10 sticky top-0">
-            <div class="flex justify-between items-center mb-3">
-                <h1 class="text-xl font-bold text-blue-400" id="mobile-title">媒体库</h1>
-                <button onclick="switchTab('settings')" class="text-gray-400 text-sm">⚙️ 设置</button>
+        <div class="md:hidden bg-[#16191f] px-4 py-3 flex flex-col shadow-md z-10 sticky top-0 border-b border-gray-800">
+            <div class="flex justify-between items-center mb-2">
+                <h1 class="text-lg font-bold text-blue-500" id="mobile-title">媒体库</h1>
+                <button onclick="switchTab('settings')" class="text-gray-400 text-sm">⚙️</button>
             </div>
-            <!-- 移动端横向滚动分类 -->
-            <div id="mobile-libs" class="flex overflow-x-auto gap-2 pb-1 no-scrollbar">
-                <!-- 动态渲染 -->
-            </div>
+            <div id="mobile-libs" class="flex overflow-x-auto gap-2 pb-1 no-scrollbar"></div>
         </div>
 
         <!-- 内容区 -->
-        <div class="flex-1 flex flex-col h-full overflow-hidden bg-gray-900">
-            <!-- 顶部分类(电影/电视)筛选 -->
-            <div id="content-header" class="hidden p-4 md:p-6 pb-2 shrink-0">
-                <div class="flex gap-2">
-                    <button onclick="setTypeFilter('all')" id="btn-type-all" class="px-4 py-1.5 rounded-full text-sm font-bold bg-blue-600 text-white transition">全部</button>
-                    <button onclick="setTypeFilter('movies')" id="btn-type-movies" class="px-4 py-1.5 rounded-full text-sm font-bold bg-gray-800 text-gray-400 hover:bg-gray-700 transition">电影</button>
-                    <button onclick="setTypeFilter('tvshows')" id="btn-type-tvshows" class="px-4 py-1.5 rounded-full text-sm font-bold bg-gray-800 text-gray-400 hover:bg-gray-700 transition">电视剧</button>
+        <div class="flex-1 flex flex-col h-full overflow-hidden bg-[#0f1115]">
+            <!-- 顶部分类筛选 -->
+            <div id="content-header" class="hidden p-4 md:px-8 md:pt-6 md:pb-2 shrink-0">
+                <div class="flex gap-3">
+                    <button onclick="setTypeFilter('all')" id="btn-type-all" class="px-5 py-1.5 rounded-full text-sm font-medium bg-blue-600 text-white transition shadow-lg shadow-blue-500/30">全部</button>
+                    <button onclick="setTypeFilter('movies')" id="btn-type-movies" class="px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700">电影</button>
+                    <button onclick="setTypeFilter('tvshows')" id="btn-type-tvshows" class="px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700">剧集</button>
                 </div>
             </div>
 
-            <!-- 媒体网格展示区 -->
-            <div id="tab-library" class="hidden flex-1 overflow-y-auto p-4 md:p-6">
-                <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-4"></div>
+            <!-- 媒体网格 -->
+            <div id="tab-library" class="hidden flex-1 overflow-y-auto p-4 md:px-8 md:py-4">
+                <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6"></div>
             </div>
 
             <!-- 设置视图 -->
-            <div id="tab-settings" class="hidden flex-1 overflow-y-auto p-4 md:p-6 pb-20">
-                <div class="max-w-2xl mx-auto">
-                    <!-- 媒体库列表管理 -->
-                    <div class="bg-gray-800 p-5 md:p-6 rounded-xl shadow-lg mb-6">
-                        <h3 class="text-lg font-bold mb-4 text-green-300 border-b border-gray-700 pb-2">已添加的媒体库</h3>
-                        <div id="settings-lib-list" class="flex flex-col gap-2 mb-4"></div>
-                    </div>
-
-                    <!-- 添加媒体库 -->
-                    <div class="bg-gray-800 p-5 md:p-6 rounded-xl shadow-lg mb-6">
-                        <h3 class="text-lg font-bold mb-4 text-blue-300 border-b border-gray-700 pb-2">添加新媒体库</h3>
-                        <input id="lib-name" placeholder="媒体库名称 (如: 电影)" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-blue-500">
-                        <select id="lib-type" class="p-3 mb-4 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="movies">电影</option>
-                            <option value="tvshows">电视剧</option>
-                        </select>
-                        <div class="mb-4">
-                            <label class="block text-sm text-gray-400 mb-2">已选路径/文件:</label>
-                            <div id="selected-paths" class="flex flex-col gap-2 mb-2"></div>
-                            <button onclick="openPathPicker()" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-sm transition w-full border border-gray-600 border-dashed">+ 添加路径或文件</button>
+            <div id="tab-settings" class="hidden flex-1 overflow-y-auto p-4 md:px-8 md:py-6 pb-20">
+                <div class="max-w-3xl mx-auto">
+                    <h2 class="text-2xl font-bold mb-6">系统设置</h2>
+                    
+                    <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
+                        <h3 class="text-lg font-bold mb-4 text-blue-400 border-b border-gray-800 pb-2">媒体库管理</h3>
+                        <div id="settings-lib-list" class="flex flex-col gap-3 mb-6"></div>
+                        
+                        <div class="border-t border-gray-800 pt-6">
+                            <h4 class="font-bold text-gray-300 mb-4">添加新媒体库</h4>
+                            <input id="lib-name" placeholder="媒体库名称 (如: 我的电影)" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none focus:border-blue-500 transition text-white">
+                            <select id="lib-type" class="p-3 mb-4 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none focus:border-blue-500 transition text-white">
+                                <option value="movies">电影</option>
+                                <option value="tvshows">电视剧</option>
+                            </select>
+                            <div class="mb-4">
+                                <label class="block text-sm text-gray-400 mb-2">已选路径:</label>
+                                <div id="selected-paths" class="flex flex-col gap-2 mb-3"></div>
+                                <button onclick="openPathPicker()" class="bg-gray-800 hover:bg-gray-700 px-4 py-2.5 rounded-lg text-sm transition w-full border border-gray-700 border-dashed text-gray-300">+ 浏览并添加路径</button>
+                            </div>
+                            <button onclick="addLibrary()" class="w-full bg-blue-600 hover:bg-blue-500 px-4 py-3 rounded-lg font-bold mt-2 transition text-white shadow-lg shadow-blue-500/20">保存并扫描</button>
                         </div>
-                        <button onclick="addLibrary()" class="w-full bg-green-600 hover:bg-green-700 px-4 py-3 rounded-lg font-bold mt-2 transition">保存并扫描</button>
                     </div>
 
-                    <!-- 修改管理员账号 -->
-                    <div class="bg-gray-800 p-5 md:p-6 rounded-xl shadow-lg mb-6">
-                        <h3 class="text-lg font-bold mb-4 text-yellow-300 border-b border-gray-700 pb-2">修改管理员账号</h3>
-                        <input id="old-pwd" type="password" placeholder="当前密码" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none">
-                        <input id="new-user" type="text" placeholder="新用户名" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none">
-                        <input id="new-pwd" type="password" placeholder="新密码" class="p-3 mb-4 bg-gray-700 rounded-lg w-full outline-none">
-                        <button onclick="updateUser()" class="w-full bg-yellow-600 hover:bg-yellow-700 px-4 py-3 rounded-lg font-bold transition">更新账号</button>
+                    <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
+                        <h3 class="text-lg font-bold mb-4 text-yellow-400 border-b border-gray-800 pb-2">修改管理员账号</h3>
+                        <input id="old-pwd" type="password" placeholder="当前密码" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none focus:border-yellow-500 text-white">
+                        <input id="new-user" type="text" placeholder="新用户名" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none focus:border-yellow-500 text-white">
+                        <input id="new-pwd" type="password" placeholder="新密码" class="p-3 mb-4 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none focus:border-yellow-500 text-white">
+                        <button onclick="updateUser()" class="w-full bg-yellow-600 hover:bg-yellow-500 px-4 py-3 rounded-lg font-bold transition text-white shadow-lg shadow-yellow-500/20">更新账号</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 沉浸式详情页 Modal -->
+    <div id="detail-modal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-black">
+        <div id="detail-fanart" class="fixed inset-0 bg-cover bg-center backdrop-blur-heavy transition-opacity duration-500"></div>
+        
+        <div class="relative min-h-screen flex flex-col justify-center items-center p-4 md:p-8">
+            <button onclick="closeDetail()" class="absolute top-4 right-4 md:top-8 md:right-8 text-white bg-black/50 hover:bg-black/80 p-3 rounded-full z-20 backdrop-blur-md transition">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+
+            <div class="max-w-5xl w-full flex flex-col md:flex-row gap-6 md:gap-10 items-center md:items-start bg-[#16191f]/80 backdrop-blur-xl p-6 md:p-10 rounded-3xl shadow-2xl border border-gray-700/50 z-10">
+                <div class="w-56 md:w-72 shrink-0 aspect-[2/3] bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border border-gray-600/50 relative group">
+                    <img id="detail-poster" src="" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzM3NDE1MSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjOWNhM2FmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg=='">
+                </div>
+                
+                <div class="flex-1 text-center md:text-left flex flex-col justify-center h-full pt-4 md:pt-2">
+                    <h1 id="detail-title" class="text-3xl md:text-5xl font-extrabold text-white mb-3 tracking-tight drop-shadow-lg">影片标题</h1>
+                    
+                    <div class="flex flex-wrap justify-center md:justify-start gap-3 mb-6 items-center">
+                        <span id="detail-year" class="text-gray-300 font-medium text-lg">2024</span>
+                        <span class="w-1.5 h-1.5 rounded-full bg-gray-600"></span>
+                        <span id="detail-type" class="border border-gray-500 text-gray-300 px-3 py-0.5 rounded text-sm font-medium">电影</span>
+                    </div>
+                    
+                    <div class="bg-black/30 rounded-xl p-5 border border-gray-800/50">
+                        <h3 class="text-gray-400 text-sm font-bold mb-2 uppercase tracking-wider">剧情简介</h3>
+                        <p id="detail-plot" class="text-gray-200 leading-relaxed max-h-48 md:max-h-64 overflow-y-auto pr-2 text-sm md:text-base">暂无简介...</p>
                     </div>
                 </div>
             </div>
@@ -100,34 +143,31 @@
     </div>
 
     <!-- 路径选择弹窗 -->
-    <div id="path-modal" class="hidden fixed inset-0 z-50 bg-black bg-opacity-75 flex items-end md:items-center justify-center">
-        <div class="bg-gray-800 w-full md:w-2/3 lg:w-1/2 md:rounded-xl rounded-t-xl shadow-2xl flex flex-col h-[85vh] md:h-[75vh]">
-            <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800 rounded-t-xl">
-                <h3 class="font-bold truncate text-sm md:text-base text-blue-300" id="current-path">/media</h3>
-                <button onclick="closePathPicker()" class="text-gray-400 hover:text-white px-2">✕</button>
+    <div id="path-modal" class="hidden fixed inset-0 z-[60] bg-black/80 flex items-end md:items-center justify-center backdrop-blur-sm">
+        <div class="bg-[#16191f] w-full md:w-2/3 lg:w-1/2 md:rounded-2xl rounded-t-2xl shadow-2xl flex flex-col h-[85vh] md:h-[75vh] border border-gray-700">
+            <div class="p-4 border-b border-gray-800 flex justify-between items-center bg-[#1a1d24] rounded-t-2xl">
+                <h3 class="font-bold truncate text-sm md:text-base text-blue-400" id="current-path">/media</h3>
+                <button onclick="closePathPicker()" class="text-gray-400 hover:text-white px-2 text-xl">✕</button>
             </div>
             <div id="dir-list" class="flex-1 overflow-y-auto p-2"></div>
-            <div class="p-4 border-t border-gray-700 flex gap-2">
-                <button onclick="selectCurrentPath()" class="flex-1 bg-blue-600 hover:bg-blue-700 py-3 rounded-lg font-bold">选中当前文件夹并关闭</button>
-                <button onclick="closePathPicker()" class="flex-1 bg-green-600 hover:bg-green-700 py-3 rounded-lg font-bold">确认勾选并关闭</button>
+            <div class="p-4 border-t border-gray-800 flex gap-3 bg-[#1a1d24] rounded-b-2xl">
+                <button onclick="selectCurrentPath()" class="flex-1 bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold text-white transition">选中当前目录</button>
+                <button onclick="closePathPicker()" class="flex-1 bg-gray-700 hover:bg-gray-600 py-3 rounded-xl font-bold text-white transition">确认勾选</button>
             </div>
         </div>
     </div>
-
-    <style>
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-    </style>
 
     <script>
         let token = localStorage.getItem('token');
         let currentPath = '/media';
         let selectedPaths = [];
-        let allLibraries = []; // 存储所有库信息
+        let allLibraries = [];
         
-        // 状态筛选
         let currentLibId = 'all';
         let currentType = 'all';
+        let cachedItems = [];
+
+        const defaultPosterSvg = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzFhMWQyNCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjNGI1NTYzIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg==';
 
         if (token) showMain();
 
@@ -161,7 +201,7 @@
         async function showMain() {
             document.getElementById('login-view').classList.add('hidden');
             document.getElementById('main-view').classList.remove('hidden');
-            await fetchLibraries(); // 先获取库列表
+            await fetchLibraries();
             switchTab('library');
         }
         
@@ -180,8 +220,6 @@
             }
         }
 
-        // ================= 库列表与筛选逻辑 =================
-        
         async function fetchLibraries() {
             const data = await api('/api/libraries');
             if (data.libraries) {
@@ -194,23 +232,20 @@
             const desktopContainer = document.getElementById('sidebar-libs');
             const mobileContainer = document.getElementById('mobile-libs');
             
-            let html = `<button onclick="setLibraryFilter('all')" class="text-left px-3 py-2 rounded-lg transition ${currentLibId === 'all' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-gray-700 text-gray-300'}">全部媒体</button>`;
-            
+            let html = `<button onclick="setLibraryFilter('all')" class="flex items-center gap-3 text-left px-3 py-2.5 rounded-lg transition ${currentLibId === 'all' ? 'bg-gray-800 text-white font-medium shadow-sm' : 'hover:bg-gray-800/50 text-gray-400'}">全部媒体</button>`;
             allLibraries.forEach(lib => {
                 const isActive = currentLibId === lib.id;
-                const cls = isActive ? 'bg-blue-600 text-white font-bold' : 'hover:bg-gray-700 text-gray-300';
+                const cls = isActive ? 'bg-gray-800 text-white font-medium shadow-sm' : 'hover:bg-gray-800/50 text-gray-400';
                 const icon = lib.type === 'movies' ? '🎬' : '📺';
-                html += `<button onclick="setLibraryFilter(${lib.id})" class="text-left px-3 py-2 rounded-lg transition truncate ${cls}">${icon} ${lib.name}</button>`;
+                html += `<button onclick="setLibraryFilter(${lib.id})" class="flex items-center gap-3 text-left px-3 py-2.5 rounded-lg transition truncate ${cls}"><span>${icon}</span> <span class="truncate">${lib.name}</span></button>`;
             });
-
             desktopContainer.innerHTML = html;
             
-            // 移动端渲染成横向滑动形式
-            let mobileHtml = `<button onclick="setLibraryFilter('all')" class="whitespace-nowrap px-3 py-1.5 rounded-full text-sm ${currentLibId === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'}">全部</button>`;
+            let mobileHtml = `<button onclick="setLibraryFilter('all')" class="whitespace-nowrap px-4 py-1.5 rounded-full text-sm ${currentLibId === 'all' ? 'bg-blue-600 text-white' : 'bg-[#0f1115] text-gray-400 border border-gray-700'}">全部</button>`;
             allLibraries.forEach(lib => {
                 const isActive = currentLibId === lib.id;
-                const cls = isActive ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300';
-                mobileHtml += `<button onclick="setLibraryFilter(${lib.id})" class="whitespace-nowrap px-3 py-1.5 rounded-full text-sm ${cls}">${lib.name}</button>`;
+                const cls = isActive ? 'bg-blue-600 text-white' : 'bg-[#0f1115] text-gray-400 border border-gray-700';
+                mobileHtml += `<button onclick="setLibraryFilter(${lib.id})" class="whitespace-nowrap px-4 py-1.5 rounded-full text-sm ${cls}">${lib.name}</button>`;
             });
             mobileContainer.innerHTML = mobileHtml;
         }
@@ -223,17 +258,14 @@
 
         function setTypeFilter(type) {
             currentType = type;
-            
-            // 更新按钮样式
             ['all', 'movies', 'tvshows'].forEach(t => {
                 const btn = document.getElementById(`btn-type-${t}`);
                 if (t === type) {
-                    btn.className = 'px-4 py-1.5 rounded-full text-sm font-bold bg-blue-600 text-white transition';
+                    btn.className = 'px-5 py-1.5 rounded-full text-sm font-medium bg-blue-600 text-white transition shadow-lg shadow-blue-500/30';
                 } else {
-                    btn.className = 'px-4 py-1.5 rounded-full text-sm font-bold bg-gray-800 text-gray-400 hover:bg-gray-700 transition';
+                    btn.className = 'px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700';
                 }
             });
-            
             loadMedia();
         }
 
@@ -243,28 +275,39 @@
                 if (currentLibId !== 'all') url += `library_id=${currentLibId}&`;
                 if (currentType !== 'all') url += `lib_type=${currentType}`;
 
-                const data = await api(url);
                 const grid = document.getElementById('media-grid');
+                grid.innerHTML = Array(12).fill(`
+                    <div class="animate-pulse bg-[#16191f] rounded-xl overflow-hidden aspect-[2/3]">
+                        <div class="w-full h-full bg-gray-800/50"></div>
+                    </div>
+                `).join('');
+
+                const data = await api(url);
                 
                 if (!data.items || data.items.length === 0) {
-                    grid.innerHTML = `<div class="col-span-full text-center text-gray-500 mt-10">该分类下暂无媒体。</div>`;
+                    grid.innerHTML = `<div class="col-span-full flex flex-col items-center justify-center text-gray-500 mt-20">
+                        <svg class="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"></path></svg>
+                        该分类下暂无媒体内容
+                    </div>`;
+                    cachedItems = [];
                     return;
                 }
                 
+                cachedItems = data.items;
+
                 grid.innerHTML = data.items.map(item => {
-                    const imgUrl = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : '';
-                    const posterHtml = imgUrl 
-                        ? `<img src="${imgUrl}" class="w-full h-full object-cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-                           <div class="hidden w-full h-full items-center justify-center text-gray-500 text-sm">加载失败</div>`
-                        : `<div class="w-full h-full flex items-center justify-center text-gray-500 text-sm">无封面</div>`;
+                    const imgUrl = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
 
                     return `
-                    <div class="bg-gray-800 p-2 rounded-lg shadow hover:ring-2 ring-blue-500 cursor-pointer transition" title="${item.plot || '无简介'}">
-                        <div class="bg-gray-700 aspect-[2/3] mb-2 rounded overflow-hidden">
-                            ${posterHtml}
+                    <div onclick="openDetail(${item.id})" class="media-card bg-[#16191f] rounded-xl overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1 relative group border border-gray-800/50">
+                        <div class="bg-gray-800 aspect-[2/3] overflow-hidden">
+                            <img src="${imgUrl}" class="media-poster w-full h-full object-cover transition-transform duration-500" onerror="this.src='${defaultPosterSvg}'">
+                            <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                         </div>
-                        <div class="font-bold text-sm truncate">${item.title}</div>
-                        <div class="text-xs text-gray-400 mt-1">${item.year || (item.type === 'movies' ? '电影' : '剧集')}</div>
+                        <div class="absolute bottom-0 w-full p-3 transform translate-y-2 group-hover:translate-y-0 transition-transform duration-300">
+                            <div class="font-bold text-white text-sm truncate drop-shadow-md">${item.title}</div>
+                            <div class="text-xs text-gray-300 mt-1">${item.year || (item.type === 'movies' ? '电影' : '剧集')}</div>
+                        </div>
                     </div>
                 `}).join('');
             } catch (e) {
@@ -272,69 +315,89 @@
             }
         }
 
-        // ================= 设置页：库管理 =================
-        
+        function openDetail(itemId) {
+            const item = cachedItems.find(i => i.id === itemId);
+            if (!item) return;
+
+            document.getElementById('detail-title').innerText = item.title;
+            document.getElementById('detail-year').innerText = item.year || '未知';
+            document.getElementById('detail-type').innerText = item.type === 'movies' ? '电影' : '剧集';
+            document.getElementById('detail-plot').innerText = item.plot || '暂无简介。您可以尝试在目录下添加同名的 NFO 文件，或者重新扫描媒体库以获取更多信息。';
+            
+            const posterImg = document.getElementById('detail-poster');
+            posterImg.src = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
+
+            const fanartDiv = document.getElementById('detail-fanart');
+            if (item.has_poster) {
+                fanartDiv.style.backgroundImage = `url('/api/images/${item.id}/fanart?token=${token}')`;
+            } else {
+                fanartDiv.style.backgroundImage = 'none';
+            }
+
+            document.getElementById('detail-modal').classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeDetail() {
+            document.getElementById('detail-modal').classList.add('hidden');
+            document.body.style.overflow = 'auto';
+        }
+
         function renderSettingsLibraries() {
             const container = document.getElementById('settings-lib-list');
             if (allLibraries.length === 0) {
-                container.innerHTML = `<div class="text-gray-500 text-sm">暂无媒体库</div>`;
+                container.innerHTML = `<div class="text-gray-500 text-sm py-2">暂无已添加的媒体库</div>`;
                 return;
             }
             container.innerHTML = allLibraries.map(lib => `
-                <div class="flex justify-between items-center bg-gray-700 p-3 rounded-lg">
-                    <div class="flex items-center gap-2 truncate">
-                        <span>${lib.type === 'movies' ? '🎬' : '📺'}</span>
-                        <span class="font-bold">${lib.name}</span>
-                        <span class="text-xs text-gray-400">(${lib.type === 'movies' ? '电影' : '电视剧'})</span>
+                <div class="flex justify-between items-center bg-[#0f1115] border border-gray-800 p-3 rounded-xl">
+                    <div class="flex items-center gap-3 truncate">
+                        <span class="text-lg">${lib.type === 'movies' ? '🎬' : '📺'}</span>
+                        <span class="font-medium text-gray-200">${lib.name}</span>
+                        <span class="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded">${lib.type === 'movies' ? '电影' : '剧集'}</span>
                     </div>
                     <div class="flex gap-2 shrink-0">
-                        <button onclick="rescanLibrary(${lib.id})" class="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm transition">重新扫描</button>
-                        <button onclick="deleteLibrary(${lib.id}, '${lib.name}')" class="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm transition">删除</button>
+                        <button onclick="rescanLibrary(${lib.id})" class="text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-1.5 rounded-lg text-sm transition border border-blue-500/20">刷新</button>
+                        <button onclick="deleteLibrary(${lib.id}, '${lib.name}')" class="text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 px-3 py-1.5 rounded-lg text-sm transition border border-red-500/20">删除</button>
                     </div>
                 </div>
             `).join('');
         }
 
         async function deleteLibrary(id, name) {
-            if (!confirm(`确定要删除媒体库【${name}】及其所有媒体记录吗？`)) return;
+            if (!confirm(`⚠️ 确定要删除媒体库【${name}】吗？这将移除库内所有数据，但不会删除本地文件。`)) return;
             await api(`/api/libraries/${id}`, 'DELETE');
-            await fetchLibraries(); // 刷新数据
+            await fetchLibraries();
             renderSettingsLibraries();
         }
 
         async function rescanLibrary(id) {
             const btn = event.target;
-            btn.innerText = '扫描中...';
-            btn.disabled = true;
+            const originalText = btn.innerText;
+            btn.innerText = '扫描中...'; btn.disabled = true; btn.classList.add('opacity-50');
             await api(`/api/libraries/${id}/scan`, 'POST');
             setTimeout(() => {
-                btn.innerText = '重新扫描';
-                btn.disabled = false;
-                alert('扫描任务已在后台启动，请稍后在媒体库刷新查看。');
+                btn.innerText = originalText; btn.disabled = false; btn.classList.remove('opacity-50');
+                alert('扫描任务已在后台启动，请稍后刷新列表查看。');
             }, 1000);
         }
-
-        // ================= 添加媒体库 =================
 
         async function openPathPicker() {
             document.getElementById('path-modal').classList.remove('hidden');
             await browseDir(currentPath);
         }
-        function closePathPicker() {
-            document.getElementById('path-modal').classList.add('hidden');
-        }
+        function closePathPicker() { document.getElementById('path-modal').classList.add('hidden'); }
 
         async function browseDir(path) {
             const list = document.getElementById('dir-list');
-            list.innerHTML = `<div class="p-4 text-center text-gray-500">加载中...</div>`;
+            list.innerHTML = `<div class="p-4 text-center text-gray-500 animate-pulse">加载中...</div>`;
             const url = `/api/browse?path=${encodeURIComponent(path)}&t=${Date.now()}`;
             const res = await api(url, "GET");
 
             if (res.error) {
-                list.innerHTML = `<div class="p-4 text-center text-red-500 text-sm font-bold bg-red-900 bg-opacity-20 rounded">错误:<br>${res.error}</div>`;
+                list.innerHTML = `<div class="p-4 text-center text-red-400 text-sm font-bold bg-red-900/20 rounded-lg">读取失败: ${res.error}</div>`;
                 return;
             }
-
             currentPath = res.current || path;
             document.getElementById('current-path').innerText = currentPath;
             list.innerHTML = '';
@@ -342,7 +405,7 @@
             if (currentPath !== '/media') {
                 const parent = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/media';
                 const backBtn = document.createElement('div');
-                backBtn.className = "p-3 border-b border-gray-700 cursor-pointer hover:bg-gray-700 flex items-center text-gray-400 font-bold";
+                backBtn.className = "p-3 border-b border-gray-800 cursor-pointer hover:bg-gray-800 flex items-center text-gray-400 font-medium transition";
                 backBtn.innerHTML = "⬅ 返回上一级";
                 backBtn.onclick = () => browseDir(parent);
                 list.appendChild(backBtn);
@@ -351,108 +414,74 @@
             if (res.dirs && res.dirs.length > 0) {
                 res.dirs.forEach(d => {
                     const row = document.createElement('div');
-                    row.className = "p-3 border-b border-gray-700 flex justify-between items-center hover:bg-gray-700 cursor-pointer transition";
-                    row.onclick = (e) => {
-                        if (e.target.tagName === 'INPUT') return;
-                        browseDir(d.path);
-                    };
+                    row.className = "p-3 border-b border-gray-800 flex justify-between items-center hover:bg-gray-800 cursor-pointer transition";
+                    row.onclick = (e) => { if (e.target.tagName === 'INPUT') return; browseDir(d.path); };
                     const leftArea = document.createElement('div');
                     leftArea.className = "flex items-center flex-1 overflow-hidden pointer-events-none";
-                    leftArea.innerHTML = `<span class="text-yellow-500 mr-2">📁</span> <span class="truncate">${d.name}</span>`;
+                    leftArea.innerHTML = `<span class="text-yellow-500 mr-3">📁</span> <span class="truncate">${d.name}</span>`;
                     const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.className = "w-5 h-5 accent-blue-500 cursor-pointer flex-shrink-0 ml-2";
+                    checkbox.type = 'checkbox'; checkbox.className = "w-5 h-5 accent-blue-500 cursor-pointer flex-shrink-0 ml-2";
                     checkbox.checked = selectedPaths.includes(d.path);
                     checkbox.onchange = (e) => togglePath(d.path, e.target.checked);
-                    row.appendChild(leftArea);
-                    row.appendChild(checkbox);
-                    list.appendChild(row);
+                    row.appendChild(leftArea); row.appendChild(checkbox); list.appendChild(row);
                 });
             }
 
             if (res.files && res.files.length > 0) {
                 res.files.forEach(f => {
                     const row = document.createElement('div');
-                    row.className = "p-3 border-b border-gray-700 flex justify-between items-center hover:bg-gray-700 transition";
+                    row.className = "p-3 border-b border-gray-800 flex justify-between items-center hover:bg-gray-800 transition";
                     row.onclick = (e) => {
                         if (e.target.tagName === 'INPUT') return;
                         const cb = row.querySelector('input[type="checkbox"]');
-                        cb.checked = !cb.checked;
-                        togglePath(f.path, cb.checked);
+                        cb.checked = !cb.checked; togglePath(f.path, cb.checked);
                     };
                     const leftArea = document.createElement('div');
-                    leftArea.className = "flex items-center flex-1 overflow-hidden pointer-events-none text-gray-300";
-                    leftArea.innerHTML = `<span class="text-blue-400 mr-2">📄</span> <span class="truncate">${f.name}</span>`;
+                    leftArea.className = "flex items-center flex-1 overflow-hidden pointer-events-none text-gray-400";
+                    leftArea.innerHTML = `<span class="text-blue-500 mr-3">📄</span> <span class="truncate">${f.name}</span>`;
                     const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.className = "w-5 h-5 accent-blue-500 cursor-pointer flex-shrink-0 ml-2";
+                    checkbox.type = 'checkbox'; checkbox.className = "w-5 h-5 accent-blue-500 cursor-pointer flex-shrink-0 ml-2";
                     checkbox.checked = selectedPaths.includes(f.path);
                     checkbox.onchange = (e) => togglePath(f.path, e.target.checked);
-                    row.appendChild(leftArea);
-                    row.appendChild(checkbox);
-                    list.appendChild(row);
+                    row.appendChild(leftArea); row.appendChild(checkbox); list.appendChild(row);
                 });
-            }
-
-            if ((!res.dirs || res.dirs.length === 0) && (!res.files || res.files.length === 0)) {
-                const emptyMsg = document.createElement('div');
-                emptyMsg.className = "p-6 text-center text-gray-400";
-                emptyMsg.innerText = "当前目录下什么都没有。";
-                list.appendChild(emptyMsg);
             }
         }
 
         function togglePath(path, isChecked) {
-            if (isChecked) {
-                if (!selectedPaths.includes(path)) selectedPaths.push(path);
-            } else {
-                selectedPaths = selectedPaths.filter(p => p !== path);
-            }
+            if (isChecked) { if (!selectedPaths.includes(path)) selectedPaths.push(path); }
+            else { selectedPaths = selectedPaths.filter(p => p !== path); }
             renderSelectedPaths();
         }
 
         function selectCurrentPath() {
-            if (!selectedPaths.includes(currentPath)) {
-                selectedPaths.push(currentPath);
-                renderSelectedPaths();
-            }
+            if (!selectedPaths.includes(currentPath)) { selectedPaths.push(currentPath); renderSelectedPaths(); }
             closePathPicker();
         }
 
         function renderSelectedPaths() {
             const container = document.getElementById('selected-paths');
-            if (selectedPaths.length === 0) {
-                container.innerHTML = `<div class="text-gray-500 text-sm italic">暂无路径</div>`;
-                return;
-            }
+            if (selectedPaths.length === 0) { container.innerHTML = `<div class="text-gray-600 text-sm italic mb-2">暂未选择任何路径</div>`; return; }
             container.innerHTML = selectedPaths.map(p => `
-                <div class="flex justify-between items-center bg-gray-700 p-2 rounded text-sm">
-                    <span class="truncate mr-2" title="${p}">${p}</span>
-                    <button onclick="removePath('${p}')" class="text-red-400 hover:text-red-300 px-2">删除</button>
+                <div class="flex justify-between items-center bg-[#1a1d24] border border-gray-700 p-2.5 rounded-lg text-sm mb-2">
+                    <span class="truncate mr-2 text-gray-300" title="${p}">${p}</span>
+                    <button onclick="removePath('${p}')" class="text-red-400 hover:text-red-300 px-2 transition">移除</button>
                 </div>
             `).join('');
         }
 
-        function removePath(path) {
-            selectedPaths = selectedPaths.filter(p => p !== path);
-            renderSelectedPaths();
-        }
+        function removePath(path) { selectedPaths = selectedPaths.filter(p => p !== path); renderSelectedPaths(); }
 
         async function addLibrary() {
             const name = document.getElementById('lib-name').value;
             const type = document.getElementById('lib-type').value;
-            if (!name || selectedPaths.length === 0) return alert('请填写名称并至少选择一个路径或文件');
-            
+            if (!name || selectedPaths.length === 0) return alert('请填写名称并至少选择一个路径');
             const res = await api('/api/libraries', 'POST', { name, paths: selectedPaths, type });
             if (res.error) return alert(res.error);
-            
-            alert('媒体库已保存，后台开始扫描...');
-            selectedPaths = [];
-            renderSelectedPaths();
+            alert('媒体库已保存，后台开始扫描。大目录可能需要一些时间，请稍后刷新。');
+            selectedPaths = []; renderSelectedPaths();
             document.getElementById('lib-name').value = '';
-            await fetchLibraries();
-            renderSettingsLibraries();
-            switchTab('library');
+            await fetchLibraries(); renderSettingsLibraries(); switchTab('library');
         }
 
         async function updateUser() {
@@ -460,14 +489,9 @@
             const newUser = document.getElementById('new-user').value;
             const newPwd = document.getElementById('new-pwd').value;
             if (!oldPwd || !newUser || !newPwd) return alert('请填写完整所有选项');
-            
             const res = await api('/api/user/update', 'POST', { old_password: oldPwd, new_username: newUser, new_password: newPwd });
-            if (res && res.status === 'success') {
-                alert('账号修改成功！请使用新账号重新登录。');
-                logout();
-            } else if (res && res.error) {
-                alert(res.error);
-            }
+            if (res && res.status === 'success') { alert('账号修改成功！请使用新账号重新登录。'); logout(); }
+            else if (res && res.error) { alert(res.error); }
         }
     </script>
 </body>
