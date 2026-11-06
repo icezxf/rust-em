@@ -156,6 +156,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         let mut directors = String::new(); let mut actors_json = String::new();
         let mut runtime = 0; let mut premiered = String::new(); let mut tagline = String::new();
         let mut studios = String::new(); let mut tmdb_id = String::new(); let mut imdb_id = String::new();
+        let mut series = String::new(); let mut label = String::new(); let mut set_name = String::new();
         let mut nfo_poster = String::new(); let mut nfo_fanart = String::new();
 
         for nfo in nfo_candidates {
@@ -169,11 +170,14 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                     if let Some(rt) = meta.runtime { runtime = rt; }
                     if let Some(pr) = meta.premiered { premiered = pr; }
                     if let Some(tg) = meta.tagline { tagline = tg; }
+                    if let Some(s) = meta.series { series = s; }
+                    if let Some(l) = meta.label { label = l; }
+                    if let Some(set) = meta.set { if let Some(n) = set.name { set_name = n; } }
+                    
                     if !meta.genres.is_empty() { genres = meta.genres.join(" / "); }
                     if !meta.directors.is_empty() { directors = meta.directors.join(" / "); }
                     if !meta.studios.is_empty() { studios = meta.studios.join(" / "); }
                     
-                    // 演员解析为 JSON
                     let actors_arr: Vec<Value> = meta.actors.into_iter().filter(|a| a.name.is_some()).map(|a| json!({
                         "name": a.name.unwrap_or_default(),
                         "role": a.role.unwrap_or_default(),
@@ -187,8 +191,25 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                             if t.to_lowercase() == "imdb" { imdb_id = uid.text.clone(); }
                         }
                     }
-                    if let Some(thumb) = meta.thumbs.first() { nfo_poster = thumb.text.clone(); }
-                    if let Some(fanart) = meta.fanart { if let Some(thumb) = fanart.thumbs.first() { nfo_fanart = thumb.text.clone(); } }
+
+                    let resolve_path = |p: &str| -> String {
+                        if p.is_empty() { return String::new(); }
+                        if p.starts_with("http") || p.starts_with("/") { return p.to_string(); }
+                        parent.join(p).to_string_lossy().to_string()
+                    };
+
+                    if let Some(poster) = meta.poster { nfo_poster = resolve_path(&poster); }
+                    else if let Some(cover) = meta.cover { nfo_poster = resolve_path(&cover); }
+                    else if let Some(thumb) = meta.thumbs.first() { nfo_poster = resolve_path(&thumb.text); }
+
+                    if let Some(fanart) = meta.fanart {
+                        match fanart {
+                            crate::nfo::NfoFanartType::Str(s) => nfo_fanart = resolve_path(&s),
+                            crate::nfo::NfoFanartType::Obj(obj) => {
+                                if let Some(thumb) = obj.thumbs.first() { nfo_fanart = resolve_path(&thumb.text); }
+                            }
+                        }
+                    }
                     break;
                 }
             }
@@ -220,11 +241,11 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         {
             let conn = match pool.lock() { Ok(c) => c, Err(_) => continue };
             let _ = conn.execute(
-                "INSERT INTO items (library_id, title, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime, rating, mpaa, genres, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id) 
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
+                "INSERT INTO items (library_id, title, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime, rating, mpaa, genres, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name) 
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
                  ON CONFLICT(file_path) DO UPDATE SET 
-                 title=excluded.title, size=excluded.size, mtime=excluded.mtime, plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, thumb_path=excluded.thumb_path, banner_path=excluded.banner_path, rating=excluded.rating, mpaa=excluded.mpaa, genres=excluded.genres, directors=excluded.directors, actors=excluded.actors, runtime=excluded.runtime, premiered=excluded.premiered, tagline=excluded.tagline, studios=excluded.studios, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id",
-                rusqlite::params![lib_id, title, path_str, lib_type, plot, year, final_poster, final_fanart, logo, thumb, banner, size, mtime, rating, mpaa, genres, directors, actors_json, runtime, premiered, tagline, studios, tmdb_id, imdb_id]
+                 title=excluded.title, size=excluded.size, mtime=excluded.mtime, plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, thumb_path=excluded.thumb_path, banner_path=excluded.banner_path, rating=excluded.rating, mpaa=excluded.mpaa, genres=excluded.genres, directors=excluded.directors, actors=excluded.actors, runtime=excluded.runtime, premiered=excluded.premiered, tagline=excluded.tagline, studios=excluded.studios, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, series=excluded.series, label=excluded.label, set_name=excluded.set_name",
+                rusqlite::params![lib_id, title, path_str, lib_type, plot, year, final_poster, final_fanart, logo, thumb, banner, size, mtime, rating, mpaa, genres, directors, actors_json, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name]
             );
         }
     }
@@ -235,7 +256,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
 pub struct ItemQuery { library_id: Option<i64>, lib_type: Option<String> }
 pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<ItemQuery>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, rating, mpaa, genres, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, size FROM items WHERE 1=1".to_string();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, rating, mpaa, genres, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, size, series, label, set_name FROM items WHERE 1=1".to_string();
     if let Some(lid) = query.library_id { sql.push_str(&format!(" AND library_id = {}", lid)); }
     if let Some(lt) = query.lib_type { sql.push_str(&format!(" AND type = '{}'", lt)); }
     sql.push_str(" ORDER BY title ASC");
@@ -253,7 +274,9 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
             "actors": actors, "runtime": row.get::<_, i32>(11).unwrap_or(0),
             "premiered": row.get::<_, String>(12).unwrap_or_default(), "tagline": row.get::<_, String>(13).unwrap_or_default(),
             "studios": row.get::<_, String>(14).unwrap_or_default(), "tmdb_id": row.get::<_, String>(15).unwrap_or_default(),
-            "imdb_id": row.get::<_, String>(16).unwrap_or_default(), "size": row.get::<_, i64>(17).unwrap_or(0)
+            "imdb_id": row.get::<_, String>(16).unwrap_or_default(), "size": row.get::<_, i64>(17).unwrap_or(0),
+            "series": row.get::<_, String>(18).unwrap_or_default(), "label": row.get::<_, String>(19).unwrap_or_default(),
+            "set_name": row.get::<_, String>(20).unwrap_or_default()
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "items": items }))
@@ -433,7 +456,7 @@ pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(it
     let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     let cache_key = format!("{}|{}|{}", url, ip, ua);
     let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    { let cache_lock = cache.lock().unwrap(); if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) { if Instant::now() < *expire_at { return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); } } }
+    { let mut cache_lock = cache.lock().unwrap(); if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) { if Instant::now() < *expire_at { return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); } } }
     let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(15)).build().unwrap();
     let mut final_url = url.to_string();
     if let Ok(resp) = client.get(url).header(USER_AGENT, ua).send().await {
