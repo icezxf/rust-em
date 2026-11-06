@@ -49,35 +49,19 @@ pub fn read_nfo(path: &std::path::Path) -> Option<NfoMovie> {
                     current_actor = Some(NfoActor::default());
                 }
             }
-            Ok(Event::Text(e)) | Ok(Event::CData(e)) => {
-                let text = e.decode().unwrap_or_default().trim().to_string();
-                if !text.is_empty() {
-                    match current_tag.as_str() {
-                        "title" => movie.title = Some(text),
-                        "plot" => movie.plot = Some(text),
-                        "year" => movie.year = Some(text),
-                        "premiered" => movie.premiered = Some(text),
-                        "runtime" => movie.runtime = text.parse::<i32>().ok(),
-                        "rating" => movie.rating = text.parse::<f64>().ok(),
-                        "mpaa" => movie.mpaa = Some(text),
-                        "tagline" => movie.tagline = Some(text),
-                        "series" => movie.series = Some(text),
-                        "label" => movie.label = Some(text),
-                        "set" => movie.set = Some(text),
-                        "poster" | "cover" => movie.poster = Some(text),
-                        "fanart" => movie.fanart = Some(text),
-                        "genre" => movie.genres.push(text),
-                        "director" => movie.directors.push(text),
-                        "studio" => movie.studios.push(text),
-                        "tmdbid" => movie.unique_ids.push(("tmdb".to_string(), text)),
-                        "imdbid" => movie.unique_ids.push(("imdb".to_string(), text)),
-                        "name" => { if let Some(actor) = current_actor.as_mut() { actor.name = Some(text); } }
-                        "role" => { if let Some(actor) = current_actor.as_mut() { actor.role = Some(text); } }
-                        "thumb" => {
-                            if let Some(actor) = current_actor.as_mut() { actor.thumb = Some(text); }
-                            else if movie.poster.is_none() { movie.poster = Some(text); }
-                        }
-                        _ => {}
+            Ok(Event::Text(e)) => {
+                if let Ok(decoded) = e.unescape() {
+                    let text = decoded.trim().to_string();
+                    if !text.is_empty() {
+                        process_text(&text, &current_tag, &mut movie, &mut current_actor);
+                    }
+                }
+            }
+            Ok(Event::CData(e)) => {
+                if let Ok(decoded) = e.decode() {
+                    let text = decoded.trim().to_string();
+                    if !text.is_empty() {
+                        process_text(&text, &current_tag, &mut movie, &mut current_actor);
                     }
                 }
             }
@@ -88,7 +72,7 @@ pub fn read_nfo(path: &std::path::Path) -> Option<NfoMovie> {
                         if actor.name.is_some() { movie.actors.push(actor); }
                     }
                 }
-                current_tag.clear(); // 离开标签后清空，防止误判
+                current_tag.clear();
             }
             Ok(Event::Eof) => break,
             Err(_) => return None,
@@ -97,4 +81,34 @@ pub fn read_nfo(path: &std::path::Path) -> Option<NfoMovie> {
         buf.clear();
     }
     Some(movie)
+}
+
+fn process_text(text: &str, tag: &str, movie: &mut NfoMovie, current_actor: &mut Option<NfoActor>) {
+    match tag {
+        "title" => movie.title = Some(text.to_string()),
+        "plot" => movie.plot = Some(text.to_string()),
+        "year" => movie.year = Some(text.to_string()),
+        "premiered" => movie.premiered = Some(text.to_string()),
+        "runtime" => movie.runtime = text.parse::<i32>().ok(),
+        "rating" => movie.rating = text.parse::<f64>().ok(),
+        "mpaa" => movie.mpaa = Some(text.to_string()),
+        "tagline" => movie.tagline = Some(text.to_string()),
+        "series" => movie.series = Some(text.to_string()),
+        "label" => movie.label = Some(text.to_string()),
+        "set" => movie.set = Some(text.to_string()),
+        "poster" | "cover" => movie.poster = Some(text.to_string()),
+        "fanart" => movie.fanart = Some(text.to_string()),
+        "genre" => movie.genres.push(text.to_string()),
+        "director" => movie.directors.push(text.to_string()),
+        "studio" => movie.studios.push(text.to_string()),
+        "tmdbid" => movie.unique_ids.push(("tmdb".to_string(), text.to_string())),
+        "imdbid" => movie.unique_ids.push(("imdb".to_string(), text.to_string())),
+        "name" => { if let Some(actor) = current_actor.as_mut() { actor.name = Some(text.to_string()); } }
+        "role" => { if let Some(actor) = current_actor.as_mut() { actor.role = Some(text.to_string()); } }
+        "thumb" => {
+            if let Some(actor) = current_actor.as_mut() { actor.thumb = Some(text.to_string()); }
+            else if movie.poster.is_none() { movie.poster = Some(text.to_string()); }
+        }
+        _ => {}
+    }
 }
