@@ -32,11 +32,13 @@
             <div id="tab-library" class="hidden">
                 <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-4"></div>
             </div>
+            
             <div id="tab-settings" class="hidden max-w-2xl mx-auto">
+                <!-- 添加媒体库 -->
                 <div class="bg-gray-800 p-5 md:p-6 rounded-xl shadow-lg mb-6">
                     <h3 class="text-lg font-bold mb-4 text-blue-300 border-b border-gray-700 pb-2">添加媒体库</h3>
-                    <input id="lib-name" placeholder="媒体库名称" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none">
-                    <select id="lib-type" class="p-3 mb-4 bg-gray-700 rounded-lg w-full outline-none">
+                    <input id="lib-name" placeholder="媒体库名称 (如: 电影)" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-blue-500">
+                    <select id="lib-type" class="p-3 mb-4 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-blue-500">
                         <option value="movies">电影</option>
                         <option value="tvshows">电视剧</option>
                     </select>
@@ -47,7 +49,17 @@
                     </div>
                     <button onclick="addLibrary()" class="w-full bg-green-600 hover:bg-green-700 px-4 py-3 rounded-lg font-bold mt-2 transition">保存并扫描</button>
                 </div>
+
+                <!-- 修改管理员账号 (已找回) -->
+                <div class="bg-gray-800 p-5 md:p-6 rounded-xl shadow-lg mb-6">
+                    <h3 class="text-lg font-bold mb-4 text-yellow-300 border-b border-gray-700 pb-2">修改管理员账号</h3>
+                    <input id="old-pwd" type="password" placeholder="当前密码" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-yellow-500">
+                    <input id="new-user" type="text" placeholder="新用户名" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-yellow-500">
+                    <input id="new-pwd" type="password" placeholder="新密码" class="p-3 mb-4 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-yellow-500">
+                    <button onclick="updateUser()" class="w-full bg-yellow-600 hover:bg-yellow-700 px-4 py-3 rounded-lg font-bold transition">更新账号</button>
+                </div>
             </div>
+            
         </div>
         <div class="md:hidden fixed bottom-0 w-full bg-gray-800 border-t border-gray-700 flex justify-around p-3 pb-safe z-20">
             <button onclick="switchTab('library')" class="flex flex-col items-center text-blue-400">
@@ -106,11 +118,13 @@
         }
         
         function logout() { localStorage.removeItem('token'); location.reload(); }
+        
         function showMain() {
             document.getElementById('login-view').classList.add('hidden');
             document.getElementById('main-view').classList.remove('hidden');
             switchTab('library');
         }
+        
         function switchTab(tab) {
             document.getElementById('tab-library').classList.add('hidden');
             document.getElementById('tab-settings').classList.add('hidden');
@@ -144,7 +158,6 @@
             document.getElementById('current-path').innerText = currentPath;
             list.innerHTML = '';
 
-            // 1. 返回上一级
             if (currentPath !== '/media') {
                 const parent = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/media';
                 const backBtn = document.createElement('div');
@@ -154,7 +167,6 @@
                 list.appendChild(backBtn);
             }
 
-            // 2. 渲染文件夹
             if (res.dirs && res.dirs.length > 0) {
                 res.dirs.forEach(d => {
                     const row = document.createElement('div');
@@ -180,7 +192,6 @@
                 });
             }
 
-            // 3. 渲染文件
             if (res.files && res.files.length > 0) {
                 res.files.forEach(f => {
                     const row = document.createElement('div');
@@ -209,7 +220,6 @@
                 });
             }
 
-            // 4. 全空提示
             if ((!res.dirs || res.dirs.length === 0) && (!res.files || res.files.length === 0)) {
                 const emptyMsg = document.createElement('div');
                 emptyMsg.className = "p-6 text-center text-gray-400";
@@ -267,6 +277,24 @@
             renderSelectedPaths();
             document.getElementById('lib-name').value = '';
             switchTab('library');
+        }
+
+        // 找回：修改账号逻辑
+        async function updateUser() {
+            const oldPwd = document.getElementById('old-pwd').value;
+            const newUser = document.getElementById('new-user').value;
+            const newPwd = document.getElementById('new-pwd').value;
+            if (!oldPwd || !newUser || !newPwd) return alert('请填写完整所有选项');
+            
+            const res = await api('/api/user/update', 'POST', { old_password: oldPwd, new_username: newUser, new_password: newPwd });
+            if (res && res.status === 'success') {
+                alert('账号修改成功！请使用新账号重新登录。');
+                logout();
+            } else if (res && res.error) {
+                alert(res.error);
+            } else {
+                alert('修改失败，请检查旧密码');
+            }
         }
     </script>
 </body>
