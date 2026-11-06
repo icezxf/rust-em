@@ -6,7 +6,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::collections::HashMap; // 确保导入了 HashMap
+use std::collections::HashMap;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
@@ -164,20 +164,20 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         for nfo in nfo_candidates {
             if nfo.exists() {
                 if let Some(meta) = crate::nfo::read_nfo(&nfo) {
-                    if let Some(t) = meta.title { title = t; }
-                    if let Some(p) = meta.plot { plot = p; }
+                    if let Some(t) = &meta.title { title = t.clone(); }
+                    if let Some(p) = &meta.plot { plot = p.clone(); }
                     if let Some(r) = meta.rating { rating = r; }
-                    if let Some(m) = meta.mpaa { mpaa = m; }
+                    if let Some(m) = &meta.mpaa { mpaa = m.clone(); }
                     if let Some(rt) = meta.runtime { runtime = rt; }
-                    if let Some(pr) = meta.premiered { premiered = pr; }
-                    if let Some(tg) = meta.tagline { tagline = tg; }
-                    if let Some(s) = meta.series { series = s; }
-                    if let Some(l) = meta.label { label = l; }
-                    if let Some(set) = meta.set { set_name = set; }
-                    if let Some(n) = meta.num { num = n; }
+                    if let Some(tg) = &meta.tagline { tagline = tg.clone(); }
+                    if let Some(s) = &meta.series { series = s.clone(); }
+                    if let Some(l) = &meta.label { label = l.clone(); }
+                    if let Some(set) = &meta.set { set_name = set.clone(); }
+                    if let Some(n) = &meta.num { num = n.clone(); }
+                    if let Some(pr) = &meta.premiered { premiered = pr.clone(); }
                     
-                    if let Some(y) = meta.year { 
-                        year = y; 
+                    if let Some(y) = &meta.year { 
+                        year = y.clone(); 
                     } else if let Some(pr) = &meta.premiered {
                         if pr.len() >= 4 { year = pr[0..4].to_string(); }
                     } else if let Some(rd) = &meta.releasedate {
@@ -207,8 +207,8 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                         parent.join(p).to_string_lossy().to_string()
                     };
 
-                    if let Some(poster) = meta.poster { nfo_poster = resolve_path(&poster); }
-                    if let Some(fanart) = meta.fanart { nfo_fanart = resolve_path(&fanart); }
+                    if let Some(poster) = &meta.poster { nfo_poster = resolve_path(poster); }
+                    if let Some(fanart) = &meta.fanart { nfo_fanart = resolve_path(fanart); }
                     break;
                 }
             }
@@ -304,11 +304,19 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
     Json(json!({ "items": items }))
 }
 
-pub async fn get_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((id, img_type)): AxumPath<(i64, String)>, Query(params): Query<HashMap<String, String>>) -> Response {
+// 修复 Handler 推断错误，改为 ImageQuery 结构体
+#[derive(Deserialize)]
+pub struct ImageQuery { index: Option<usize> }
+
+pub async fn get_image(
+    State(pool): State<Arc<Mutex<Connection>>>,
+    AxumPath((id, img_type)): AxumPath<(i64, String)>,
+    Query(params): Query<ImageQuery>,
+) -> Response {
     let path_opt = {
         let conn = pool.lock().unwrap();
         if img_type == "stills" {
-            let idx = params.get("index").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+            let idx = params.index.unwrap_or(0);
             let mut stmt = conn.prepare("SELECT stills FROM items WHERE id = ?1").unwrap();
             let stills_json: Option<String> = stmt.query_row([id], |r| r.get(0)).ok();
             if let Some(json) = stills_json {
@@ -493,14 +501,23 @@ pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(it
     let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     let cache_key = format!("{}|{}|{}", url, ip, ua);
     let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    { let cache_lock = cache.lock().unwrap(); if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) { if Instant::now() < *expire_at { println!("🚀 [302 缓存命中] 客户端: {}, 直链: {}", ua, cached_url); return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); } } }
+    { 
+        let cache_lock = cache.lock().unwrap(); 
+        if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) { 
+            if Instant::now() < *expire_at { 
+                println!("🚀 [302 缓存命中] 客户端: {}, 直链: {}", ua, cached_url);
+                return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); 
+            } 
+        } 
+    }
     let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(15)).build().unwrap();
     let mut final_url = url.to_string();
     if let Ok(resp) = client.get(url).header(USER_AGENT, ua).send().await {
         if resp.status().is_redirection() { if let Some(location) = resp.headers().get("location") { if let Ok(loc_str) = location.to_str() { final_url = loc_str.to_string(); } } }
     }
     { let mut cache_lock = cache.lock().unwrap(); cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(5))); }
-    println!("🚀 [302 解析成功] 客户端: {}, 原始URL: {}, 真实直链: {}", ua, url, final_url); (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
+    println!("🚀 [302 解析成功] 客户端: {}, 原始URL: {}, 真实直链: {}", ua, url, final_url);
+    (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
 }
 
 #[derive(Deserialize)]
