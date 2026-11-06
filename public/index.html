@@ -130,14 +130,13 @@
                         
                         <!-- 右侧信息区 -->
                         <div class="flex-1 flex flex-col pt-2 w-full">
-                            <!-- 标题栏 (去掉了 num) -->
+                            <!-- 标题 -->
                             <div class="flex items-center gap-3 mb-2">
                                 <h1 id="detail-title" class="text-3xl md:text-5xl font-black text-white tracking-tight drop-shadow-md">影片标题</h1>
                             </div>
                             
-                            <!-- 标签栏 (num 放进来了) -->
+                            <!-- 元数据（番号、年份、评分、时长） -->
                             <div class="flex flex-wrap items-center gap-3 mb-6 text-sm font-medium text-gray-400">
-                                <!-- 番号在这里显示，蓝色高亮 -->
                                 <span id="detail-num" class="hidden border border-blue-500/50 bg-blue-500/20 text-blue-300 px-2.5 py-1 rounded-md font-mono font-bold"></span>
                                 <span id="detail-year" class="bg-gray-800/80 px-2.5 py-1 rounded-md text-gray-200">未知年份</span>
                                 <span class="text-yellow-400 font-bold flex items-center gap-1 bg-gray-800/80 px-2.5 py-1 rounded-md">
@@ -148,21 +147,27 @@
                                 <span id="detail-mpaa" class="border border-gray-600 text-gray-300 px-2 py-1 rounded-md text-xs hidden"></span>
                             </div>
 
+                            <!-- 类型标签 -->
                             <div id="detail-genres" class="flex flex-wrap gap-2 mb-6 hidden">
                                 <div id="detail-genres-val" class="flex flex-wrap gap-2"></div>
                             </div>
 
+                            <!-- 播放按钮 -->
                             <div id="detail-play-actions" class="flex flex-wrap gap-3 mb-6"></div>
 
+                            <!-- 简介 -->
                             <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base max-h-40 overflow-y-auto pr-2 mb-4 whitespace-pre-wrap">暂无简介...</p>
                             
-                            <!-- 信息块：毛玻璃背景，标签胶囊 -->
-                            <div class="flex flex-col gap-2 text-sm text-gray-300 mt-4 bg-[#0f1115]/60 backdrop-blur-md p-4 rounded-xl border border-gray-700/50 shadow-lg">
-                                <div id="detail-series-box" class="hidden"><span class="text-gray-500">系列: </span> <span id="detail-series" class="text-blue-400 font-medium"></span></div>
-                                <div id="detail-label-box" class="hidden"><span class="text-gray-500">厂牌: </span> <span id="detail-label" class="text-blue-400 font-medium"></span></div>
-                                <div id="detail-studio-box" class="hidden"><span class="text-gray-500">制作商: </span> <span id="detail-studios" class="text-gray-200 font-medium"></span></div>
-                                <div id="detail-directors" class="hidden"><span class="text-gray-500">导演: </span> <span class="text-gray-200 font-medium" id="detail-directors-val"></span></div>
-                                <div id="detail-tags" class="hidden items-start mt-1"><span class="text-gray-500 shrink-0 mr-2 mt-0.5">标签: </span> <div class="flex flex-wrap gap-1.5" id="detail-tags-val"></div></div>
+                            <!-- 信息块：使用了更深的背景色和磨砂质感，彻底摆脱背景图干扰 -->
+                            <div class="flex flex-col gap-2.5 text-sm text-gray-300 mt-4 bg-[#16191f]/90 backdrop-blur-lg p-4 rounded-xl border border-gray-700/60 shadow-xl">
+                                <div id="detail-series-box" class="hidden"><span class="text-gray-500 w-16 inline-block">系列:</span> <span id="detail-series" class="text-blue-400 font-medium"></span></div>
+                                <div id="detail-label-box" class="hidden"><span class="text-gray-500 w-16 inline-block">厂牌:</span> <span id="detail-label" class="text-blue-400 font-medium"></span></div>
+                                <div id="detail-studio-box" class="hidden"><span class="text-gray-500 w-16 inline-block">制作商:</span> <span id="detail-studios" class="text-gray-200 font-medium"></span></div>
+                                <div id="detail-directors" class="hidden"><span class="text-gray-500 w-16 inline-block">导演:</span> <span class="text-gray-200 font-medium" id="detail-directors-val"></span></div>
+                                <div id="detail-tags" class="hidden items-start mt-1">
+                                    <span class="text-gray-500 shrink-0 w-16 inline-block mt-0.5">标签:</span> 
+                                    <div class="flex flex-wrap gap-1.5 flex-1" id="detail-tags-val"></div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -474,7 +479,6 @@
             document.getElementById('detail-plot').innerText = item.plot || '暂无简介...';
             document.getElementById('detail-title').innerText = item.title || '未知';
             
-            // 番号移至胶囊栏
             const numEl = document.getElementById('detail-num');
             if (item.num) { numEl.innerText = item.num; numEl.classList.remove('hidden'); } else { numEl.classList.add('hidden'); }
 
@@ -513,7 +517,6 @@
             };
             updateTextBlock('detail-directors', 'detail-directors-val', item.directors);
             
-            // 标签：分拆成独立小胶囊显示
             const tagsBox = document.getElementById('detail-tags');
             const tagsValBox = document.getElementById('detail-tags-val');
             if (item.tags) {
