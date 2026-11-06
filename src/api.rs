@@ -147,11 +147,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         let mtime = metadata.modified().unwrap_or(UNIX_EPOCH).duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
         let path_str = path.to_string_lossy().to_string();
 
-        // 读取 STRM 内容
-        let strm_content = std::fs::read_to_string(&path)
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
-
+        let strm_content = std::fs::read_to_string(&path).map(|s| s.trim().to_string()).unwrap_or_default();
         let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
         let parent = path.parent().unwrap_or(Path::new(""));
         let nfo_candidates = vec![path.with_extension("nfo"), parent.join("movie.nfo")];
@@ -180,7 +176,6 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                     if let Some(set) = meta.set { set_name = set; }
                     if let Some(n) = meta.num { num = n; }
                     
-                    // 年份兜底逻辑：year -> premiered -> releasedate
                     if let Some(y) = meta.year { 
                         year = y; 
                     } else if let Some(pr) = &meta.premiered {
@@ -242,14 +237,34 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
             }
         }
 
+        // 扫描 extrafanart 文件夹
+        let mut stills = Vec::new();
+        let extrafanart_dir = parent.join("extrafanart");
+        if extrafanart_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&extrafanart_dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let p = entry.path();
+                    if p.is_file() {
+                        if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+                            if ["jpg", "jpeg", "png", "webp"].contains(&ext.to_lowercase().as_str()) {
+                                stills.push(p.to_string_lossy().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        stills.sort();
+        let stills_json = serde_json::to_string(&stills).unwrap_or_default();
+
         {
             let conn = match pool.lock() { Ok(c) => c, Err(_) => continue };
             let _ = conn.execute(
-                "INSERT INTO items (library_id, title, num, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name, strm_content) 
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)
+                "INSERT INTO items (library_id, title, num, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name, strm_content, stills) 
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)
                  ON CONFLICT(file_path) DO UPDATE SET 
-                 title=excluded.title, num=excluded.num, size=excluded.size, mtime=excluded.mtime, plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, thumb_path=excluded.thumb_path, banner_path=excluded.banner_path, rating=excluded.rating, mpaa=excluded.mpaa, genres=excluded.genres, tags=excluded.tags, directors=excluded.directors, actors=excluded.actors, runtime=excluded.runtime, premiered=excluded.premiered, tagline=excluded.tagline, studios=excluded.studios, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, series=excluded.series, label=excluded.label, set_name=excluded.set_name, strm_content=excluded.strm_content",
-                rusqlite::params![lib_id, title, num, path_str, lib_type, plot, year, final_poster, final_fanart, logo, thumb, banner, size, mtime, rating, mpaa, genres, tags, directors, actors_json, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name, strm_content]
+                 title=excluded.title, num=excluded.num, size=excluded.size, mtime=excluded.mtime, plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, thumb_path=excluded.thumb_path, banner_path=excluded.banner_path, rating=excluded.rating, mpaa=excluded.mpaa, genres=excluded.genres, tags=excluded.tags, directors=excluded.directors, actors=excluded.actors, runtime=excluded.runtime, premiered=excluded.premiered, tagline=excluded.tagline, studios=excluded.studios, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, series=excluded.series, label=excluded.label, set_name=excluded.set_name, strm_content=excluded.strm_content, stills=excluded.stills",
+                rusqlite::params![lib_id, title, num, path_str, lib_type, plot, year, final_poster, final_fanart, logo, thumb, banner, size, mtime, rating, mpaa, genres, tags, directors, actors_json, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name, strm_content, stills_json]
             );
         }
     }
@@ -260,7 +275,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
 pub struct ItemQuery { library_id: Option<i64>, lib_type: Option<String> }
 pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<ItemQuery>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut sql = "SELECT id, title, num, type, year, plot, poster_path, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, size, series, label, set_name, file_path, strm_content FROM items WHERE 1=1".to_string();
+    let mut sql = "SELECT id, title, num, type, year, plot, poster_path, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, size, series, label, set_name, file_path, strm_content, stills FROM items WHERE 1=1".to_string();
     if let Some(lid) = query.library_id { sql.push_str(&format!(" AND library_id = {}", lid)); }
     if let Some(lt) = query.lib_type { sql.push_str(&format!(" AND type = '{}'", lt)); }
     sql.push_str(" ORDER BY title ASC");
@@ -269,6 +284,8 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
     let items: Vec<Value> = stmt.query_map([], |row| {
         let actors_json: String = row.get(12).unwrap_or_else(|_| "[]".to_string());
         let actors: Value = serde_json::from_str(&actors_json).unwrap_or(json!([]));
+        let stills_json: String = row.get(25).unwrap_or_else(|_| "[]".to_string());
+        let stills: Value = serde_json::from_str(&stills_json).unwrap_or(json!([]));
         Ok(json!({
             "id": row.get::<_, i64>(0).unwrap_or_default(), "title": row.get::<_, String>(1).unwrap_or_default(),
             "num": row.get::<_, String>(2).unwrap_or_default(), "type": row.get::<_, String>(3).unwrap_or_default(),
@@ -282,31 +299,47 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
             "imdb_id": row.get::<_, String>(18).unwrap_or_default(), "size": row.get::<_, i64>(19).unwrap_or(0),
             "series": row.get::<_, String>(20).unwrap_or_default(), "label": row.get::<_, String>(21).unwrap_or_default(),
             "set_name": row.get::<_, String>(22).unwrap_or_default(), "file_path": row.get::<_, String>(23).unwrap_or_default(),
-            "strm_content": row.get::<_, String>(24).unwrap_or_default()
+            "strm_content": row.get::<_, String>(24).unwrap_or_default(), "stills": stills
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "items": items }))
 }
 
-pub async fn get_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((id, img_type)): AxumPath<(i64, String)>) -> Response {
+// 支持根据索引获取剧照
+pub async fn get_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((id, img_type)): AxumPath<(i64, String)>, Query(params): Query<HashMap<String, String>>) -> Response {
     let path_opt = {
         let conn = pool.lock().unwrap();
-        let query = match img_type.as_str() {
-            "poster" => "SELECT poster_path FROM items WHERE id = ?1", "fanart" => "SELECT fanart_path FROM items WHERE id = ?1",
-            "logo" => "SELECT logo_path FROM items WHERE id = ?1", "thumb" => "SELECT thumb_path FROM items WHERE id = ?1",
-            "banner" => "SELECT banner_path FROM items WHERE id = ?1", _ => "SELECT poster_path FROM items WHERE id = ?1",
-        };
-        let mut stmt = conn.prepare(query).unwrap();
-        stmt.query_row([id], |row| row.get::<_, String>(0)).ok()
+        if img_type == "stills" {
+            let idx = params.get("index").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+            let mut stmt = conn.prepare("SELECT stills FROM items WHERE id = ?1").unwrap();
+            let stills_json: Option<String> = stmt.query_row([id], |r| r.get(0)).ok();
+            if let Some(json) = stills_json {
+                if let Ok(arr) = serde_json::from_str::<Vec<String>>(&json) {
+                    if let Some(p) = arr.get(idx) { return serve_file(p).await; }
+                }
+            }
+            None
+        } else {
+            let query = match img_type.as_str() {
+                "poster" => "SELECT poster_path FROM items WHERE id = ?1", "fanart" => "SELECT fanart_path FROM items WHERE id = ?1",
+                "logo" => "SELECT logo_path FROM items WHERE id = ?1", "thumb" => "SELECT thumb_path FROM items WHERE id = ?1",
+                "banner" => "SELECT banner_path FROM items WHERE id = ?1", _ => "SELECT poster_path FROM items WHERE id = ?1",
+            };
+            let mut stmt = conn.prepare(query).unwrap();
+            stmt.query_row([id], |row| row.get::<_, String>(0)).ok()
+        }
     };
     if let Some(path_str) = path_opt {
-        if !path_str.is_empty() {
-            if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
-            if let Ok(bytes) = tokio::fs::read(&path_str).await {
-                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
-                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
-            }
-        }
+        if !path_str.is_empty() { serve_file(&path_str).await; }
+    }
+    StatusCode::NOT_FOUND.into_response()
+}
+
+async fn serve_file(path_str: &str) -> Response {
+    if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str.to_string())], "").into_response(); }
+    if let Ok(bytes) = tokio::fs::read(&path_str).await {
+        let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
+        return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
     }
     StatusCode::NOT_FOUND.into_response()
 }
