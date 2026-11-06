@@ -517,14 +517,14 @@ pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(it
     if !url.starts_with("http") { return StatusCode::NOT_FOUND.into_response(); }
 
     // 去请求网盘/OpenList 拿最终直链
-    let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(15)).build().unwrap();
+    let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(300)).build().unwrap();
     let mut final_url = url.to_string();
     if let Ok(resp) = client.get(url).header(USER_AGENT, ua).send().await {
         if resp.status().is_redirection() { if let Some(location) = resp.headers().get("location") { if let Ok(loc_str) = location.to_str() { final_url = loc_str.to_string(); } } }
     }
     
     // 写入缓存 (5秒)
-    { let mut cache_lock = cache.lock().unwrap(); cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(5))); }
+    { let mut cache_lock = cache.lock().unwrap(); cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(300))); }
     
     println!("🚀 [302 解析成功] ItemID: {}, 客户端: {}, 原始URL: {}, 真实直链: {}", item_id, ua, url, final_url);
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
