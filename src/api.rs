@@ -312,6 +312,7 @@ pub async fn get_image(
     AxumPath((id, img_type)): AxumPath<(i64, String)>,
     Query(params): Query<ImageQuery>,
 ) -> Response {
+    // 1. 查库只负责拿路径，用 Option<String>
     let path_opt = {
         let conn = pool.lock().unwrap();
         if img_type == "stills" {
@@ -320,22 +321,28 @@ pub async fn get_image(
             let stills_json: Option<String> = stmt.query_row([id], |r| r.get(0)).ok();
             if let Some(json) = stills_json {
                 if let Ok(arr) = serde_json::from_str::<Vec<String>>(&json) {
-                    if let Some(p) = arr.get(idx) { return serve_file(p).await; }
-                }
-            }
-            None
+                    arr.get(idx).cloned()
+                } else { None }
+            } else { None }
         } else {
             let query = match img_type.as_str() {
-                "poster" => "SELECT poster_path FROM items WHERE id = ?1", "fanart" => "SELECT fanart_path FROM items WHERE id = ?1",
-                "logo" => "SELECT logo_path FROM items WHERE id = ?1", "thumb" => "SELECT thumb_path FROM items WHERE id = ?1",
-                "banner" => "SELECT banner_path FROM items WHERE id = ?1", _ => "SELECT poster_path FROM items WHERE id = ?1",
+                "poster" => "SELECT poster_path FROM items WHERE id = ?1", 
+                "fanart" => "SELECT fanart_path FROM items WHERE id = ?1",
+                "logo" => "SELECT logo_path FROM items WHERE id = ?1", 
+                "thumb" => "SELECT thumb_path FROM items WHERE id = ?1",
+                "banner" => "SELECT banner_path FROM items WHERE id = ?1", 
+                _ => "SELECT poster_path FROM items WHERE id = ?1",
             };
             let mut stmt = conn.prepare(query).unwrap();
             stmt.query_row([id], |row| row.get::<_, String>(0)).ok()
         }
-    };
+    }; // 作用域结束，conn 被 drop，锁释放
+
+    // 2. 锁释放后，安全地执行 async 操作
     if let Some(path_str) = path_opt {
-        if !path_str.is_empty() { serve_file(&path_str).await; }
+        if !path_str.is_empty() {
+            return serve_file(&path_str).await;
+        }
     }
     StatusCode::NOT_FOUND.into_response()
 }
@@ -492,7 +499,6 @@ pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(it
     let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     
-    // 【核心优化】：缓存 Key 直接使用 item_id + IP + UA，完全不需要去读库或读文件！
     let cache_key = format!("{}|{}|{}", item_id, ip, ua);
     let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     { 
@@ -505,25 +511,21 @@ pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(it
         } 
     }
 
-    // 缓存没命中，才去查库拿 .strm 路径
     let path_opt = { let conn = pool.lock().unwrap(); conn.query_row("SELECT file_path FROM items WHERE id = ?1", [item_id], |row| row.get::<_, String>(0)).ok() };
     let Some(strm_path) = path_opt else { return StatusCode::NOT_FOUND.into_response(); };
     
-    // 读取 .strm 内容
     let file = match tokio::fs::File::open(&strm_path).await { Ok(f) => f, Err(_) => return StatusCode::NOT_FOUND.into_response() };
     let mut contents = String::new();
     if file.take(MAX_STRM_SIZE).read_to_string(&mut contents).await.is_err() { return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
     let url = contents.lines().map(str::trim).find(|s| !s.is_empty()).unwrap_or("");
     if !url.starts_with("http") { return StatusCode::NOT_FOUND.into_response(); }
 
-    // 去请求网盘/OpenList 拿最终直链
-    let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(300)).build().unwrap();
+    let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(15)).build().unwrap();
     let mut final_url = url.to_string();
     if let Ok(resp) = client.get(url).header(USER_AGENT, ua).send().await {
         if resp.status().is_redirection() { if let Some(location) = resp.headers().get("location") { if let Ok(loc_str) = location.to_str() { final_url = loc_str.to_string(); } } }
     }
     
-    // 写入缓存 (5秒)
     { let mut cache_lock = cache.lock().unwrap(); cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(300))); }
     
     println!("🚀 [302 解析成功] ItemID: {}, 客户端: {}, 原始URL: {}, 真实直链: {}", item_id, ua, url, final_url);
