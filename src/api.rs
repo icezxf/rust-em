@@ -9,30 +9,30 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use tokio::io::AsyncReadExt;
 
 static TOKENS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 static STRM_CACHE: OnceLock<Mutex<HashMap<String, (String, Instant)>>> = OnceLock::new();
 
+// 限制 STRM 文件的最大读取字节数 (16KB)，防止恶意文件打爆内存
+const MAX_STRM_SIZE: u64 = 16 * 1024;
+
 // =========================================================================
-// 1. Token 万能提取逻辑
+// 1. Web UI 基础与鉴权
 // =========================================================================
 fn extract_emby_token(headers: &HeaderMap, query_str: Option<&str>) -> Option<String> {
     if let Some(val) = headers.get("X-Emby-Token").or_else(|| headers.get("X-MediaBrowser-Token")) {
         if let Ok(s) = val.to_str() { if !s.is_empty() { return Some(s.to_string()); } }
     }
     if let Some(val) = headers.get("Authorization").and_then(|v| v.to_str().ok()) {
-        if let Some(token) = val.strip_prefix("Bearer ") {
-            return Some(token.trim().to_string());
-        }
+        if let Some(token) = val.strip_prefix("Bearer ") { return Some(token.trim().to_string()); }
         if let Some(idx) = val.find("Token=\"") {
             let rest = &val[idx + 7..];
-            if let Some(end_idx) = rest.find('"') {
-                return Some(rest[..end_idx].to_string());
-            }
+            if let Some(end_idx) = rest.find('"') { return Some(rest[..end_idx].to_string()); }
         }
     }
     if let Some(query) = query_str {
@@ -48,9 +48,6 @@ fn extract_emby_token(headers: &HeaderMap, query_str: Option<&str>) -> Option<St
     None
 }
 
-// =========================================================================
-// 2. Web UI 基础 API
-// =========================================================================
 #[derive(Deserialize)]
 pub struct LoginReq { username: String, password: String }
 
@@ -73,14 +70,17 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
 pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     if let Some(token) = extract_emby_token(req.headers(), req.uri().query()) {
         if let Some(tokens) = TOKENS.get() {
-            if tokens.lock().unwrap().contains(&token) {
-                return Ok(next.run(req).await);
-            }
+            if tokens.lock().unwrap().contains(&token) { return Ok(next.run(req).await); }
         }
     }
     Err(StatusCode::UNAUTHORIZED)
 }
 
+// =========================================================================
+// 2. 扫描核心逻辑 (吸收 Lux 的设计精髓)
+// =========================================================================
+
+// 目录浏览
 #[derive(Deserialize)]
 pub struct BrowseReq { path: String }
 
@@ -129,16 +129,7 @@ pub async fn add_library(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
         let lib_id = conn.last_insert_rowid();
 
         for path_str in payload.paths {
-            let path = Path::new(&path_str);
-            if path.is_dir() {
-                for entry in walkdir::WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
-                    if entry.file_type().is_file() {
-                        process_file(entry.path(), &payload.lib_type, lib_id, &conn);
-                    }
-                }
-            } else if path.is_file() {
-                process_file(path, &payload.lib_type, lib_id, &conn);
-            }
+            scan_directory(&conn, lib_id, &payload.lib_type, Path::new(&path_str));
         }
     }).await.unwrap();
     Json(json!({"status": "scanning"}))
@@ -167,50 +158,92 @@ pub async fn rescan_library(State(pool): State<Arc<Mutex<Connection>>>, AxumPath
         if let Ok((_, paths_json, lib_type)) = conn.query_row("SELECT name, path, type FROM libraries WHERE id = ?1", [id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))) {
             let paths: Vec<String> = serde_json::from_str(&paths_json).unwrap_or_default();
             for path_str in paths {
-                let path = Path::new(&path_str);
-                if path.is_dir() {
-                    for entry in walkdir::WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
-                        if entry.file_type().is_file() { process_file(entry.path(), &lib_type, id, &conn); }
-                    }
-                }
+                scan_directory(&conn, id, &lib_type, Path::new(&path_str));
             }
         }
     }).await.unwrap();
     Json(json!({"status": "scanning"}))
 }
 
-fn process_file(file_path: &Path, lib_type: &str, lib_id: i64, conn: &Connection) {
-    if file_path.extension().map_or(false, |ext| ext == "strm") {
-        let stem = file_path.file_stem().unwrap().to_string_lossy().to_string();
-        let parent = file_path.parent().unwrap_or(Path::new(""));
-        let nfo_path = file_path.with_extension("nfo");
-        let mut title = stem.clone();
-        let mut plot = "".to_string();
-        let mut year = "".to_string();
+// 提取的核心扫描函数：带指纹比对、安全读取、智能 Sidecar 查找
+fn scan_directory(conn: &Connection, lib_id: i64, lib_type: &str, dir_path: &Path) {
+    println!("🔍 开始扫描目录: {:?}", dir_path);
+    let mut count = 0;
+    let mut updated = 0;
+    
+    let walker = walkdir::WalkDir::new(dir_path).into_iter().filter_map(|e| e.ok());
+    for entry in walker {
+        let path = entry.path();
+        if !path.is_file() { continue; }
         
-        if let Some(nfo) = crate::nfo::read_nfo(&nfo_path) {
-            if let Some(t) = nfo.title { title = t; }
-            if let Some(p) = nfo.plot { plot = p; }
-            if let Some(y) = nfo.year { year = y.to_string(); }
-        }
+        // 目前依然只处理 .strm 文件，后续可扩展支持 mp4/mkv 等
+        if path.extension().and_then(|e| e.to_str()).map_or(false, |e| e.eq_ignore_ascii_case("strm")) {
+            count += 1;
+            let metadata = match std::fs::metadata(path) { Ok(m) => m, Err(_) => continue };
+            let size = metadata.len();
+            let mtime = metadata.modified().unwrap_or(UNIX_EPOCH).duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+            let path_str = path.to_string_lossy().to_string();
 
-        let mut poster_path = "".to_string();
-        let mut fanart_path = "".to_string();
-        for name in [format!("{}-poster.jpg", stem), "poster.jpg".to_string(), "folder.jpg".to_string()] {
-            let p = parent.join(&name);
-            if p.exists() { poster_path = p.to_string_lossy().to_string(); break; }
-        }
-        for name in [format!("{}-fanart.jpg", stem), "fanart.jpg".to_string(), "background.jpg".to_string()] {
-            let p = parent.join(&name);
-            if p.exists() { fanart_path = p.to_string_lossy().to_string(); break; }
-        }
+            // 1. 增量检查：是否已存在且未修改？
+            let mut stmt = conn.prepare("SELECT id, size, mtime FROM items WHERE file_path = ?1").unwrap();
+            let existing: Option<(i64, i64, i64)> = stmt.query_row([&path_str], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).ok();
+            if let Some((_, db_size, db_mtime)) = existing {
+                if db_size == size as i64 && db_mtime == mtime {
+                    continue; // 指纹一致，跳过
+                }
+            }
+            updated += 1;
 
-        let path_str = file_path.to_string_lossy().to_string();
-        let _ = conn.execute(
-            "INSERT OR REPLACE INTO items (library_id, title, file_path, type, plot, year, poster_path, fanart_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![lib_id, title, path_str, lib_type, plot, year, poster_path, fanart_path]
-        );
+            // 2. 寻找 Sidecar 文件 (NFO 与 图片)
+            let stem = path.file_stem().unwrap().to_string_lossy();
+            let parent = path.parent().unwrap_or(Path::new(""));
+            
+            // 智能 NFO 搜索
+            let nfo_candidates = [
+                path.with_extension("nfo"), 
+                parent.join(format!("{}.nfo", stem)), 
+                parent.join("movie.nfo")
+            ];
+            let mut title = stem.to_string();
+            let mut plot = "".to_string();
+            let mut year = "".to_string();
+            for nfo in nfo_candidates {
+                if nfo.exists() {
+                    if let Some(meta) = crate::nfo::read_nfo(&nfo) {
+                        if let Some(t) = meta.title { title = t; }
+                        if let Some(p) = meta.plot { plot = p; }
+                        if let Some(y) = meta.year { year = y.to_string(); }
+                        break;
+                    }
+                }
+            }
+
+            // 智能图片搜索
+            let mut poster_path = "".to_string();
+            let mut fanart_path = "".to_string();
+            let img_names = ["poster.jpg", "folder.jpg", &format!("{}-poster.jpg", stem)];
+            for name in img_names {
+                let p = parent.join(name);
+                if p.exists() { poster_path = p.to_string_lossy().to_string(); break; }
+            }
+            let bg_names = ["fanart.jpg", "background.jpg", &format!("{}-fanart.jpg", stem)];
+            for name in bg_names {
+                let p = parent.join(name);
+                if p.exists() { fanart_path = p.to_string_lossy().to_string(); break; }
+            }
+
+            // 3. 写入或更新数据库
+            let _ = conn.execute(
+                "INSERT INTO items (library_id, title, file_path, type, plot, year, poster_path, fanart_path, size, mtime) 
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 ON CONFLICT(file_path) DO UPDATE SET 
+                 title=excluded.title, size=excluded.size, mtime=excluded.mtime,
+                 plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, fanart_path=excluded.fanart_path",
+                rusqlite::params![lib_id, title, path_str, lib_type, plot, year, poster_path, fanart_path, size as i64, mtime]
+            );
+        }
     }
+    println!("✅ 扫描完成。共找到 {} 个 STRM，更新/新增 {} 个。", count, updated);
 }
 
 #[derive(Deserialize)]
@@ -272,43 +305,20 @@ pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
 }
 
 // =========================================================================
-// 3. Emby 协议兼容层
+// 3. Emby 协议兼容层 (含安全读取 STRM 流)
 // =========================================================================
 
 pub async fn emby_public_info() -> impl IntoResponse {
-    Json(json!({
-        "ServerName": "Rust-Em",
-        "Version": "4.8.0.0",
-        "Id": "rust-em-server",
-        "OperatingSystem": "Linux",
-        "StartupWizardCompleted": true
-    }))
+    Json(json!({ "ServerName": "Rust-Em", "Version": "4.8.0.0", "Id": "rust-em-server", "OperatingSystem": "Linux", "StartupWizardCompleted": true }))
 }
 
 pub async fn emby_info() -> impl IntoResponse {
-    Json(json!({
-        "ServerName": "Rust-Em",
-        "Version": "4.8.0.0",
-        "Id": "rust-em-server",
-        "OperatingSystem": "Linux",
-        "OperatingSystemDisplayName": "Linux",
-        "HasPendingRestart": false,
-        "IsShuttingDown": false,
-        "SupportsLibraryMonitor": false,
-        "SupportsHttps": true,
-        "HttpServerPortNumber": 8096
-    }))
+    Json(json!({ "ServerName": "Rust-Em", "Version": "4.8.0.0", "Id": "rust-em-server", "OperatingSystem": "Linux", "OperatingSystemDisplayName": "Linux", "HasPendingRestart": false, "IsShuttingDown": false, "SupportsLibraryMonitor": false, "SupportsHttps": true, "HttpServerPortNumber": 8096 }))
 }
 
-pub async fn emby_auth_keys() -> impl IntoResponse {
-    Json(json!({ "Items": [], "TotalRecordCount": 0 }))
-}
+pub async fn emby_auth_keys() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 
-pub async fn emby_authenticate(
-    State(pool): State<Arc<Mutex<Connection>>>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
+pub async fn emby_authenticate(State(pool): State<Arc<Mutex<Connection>>>, headers: HeaderMap, body: Bytes) -> Response {
     let content_type = headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("");
     let mut username = String::new();
     let mut password = String::new();
@@ -338,13 +348,7 @@ pub async fn emby_authenticate(
         TOKENS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap().push(token.clone());
         
         (StatusCode::OK, Json(json!({
-            "User": { 
-                "Id": id.to_string(), 
-                "Name": name,
-                "ServerId": "rust-em-server",
-                "HasPassword": true,
-                "Policy": { "IsAdministrator": true, "EnableAllFolders": true }
-            },
+            "User": { "Id": id.to_string(), "Name": name, "ServerId": "rust-em-server", "HasPassword": true, "Policy": { "IsAdministrator": true, "EnableAllFolders": true } },
             "SessionInfo": { "Id": uuid::Uuid::new_v4().to_string(), "UserId": id.to_string() },
             "AccessToken": token,
             "ServerId": "rust-em-server"
@@ -448,20 +452,30 @@ pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, Axum
     let conn = pool.lock().unwrap();
     let path_opt = conn.query_row("SELECT file_path FROM items WHERE id = ?1", [item_id], |row| row.get::<_, String>(0)).ok();
     if let Some(path_str) = path_opt {
-        Json(json!({
-            "MediaSources": [{ "Id": item_id.to_string(), "Path": path_str, "Protocol": "Http", "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsTranscoding": false }]
-        })).into_response()
+        Json(json!({ "MediaSources": [{ "Id": item_id.to_string(), "Path": path_str, "Protocol": "Http", "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsTranscoding": false }] })).into_response()
     } else { StatusCode::NOT_FOUND.into_response() }
 }
 
+// 核心：带安全边界和并发防封禁的流重定向
 pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>, headers: HeaderMap) -> Response {
     let path_opt = {
         let conn = pool.lock().unwrap();
         conn.query_row("SELECT file_path FROM items WHERE id = ?1", [item_id], |row| row.get::<_, String>(0)).ok()
     };
     let Some(strm_path) = path_opt else { return StatusCode::NOT_FOUND.into_response(); };
-    let Ok(url) = tokio::fs::read_to_string(&strm_path).await else { return StatusCode::NOT_FOUND.into_response(); };
-    let url = url.trim().to_string();
+
+    // 1. 安全读取 STRM 文件 (参考 Lux 防止恶意文件占满内存)
+    let file = match tokio::fs::File::open(&strm_path).await {
+        Ok(f) => f,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let mut contents = String::new();
+    if file.take(MAX_STRM_SIZE).read_to_string(&mut contents).await.is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    // 去除空行和多余空格
+    let url = contents.lines().map(str::trim).find(|s| !s.is_empty()).unwrap_or("");
     if !url.starts_with("http") { return StatusCode::NOT_FOUND.into_response(); }
 
     let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("unknown");
@@ -477,8 +491,8 @@ pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(it
     }
 
     let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(15)).build().unwrap();
-    let mut final_url = url.clone();
-    if let Ok(resp) = client.get(&url).header(USER_AGENT, ua).send().await {
+    let mut final_url = url.to_string();
+    if let Ok(resp) = client.get(url).header(USER_AGENT, ua).send().await {
         if resp.status().is_redirection() {
             if let Some(location) = resp.headers().get("location") {
                 if let Ok(loc_str) = location.to_str() { final_url = loc_str.to_string(); }
@@ -493,67 +507,26 @@ pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(it
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
 }
 
-// ================= 继续观看隐藏 =================
-
+// ================= 隐藏继续观看 =================
 #[derive(Deserialize)]
-pub struct ResumeVisibilityQuery {
-    #[serde(rename = "Hide")]
-    pub hide: Option<String>,
-}
-
+pub struct ResumeVisibilityQuery { #[serde(rename = "Hide")] pub hide: Option<String> }
 #[derive(Deserialize)]
-pub struct ResumeVisibilityBody {
-    #[serde(rename = "Hide")]
-    pub hide: bool,
-}
+pub struct ResumeVisibilityBody { #[serde(rename = "Hide")] pub hide: bool }
 
 fn emby_user_item_data_json(item_id: &str, is_hidden: bool) -> Value {
-    json!({
-        "PlaybackPositionTicks": 0,
-        "PlayCount": 0,
-        "IsFavorite": false,
-        "Played": false,
-        "HideFromResume": is_hidden
-    })
+    json!({ "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "HideFromResume": is_hidden })
 }
 
-pub async fn emby_hide_from_resume(
-    AxumPath((_user_id, item_id)): AxumPath<(String, String)>,
-    Query(query): Query<ResumeVisibilityQuery>,
-    body: Bytes,
-) -> Response {
-    emby_handle_hide(item_id, query, body)
-}
-
-pub async fn emby_hide_from_resume_without_user(
-    AxumPath(item_id): AxumPath<String>,
-    Query(query): Query<ResumeVisibilityQuery>,
-    body: Bytes,
-) -> Response {
-    emby_handle_hide(item_id, query, body)
-}
+pub async fn emby_hide_from_resume(AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Query(query): Query<ResumeVisibilityQuery>, body: Bytes) -> Response { emby_handle_hide(item_id, query, body) }
+pub async fn emby_hide_from_resume_without_user(AxumPath(item_id): AxumPath<String>, Query(query): Query<ResumeVisibilityQuery>, body: Bytes) -> Response { emby_handle_hide(item_id, query, body) }
 
 fn emby_handle_hide(item_id: String, query: ResumeVisibilityQuery, body: Bytes) -> Response {
-    let query_hide = match query.hide.as_deref().map(str::parse::<bool>).transpose() {
-        Ok(value) => value,
-        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
-    };
-    let body_hide = if body.is_empty() {
-        None
-    } else {
-        match serde_json::from_slice::<ResumeVisibilityBody>(&body) {
-            Ok(body) => Some(body.hide),
-            Err(_) => return StatusCode::BAD_REQUEST.into_response(),
-        }
-    };
+    let query_hide = match query.hide.as_deref().map(str::parse::<bool>).transpose() { Ok(value) => value, Err(_) => return StatusCode::BAD_REQUEST.into_response() };
+    let body_hide = if body.is_empty() { None } else { match serde_json::from_slice::<ResumeVisibilityBody>(&body) { Ok(body) => Some(body.hide), Err(_) => return StatusCode::BAD_REQUEST.into_response() } };
     let hidden = match (query_hide, body_hide) {
-        (Some(q), Some(b)) if q != b => {
-            return StatusCode::BAD_REQUEST.into_response();
-        }
+        (Some(q), Some(b)) if q != b => return StatusCode::BAD_REQUEST.into_response(),
         (Some(h), _) | (_, Some(h)) => h,
         (None, None) => return StatusCode::BAD_REQUEST.into_response(),
     };
-    
-    // 我们暂且不保存这个状态，直接返回成功
     Json(emby_user_item_data_json(&item_id, hidden)).into_response()
 }
