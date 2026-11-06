@@ -3,6 +3,7 @@ use axum::{
     http::{StatusCode, header::{LOCATION, USER_AGENT, CONTENT_TYPE}, HeaderMap},
     middleware::Next,
     response::{IntoResponse, Response},
+    body::Bytes,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -16,8 +17,40 @@ use std::path::Path;
 static TOKENS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 static STRM_CACHE: OnceLock<Mutex<HashMap<String, (String, Instant)>>> = OnceLock::new();
 
-// ================= 鉴权与登录 =================
+// =========================================================================
+// 1. Token 万能提取逻辑
+// =========================================================================
+fn extract_emby_token(headers: &HeaderMap, query_str: Option<&str>) -> Option<String> {
+    if let Some(val) = headers.get("X-Emby-Token").or_else(|| headers.get("X-MediaBrowser-Token")) {
+        if let Ok(s) = val.to_str() { if !s.is_empty() { return Some(s.to_string()); } }
+    }
+    if let Some(val) = headers.get("Authorization").and_then(|v| v.to_str().ok()) {
+        if let Some(token) = val.strip_prefix("Bearer ") {
+            return Some(token.trim().to_string());
+        }
+        if let Some(idx) = val.find("Token=\"") {
+            let rest = &val[idx + 7..];
+            if let Some(end_idx) = rest.find('"') {
+                return Some(rest[..end_idx].to_string());
+            }
+        }
+    }
+    if let Some(query) = query_str {
+        for pair in query.split('&') {
+            if let Some((k, v)) = pair.split_once('=') {
+                let k_lower = k.to_lowercase();
+                if k_lower == "api_key" || k_lower == "x-emby-token" || k_lower == "apikey" {
+                    return Some(v.to_string());
+                }
+            }
+        }
+    }
+    None
+}
 
+// =========================================================================
+// 2. Web UI 基础 API
+// =========================================================================
 #[derive(Deserialize)]
 pub struct LoginReq { username: String, password: String }
 
@@ -28,9 +61,7 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
 
     let conn = pool.lock().unwrap();
     let mut stmt = conn.prepare("SELECT id FROM users WHERE username = ?1 AND password = ?2").unwrap();
-    let exists = stmt.exists([&payload.username, &hashed_pwd]).unwrap();
-
-    if exists {
+    if stmt.exists([&payload.username, &hashed_pwd]).unwrap() {
         let token = uuid::Uuid::new_v4().to_string();
         TOKENS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap().push(token.clone());
         (StatusCode::OK, Json(json!({ "token": token })))
@@ -40,32 +71,15 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
 }
 
 pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
-    if let Some(auth_header) = req.headers().get("Authorization") {
-        if let Some(token) = auth_header.to_str().unwrap_or("").strip_prefix("Bearer ") {
-            if let Some(tokens) = TOKENS.get() {
-                if tokens.lock().unwrap().contains(&token.to_string()) {
-                    return Ok(next.run(req).await);
-                }
-            }
-        }
-    }
-    if let Some(query) = req.uri().query() {
-        for pair in query.split('&') {
-            if let Some((key, value)) = pair.split_once('=') {
-                if key == "token" {
-                    if let Some(tokens) = TOKENS.get() {
-                        if tokens.lock().unwrap().contains(&value.to_string()) {
-                            return Ok(next.run(req).await);
-                        }
-                    }
-                }
+    if let Some(token) = extract_emby_token(req.headers(), req.uri().query()) {
+        if let Some(tokens) = TOKENS.get() {
+            if tokens.lock().unwrap().contains(&token) {
+                return Ok(next.run(req).await);
             }
         }
     }
     Err(StatusCode::UNAUTHORIZED)
 }
-
-// ================= 浏览目录 =================
 
 #[derive(Deserialize)]
 pub struct BrowseReq { path: String }
@@ -91,7 +105,7 @@ pub async fn browse_dir(Query(req): Query<BrowseReq>) -> impl IntoResponse {
                     }
                 }
             }
-            Err(e) => { error_msg = Some(format!("无法读取目录 [{}]: {}", base_path, e)); }
+            Err(e) => { error_msg = Some(format!("无法读取目录: {}", e)); }
         }
         dirs.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
         files.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
@@ -101,8 +115,6 @@ pub async fn browse_dir(Query(req): Query<BrowseReq>) -> impl IntoResponse {
     let (dirs, files, error, current) = result;
     Json(json!({ "current": current, "dirs": dirs, "files": files, "error": error }))
 }
-
-// ================= 媒体库管理 =================
 
 #[derive(Deserialize, Clone)]
 pub struct AddLibReq { name: String, paths: Vec<String>, #[serde(rename = "type")] lib_type: String }
@@ -129,7 +141,6 @@ pub async fn add_library(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
             }
         }
     }).await.unwrap();
-
     Json(json!({"status": "scanning"}))
 }
 
@@ -137,62 +148,34 @@ pub async fn get_libraries(State(pool): State<Arc<Mutex<Connection>>>) -> impl I
     let conn = pool.lock().unwrap();
     let mut stmt = conn.prepare("SELECT id, name, type FROM libraries").unwrap();
     let libs: Vec<Value> = stmt.query_map([], |row| {
-        Ok(json!({
-            "id": row.get::<_, i64>(0).unwrap_or_default(),
-            "name": row.get::<_, String>(1).unwrap_or_default(),
-            "type": row.get::<_, String>(2).unwrap_or_default(),
-        }))
+        Ok(json!({ "id": row.get::<_, i64>(0).unwrap_or_default(), "name": row.get::<_, String>(1).unwrap_or_default(), "type": row.get::<_, String>(2).unwrap_or_default() }))
     }).unwrap().filter_map(Result::ok).collect();
-
     Json(json!({ "libraries": libs }))
 }
 
-pub async fn delete_library(
-    State(pool): State<Arc<Mutex<Connection>>>, 
-    AxumPath(id): AxumPath<i64>
-) -> impl IntoResponse {
+pub async fn delete_library(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(id): AxumPath<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    // 先删关联的媒体项，再删媒体库
     let _ = conn.execute("DELETE FROM items WHERE library_id = ?1", [id]);
     let _ = conn.execute("DELETE FROM libraries WHERE id = ?1", [id]);
     Json(json!({"status": "success"}))
 }
 
-pub async fn rescan_library(
-    State(pool): State<Arc<Mutex<Connection>>>, 
-    AxumPath(id): AxumPath<i64>
-) -> impl IntoResponse {
+pub async fn rescan_library(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(id): AxumPath<i64>) -> impl IntoResponse {
     let pool_clone = pool.clone();
     tokio::task::spawn_blocking(move || {
         let conn = pool_clone.lock().unwrap();
-        
-        // 获取库信息
-        let (name, paths_json, lib_type) = match conn.query_row(
-            "SELECT name, path, type FROM libraries WHERE id = ?1", 
-            [id], 
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
-        ) {
-            Ok(v) => v,
-            Err(_) => return, // 库不存在
-        };
-
-        let paths: Vec<String> = serde_json::from_str(&paths_json).unwrap_or_default();
-        println!("🔄 重新扫描媒体库: {}", name);
-
-        for path_str in paths {
-            let path = Path::new(&path_str);
-            if path.is_dir() {
-                for entry in walkdir::WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
-                    if entry.file_type().is_file() {
-                        process_file(entry.path(), &lib_type, id, &conn);
+        if let Ok((_, paths_json, lib_type)) = conn.query_row("SELECT name, path, type FROM libraries WHERE id = ?1", [id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))) {
+            let paths: Vec<String> = serde_json::from_str(&paths_json).unwrap_or_default();
+            for path_str in paths {
+                let path = Path::new(&path_str);
+                if path.is_dir() {
+                    for entry in walkdir::WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+                        if entry.file_type().is_file() { process_file(entry.path(), &lib_type, id, &conn); }
                     }
                 }
-            } else if path.is_file() {
-                process_file(path, &lib_type, id, &conn);
             }
         }
     }).await.unwrap();
-
     Json(json!({"status": "scanning"}))
 }
 
@@ -200,7 +183,6 @@ fn process_file(file_path: &Path, lib_type: &str, lib_id: i64, conn: &Connection
     if file_path.extension().map_or(false, |ext| ext == "strm") {
         let stem = file_path.file_stem().unwrap().to_string_lossy().to_string();
         let parent = file_path.parent().unwrap_or(Path::new(""));
-        
         let nfo_path = file_path.with_extension("nfo");
         let mut title = stem.clone();
         let mut plot = "".to_string();
@@ -214,15 +196,11 @@ fn process_file(file_path: &Path, lib_type: &str, lib_id: i64, conn: &Connection
 
         let mut poster_path = "".to_string();
         let mut fanart_path = "".to_string();
-        
-        let poster_names = [format!("{}-poster.jpg", stem), "poster.jpg".to_string(), "folder.jpg".to_string()];
-        for name in poster_names {
+        for name in [format!("{}-poster.jpg", stem), "poster.jpg".to_string(), "folder.jpg".to_string()] {
             let p = parent.join(&name);
             if p.exists() { poster_path = p.to_string_lossy().to_string(); break; }
         }
-
-        let fanart_names = [format!("{}-fanart.jpg", stem), "fanart.jpg".to_string(), "background.jpg".to_string()];
-        for name in fanart_names {
+        for name in [format!("{}-fanart.jpg", stem), "fanart.jpg".to_string(), "background.jpg".to_string()] {
             let p = parent.join(&name);
             if p.exists() { fanart_path = p.to_string_lossy().to_string(); break; }
         }
@@ -235,65 +213,37 @@ fn process_file(file_path: &Path, lib_type: &str, lib_id: i64, conn: &Connection
     }
 }
 
-// ================= 媒体项获取 (支持筛选) =================
-
 #[derive(Deserialize)]
-pub struct ItemQuery {
-    library_id: Option<i64>,
-    lib_type: Option<String>,
-}
+pub struct ItemQuery { library_id: Option<i64>, lib_type: Option<String> }
 
-pub async fn get_items(
-    State(pool): State<Arc<Mutex<Connection>>>,
-    Query(query): Query<ItemQuery>,
-) -> impl IntoResponse {
+pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<ItemQuery>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    
-    // 动态构建 SQL
     let mut sql = "SELECT id, title, type, year, plot, poster_path FROM items WHERE 1=1".to_string();
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-
-    if let Some(lid) = query.library_id {
-        sql.push_str(" AND library_id = ?");
-        params.push(Box::new(lid));
-    }
-    if let Some(lt) = query.lib_type {
-        sql.push_str(" AND type = ?");
-        params.push(Box::new(lt));
-    }
+    if let Some(lid) = query.library_id { sql.push_str(&format!(" AND library_id = {}", lid)); }
+    if let Some(lt) = query.lib_type { sql.push_str(&format!(" AND type = '{}'", lt)); }
     sql.push_str(" ORDER BY title ASC");
 
     let mut stmt = conn.prepare(&sql).unwrap();
-    let params_ref: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    
-    let items: Vec<Value> = stmt.query_map(params_ref.as_slice(), |row| {
-        let id: i64 = row.get(0).unwrap_or_default();
-        let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
+    let items: Vec<Value> = stmt.query_map([], |row| {
         Ok(json!({
-            "id": id,
+            "id": row.get::<_, i64>(0).unwrap_or_default(),
             "title": row.get::<_, String>(1).unwrap_or_default(),
             "type": row.get::<_, String>(2).unwrap_or_default(),
             "year": row.get::<_, String>(3).unwrap_or_default(),
             "plot": row.get::<_, String>(4).unwrap_or_default(),
-            "has_poster": has_poster,
+            "has_poster": !row.get::<_, String>(5).unwrap_or_default().is_empty(),
         }))
     }).unwrap().filter_map(Result::ok).collect();
-
     Json(json!({ "items": items }))
 }
 
-pub async fn get_image(
-    State(pool): State<Arc<Mutex<Connection>>>,
-    AxumPath((id, img_type)): AxumPath<(i64, String)>,
-) -> Response {
+pub async fn get_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((id, img_type)): AxumPath<(i64, String)>) -> Response {
     let path_opt = {
         let conn = pool.lock().unwrap();
         let query = if img_type == "poster" { "SELECT poster_path FROM items WHERE id = ?1" } else { "SELECT fanart_path FROM items WHERE id = ?1" };
         let mut stmt = conn.prepare(query).unwrap();
-        let res: Result<String, _> = stmt.query_row([id], |row| row.get(0));
-        res.ok()
+        stmt.query_row([id], |row| row.get::<_, String>(0)).ok()
     };
-    
     if let Some(path_str) = path_opt {
         if !path_str.is_empty() {
             if let Ok(bytes) = tokio::fs::read(&path_str).await {
@@ -309,21 +259,11 @@ pub async fn get_image(
 pub struct UpdateUserReq { old_password: String, new_username: String, new_password: String }
 
 pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<UpdateUserReq>) -> impl IntoResponse {
-    let mut hasher_old = Sha256::new();
-    hasher_old.update(&payload.old_password);
-    let hashed_old = format!("{:x}", hasher_old.finalize());
-
-    let mut hasher_new = Sha256::new();
-    hasher_new.update(&payload.new_password);
-    let hashed_new = format!("{:x}", hasher_new.finalize());
-
+    let mut hasher_old = Sha256::new(); hasher_old.update(&payload.old_password);
+    let mut hasher_new = Sha256::new(); hasher_new.update(&payload.new_password);
     let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id FROM users WHERE username = 'admin' AND password = ?1").unwrap();
-    if stmt.exists([&hashed_old]).unwrap() {
-        conn.execute(
-            "UPDATE users SET username = ?1, password = ?2 WHERE username = 'admin'", 
-            [&payload.new_username, &hashed_new]
-        ).unwrap();
+    if conn.prepare("SELECT id FROM users WHERE username = 'admin' AND password = ?1").unwrap().exists([&format!("{:x}", hasher_old.finalize())]).unwrap() {
+        conn.execute("UPDATE users SET username = ?1, password = ?2 WHERE username = 'admin'", [&payload.new_username, &format!("{:x}", hasher_new.finalize())]).unwrap();
         if let Some(tokens) = TOKENS.get() { tokens.lock().unwrap().clear(); }
         (StatusCode::OK, Json(json!({"status": "success"})))
     } else {
@@ -331,47 +271,81 @@ pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
     }
 }
 
-// ================= Emby 协议兼容层 =================
+// =========================================================================
+// 3. Emby 协议兼容层
+// =========================================================================
 
-pub async fn emby_info() -> impl IntoResponse { 
+pub async fn emby_public_info() -> impl IntoResponse {
     Json(json!({
         "ServerName": "Rust-Em",
-        "Version": "0.1.0",
+        "Version": "4.8.0.0",
         "Id": "rust-em-server",
         "OperatingSystem": "Linux",
-        "HasPendingRestart": false,
-        "IsShuttingDown": false
-    })) 
+        "StartupWizardCompleted": true
+    }))
 }
 
-#[derive(Deserialize)]
-pub struct EmbyAuthReq {
-    #[serde(rename = "Username")]
-    pub username: String,
-    #[serde(rename = "Pw")]
-    pub password: String,
+pub async fn emby_info() -> impl IntoResponse {
+    Json(json!({
+        "ServerName": "Rust-Em",
+        "Version": "4.8.0.0",
+        "Id": "rust-em-server",
+        "OperatingSystem": "Linux",
+        "OperatingSystemDisplayName": "Linux",
+        "HasPendingRestart": false,
+        "IsShuttingDown": false,
+        "SupportsLibraryMonitor": false,
+        "SupportsHttps": true,
+        "HttpServerPortNumber": 8096
+    }))
+}
+
+pub async fn emby_auth_keys() -> impl IntoResponse {
+    Json(json!({ "Items": [], "TotalRecordCount": 0 }))
 }
 
 pub async fn emby_authenticate(
     State(pool): State<Arc<Mutex<Connection>>>,
-    Json(payload): Json<EmbyAuthReq>,
+    headers: HeaderMap,
+    body: Bytes,
 ) -> Response {
+    let content_type = headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("");
+    let mut username = String::new();
+    let mut password = String::new();
+
+    if content_type.contains("application/json") {
+        if let Ok(val) = serde_json::from_slice::<Value>(&body) {
+            username = val["Username"].as_str().unwrap_or("").to_string();
+            password = val["Pw"].as_str().unwrap_or("").to_string();
+        }
+    } else if content_type.contains("application/x-www-form-urlencoded") {
+        for (k, v) in url::form_urlencoded::parse(&body) {
+            if k == "Username" { username = v.to_string(); }
+            if k == "Pw" { password = v.to_string(); }
+        }
+    }
+
     let mut hasher = Sha256::new();
-    hasher.update(&payload.password);
+    hasher.update(&password);
     let hashed_pwd = format!("{:x}", hasher.finalize());
 
     let conn = pool.lock().unwrap();
     let mut stmt = conn.prepare("SELECT id, username FROM users WHERE username = ?1 AND password = ?2").unwrap();
-    let user_opt = stmt.query_row([&payload.username, &hashed_pwd], |row| {
-        Ok((row.get::<_, i64>(0).unwrap(), row.get::<_, String>(1).unwrap()))
-    }).ok();
+    let user_opt = stmt.query_row([&username, &hashed_pwd], |row| Ok((row.get::<_, i64>(0).unwrap(), row.get::<_, String>(1).unwrap()))).ok();
 
     if let Some((id, name)) = user_opt {
         let token = uuid::Uuid::new_v4().to_string();
         TOKENS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap().push(token.clone());
         
         (StatusCode::OK, Json(json!({
-            "User": { "Id": id.to_string(), "Name": name },
+            "User": { 
+                "Id": id.to_string(), 
+                "Name": name,
+                "ServerId": "rust-em-server",
+                "HasPassword": true,
+                "Policy": { "IsAdministrator": true, "EnableAllFolders": true }
+            },
+            "SessionInfo": { "Id": uuid::Uuid::new_v4().to_string(), "UserId": id.to_string() },
             "AccessToken": token,
             "ServerId": "rust-em-server"
         }))).into_response()
@@ -380,80 +354,115 @@ pub async fn emby_authenticate(
     }
 }
 
-pub async fn emby_items(
-    State(pool): State<Arc<Mutex<Connection>>>,
-) -> impl IntoResponse {
+pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path FROM items").unwrap();
-    
+    let mut stmt = conn.prepare("SELECT id, name, type FROM libraries").unwrap();
     let items: Vec<Value> = stmt.query_map([], |row| {
         let id: i64 = row.get(0).unwrap_or_default();
-        let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
+        let name: String = row.get(1).unwrap_or_default();
+        let lib_type: String = row.get(2).unwrap_or_default();
+        let collection_type = if lib_type == "movies" { "movies" } else { "tvshows" };
         Ok(json!({
-            "Id": id.to_string(),
-            "Name": row.get::<_, String>(1).unwrap_or_default(),
-            "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
-            "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
-            "Overview": row.get::<_, String>(4).unwrap_or_default(),
-            "ImageTags": if has_poster { json!({"Primary": "tag"}) } else { json!({}) },
-            "MediaSources": [{ "Id": id.to_string(), "SupportsDirectPlay": true }]
+            "Name": name, "Id": format!("lib_{}", id), "ServerId": "rust-em-server",
+            "Type": "CollectionFolder", "IsFolder": true, "MediaType": "Video",
+            "CollectionType": collection_type, "ChildCount": 0, "RecursiveItemCount": 0,
+            "ImageTags": {}, "BackdropImageTags": [],
+            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
         }))
     }).unwrap().filter_map(Result::ok).collect();
-
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_playback_info(
-    State(pool): State<Arc<Mutex<Connection>>>, 
-    AxumPath(item_id): AxumPath<i64>
-) -> Response {
-    let path_opt = {
-        let conn = pool.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT file_path FROM items WHERE id = ?1").unwrap();
-        let res: Result<String, _> = stmt.query_row([item_id], |row| row.get(0));
-        res.ok()
-    };
+#[derive(Deserialize, Default)]
+pub struct EmbyItemsQuery { #[serde(rename = "ParentId")] parent_id: Option<String> }
 
-    if let Some(path_str) = path_opt {
-        Json(json!({
-            "MediaSources": [{
-                "Id": item_id.to_string(),
-                "Path": path_str,
-                "Protocol": "Http",
-                "SupportsDirectPlay": true,
-                "SupportsDirectStream": true,
-                "SupportsTranscoding": false
-            }]
-        })).into_response()
-    } else {
-        (StatusCode::NOT_FOUND, Json(json!({ "error": "Item not found" }))).into_response()
+pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(user_id): AxumPath<String>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path FROM items WHERE 1=1".to_string();
+    if let Some(pid) = &query.parent_id {
+        if pid.starts_with("lib_") {
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); }
+        }
     }
+    sql.push_str(" ORDER BY id DESC LIMIT 100");
+    let mut stmt = conn.prepare(&sql).unwrap();
+    let items: Vec<Value> = stmt.query_map([], |row| {
+        let id: i64 = row.get(0).unwrap_or_default();
+        let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
+        let item_type: String = row.get(2).unwrap_or_default();
+        let file_path: String = row.get(6).unwrap_or_default();
+        Ok(json!({
+            "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(),
+            "ServerId": "rust-em-server", "Type": if item_type == "movies" { "Movie" } else { "Series" },
+            "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
+            "Overview": row.get::<_, String>(4).unwrap_or_default(),
+            "ImageTags": if has_poster { json!({"Primary": "tag"}) } else { json!({}) },
+            "BackdropImageTags": [], "Path": file_path,
+            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
+            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
+        }))
+    }).unwrap().filter_map(Result::ok).collect();
+    Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_stream(
-    State(pool): State<Arc<Mutex<Connection>>>, 
-    AxumPath(item_id): AxumPath<i64>,
-    headers: HeaderMap,
-) -> Response {
+pub async fn emby_item_detail(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<String>) -> Response {
+    let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
+    let conn = pool.lock().unwrap();
+    let item_opt = conn.query_row("SELECT id, title, type, year, plot, poster_path, file_path FROM items WHERE id = ?1", [id], |row| {
+        let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
+        let item_type: String = row.get(2).unwrap_or_default();
+        Ok(json!({
+            "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(),
+            "ServerId": "rust-em-server", "Type": if item_type == "movies" { "Movie" } else { "Series" },
+            "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
+            "Overview": row.get::<_, String>(4).unwrap_or_default(),
+            "ImageTags": if has_poster { json!({"Primary": "tag"}) } else { json!({}) },
+            "Path": row.get::<_, String>(6).unwrap_or_default(),
+            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
+            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
+        }))
+    }).ok();
+    if let Some(item) = item_opt { Json(item).into_response() } else { StatusCode::NOT_FOUND.into_response() }
+}
+
+pub async fn emby_item_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type)): AxumPath<(String, String)>) -> Response {
+    let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let path_opt = {
         let conn = pool.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT file_path FROM items WHERE id = ?1").unwrap();
-        let res: Result<String, _> = stmt.query_row([item_id], |row| row.get(0));
-        res.ok()
+        let query = if image_type.to_lowercase() == "primary" || image_type.to_lowercase() == "thumb" { "SELECT poster_path FROM items WHERE id = ?1" } else { "SELECT fanart_path FROM items WHERE id = ?1" };
+        let mut stmt = conn.prepare(query).unwrap();
+        stmt.query_row([id], |row| row.get::<_, String>(0)).ok()
     };
-
-    let Some(strm_path) = path_opt else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    let Ok(url) = tokio::fs::read_to_string(&strm_path).await else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    let url = url.trim().to_string();
-
-    if !url.starts_with("http") {
-        return StatusCode::NOT_FOUND.into_response();
+    if let Some(path_str) = path_opt {
+        if !path_str.is_empty() {
+            if let Ok(bytes) = tokio::fs::read(&path_str).await {
+                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
+                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
+            }
+        }
     }
+    StatusCode::NOT_FOUND.into_response()
+}
+
+pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> Response {
+    let conn = pool.lock().unwrap();
+    let path_opt = conn.query_row("SELECT file_path FROM items WHERE id = ?1", [item_id], |row| row.get::<_, String>(0)).ok();
+    if let Some(path_str) = path_opt {
+        Json(json!({
+            "MediaSources": [{ "Id": item_id.to_string(), "Path": path_str, "Protocol": "Http", "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsTranscoding": false }]
+        })).into_response()
+    } else { StatusCode::NOT_FOUND.into_response() }
+}
+
+pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>, headers: HeaderMap) -> Response {
+    let path_opt = {
+        let conn = pool.lock().unwrap();
+        conn.query_row("SELECT file_path FROM items WHERE id = ?1", [item_id], |row| row.get::<_, String>(0)).ok()
+    };
+    let Some(strm_path) = path_opt else { return StatusCode::NOT_FOUND.into_response(); };
+    let Ok(url) = tokio::fs::read_to_string(&strm_path).await else { return StatusCode::NOT_FOUND.into_response(); };
+    let url = url.trim().to_string();
+    if !url.starts_with("http") { return StatusCode::NOT_FOUND.into_response(); }
 
     let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
@@ -463,33 +472,16 @@ pub async fn emby_stream(
     {
         let mut cache_lock = cache.lock().unwrap();
         if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) {
-            if Instant::now() < *expire_at {
-                return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response();
-            } else {
-                cache_lock.remove(&cache_key);
-            }
-        }
-        if cache_lock.len() > 512 {
-            cache_lock.retain(|_, (_, expire)| Instant::now() < *expire);
+            if Instant::now() < *expire_at { return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); }
         }
     }
 
-    let client = match reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(15))
-        .build() {
-            Ok(c) => c,
-            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        };
-
+    let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(15)).build().unwrap();
     let mut final_url = url.clone();
-
     if let Ok(resp) = client.get(&url).header(USER_AGENT, ua).send().await {
         if resp.status().is_redirection() {
             if let Some(location) = resp.headers().get("location") {
-                if let Ok(loc_str) = location.to_str() {
-                    final_url = loc_str.to_string();
-                }
+                if let Ok(loc_str) = location.to_str() { final_url = loc_str.to_string(); }
             }
         }
     }
@@ -498,6 +490,70 @@ pub async fn emby_stream(
         let mut cache_lock = cache.lock().unwrap();
         cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(5)));
     }
-
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
+}
+
+// ================= 继续观看隐藏 =================
+
+#[derive(Deserialize)]
+pub struct ResumeVisibilityQuery {
+    #[serde(rename = "Hide")]
+    pub hide: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ResumeVisibilityBody {
+    #[serde(rename = "Hide")]
+    pub hide: bool,
+}
+
+fn emby_user_item_data_json(item_id: &str, is_hidden: bool) -> Value {
+    json!({
+        "PlaybackPositionTicks": 0,
+        "PlayCount": 0,
+        "IsFavorite": false,
+        "Played": false,
+        "HideFromResume": is_hidden
+    })
+}
+
+pub async fn emby_hide_from_resume(
+    AxumPath((_user_id, item_id)): AxumPath<(String, String)>,
+    Query(query): Query<ResumeVisibilityQuery>,
+    body: Bytes,
+) -> Response {
+    emby_handle_hide(item_id, query, body)
+}
+
+pub async fn emby_hide_from_resume_without_user(
+    AxumPath(item_id): AxumPath<String>,
+    Query(query): Query<ResumeVisibilityQuery>,
+    body: Bytes,
+) -> Response {
+    emby_handle_hide(item_id, query, body)
+}
+
+fn emby_handle_hide(item_id: String, query: ResumeVisibilityQuery, body: Bytes) -> Response {
+    let query_hide = match query.hide.as_deref().map(str::parse::<bool>).transpose() {
+        Ok(value) => value,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    let body_hide = if body.is_empty() {
+        None
+    } else {
+        match serde_json::from_slice::<ResumeVisibilityBody>(&body) {
+            Ok(body) => Some(body.hide),
+            Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+        }
+    };
+    let hidden = match (query_hide, body_hide) {
+        (Some(q), Some(b)) if q != b => {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        (Some(h), _) | (_, Some(h)) => h,
+        (None, None) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    
+    // 我们暂且不保存这个状态，直接返回成功
+    Json(emby_user_item_data_json(&item_id, hidden)).into_response()
 }
