@@ -1,13 +1,11 @@
-# ==========================================
-# 第一阶段：编译阶段 (Builder)
-# ==========================================
 FROM rust:alpine AS builder
 
 RUN apk add --no-cache musl-dev gcc
 
 WORKDIR /app
 
-COPY Cargo.toml Cargo.lock ./
+# 这里使用 * 通配符，没 Cargo.lock 也不会报错
+COPY Cargo.* ./
 RUN mkdir src && echo "fn main() {}" > src/main.rs && \
     cargo build --release && \
     rm -rf src target/release/deps/rust_em* target/release/rust_em*
@@ -15,9 +13,6 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs && \
 COPY src ./src
 RUN cargo build --release
 
-# ==========================================
-# 第二阶段：运行阶段 (Runtime)
-# ==========================================
 FROM alpine:latest
 
 RUN apk add --no-cache libgcc
