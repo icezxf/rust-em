@@ -164,7 +164,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                 if let Some(meta) = crate::nfo::read_nfo(&nfo) {
                     if let Some(t) = meta.title { title = t; }
                     if let Some(p) = meta.plot { plot = p; }
-                    if let Some(y) = meta.year { year = y.to_string(); }
+                    if let Some(y) = meta.year { year = y; }
                     if let Some(r) = meta.rating { rating = r; }
                     if let Some(m) = meta.mpaa { mpaa = m; }
                     if let Some(rt) = meta.runtime { runtime = rt; }
@@ -172,7 +172,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                     if let Some(tg) = meta.tagline { tagline = tg; }
                     if let Some(s) = meta.series { series = s; }
                     if let Some(l) = meta.label { label = l; }
-                    if let Some(set) = meta.set { if let Some(n) = set.name { set_name = n; } }
+                    if let Some(set) = meta.set { set_name = set; }
                     
                     if !meta.genres.is_empty() { genres = meta.genres.join(" / "); }
                     if !meta.directors.is_empty() { directors = meta.directors.join(" / "); }
@@ -186,10 +186,8 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                     actors_json = serde_json::to_string(&actors_arr).unwrap_or_default();
 
                     for uid in meta.unique_ids {
-                        if let Some(t) = uid.id_type {
-                            if t.to_lowercase() == "tmdb" { tmdb_id = uid.text.clone(); }
-                            if t.to_lowercase() == "imdb" { imdb_id = uid.text.clone(); }
-                        }
+                        if uid.0 == "tmdb" { tmdb_id = uid.1.clone(); }
+                        if uid.0 == "imdb" { imdb_id = uid.1.clone(); }
                     }
 
                     let resolve_path = |p: &str| -> String {
@@ -199,17 +197,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                     };
 
                     if let Some(poster) = meta.poster { nfo_poster = resolve_path(&poster); }
-                    else if let Some(cover) = meta.cover { nfo_poster = resolve_path(&cover); }
-                    else if let Some(thumb) = meta.thumbs.first() { nfo_poster = resolve_path(&thumb.text); }
-
-                    if let Some(fanart) = meta.fanart {
-                        match fanart {
-                            crate::nfo::NfoFanartType::Str(s) => nfo_fanart = resolve_path(&s),
-                            crate::nfo::NfoFanartType::Obj(obj) => {
-                                if let Some(thumb) = obj.thumbs.first() { nfo_fanart = resolve_path(&thumb.text); }
-                            }
-                        }
-                    }
+                    if let Some(fanart) = meta.fanart { nfo_fanart = resolve_path(&fanart); }
                     break;
                 }
             }
@@ -456,7 +444,7 @@ pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(it
     let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     let cache_key = format!("{}|{}|{}", url, ip, ua);
     let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    { let mut cache_lock = cache.lock().unwrap(); if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) { if Instant::now() < *expire_at { return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); } } }
+    { let cache_lock = cache.lock().unwrap(); if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) { if Instant::now() < *expire_at { return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); } } }
     let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(15)).build().unwrap();
     let mut final_url = url.to_string();
     if let Ok(resp) = client.get(url).header(USER_AGENT, ua).send().await {
