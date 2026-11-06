@@ -130,7 +130,6 @@ fn get_image_type(stem: &str) -> Option<&'static str> {
     match base { "poster" => Some("poster"), "fanart" | "backdrop" => Some("fanart"), "logo" | "clearlogo" => Some("logo"), "thumb" | "thumbnail" => Some("thumb"), "banner" => Some("banner"), _ => None }
 }
 
-// 提取基础名字（去掉 -cd1, -part2 等后缀）
 fn get_base_stem(stem: &str) -> String {
     let lower = stem.to_lowercase();
     for p in &["-cd", "-disc", "-part", "-pt"] {
@@ -172,11 +171,17 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         let size: i64 = paths.iter().filter_map(|p| std::fs::metadata(p).ok().map(|m| m.len() as i64)).sum();
         let mtime = metadata.modified().unwrap_or(UNIX_EPOCH).duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
         
-        // 用基础名作为该媒体的唯一路径标识
         let virtual_path = parent.join(format!("{}.strm", base_stem)).to_string_lossy().to_string();
         
-        // 读取第一个片段的内容（供展示）
-        let strm_content = std::fs::read_to_string(first_path).map(|s| s.trim().to_string()).unwrap_or_default();
+        // 读取所有片段的内容并拼接（用于展示）
+        let mut combined_content = String::new();
+        for p in &paths {
+            if let Ok(c) = std::fs::read_to_string(p) {
+                combined_content.push_str(c.trim());
+                combined_content.push('\n');
+            }
+        }
+        let strm_content = combined_content.trim().to_string();
         
         let parts_json = serde_json::to_string(&paths.iter().map(|p| p.to_string_lossy().to_string()).collect::<Vec<_>>()).unwrap_or_default();
 

@@ -115,7 +115,6 @@
                             <img id="detail-poster" src="" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzM3NDE1MSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjOWNhM2FmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg=='">
                         </div>
                         
-                        <!-- 标题显示在海报下面 -->
                         <div class="text-center md:text-left w-full">
                             <h1 id="detail-title" class="text-3xl md:text-4xl font-black text-white tracking-tight drop-shadow-lg mb-2">影片标题</h1>
                             <div class="flex items-center justify-center md:justify-start gap-2 mb-4">
@@ -142,6 +141,7 @@
                             <div class="flex flex-col gap-1 text-xs text-gray-400 mb-2">
                                 <div id="detail-series-box" class="hidden"><span class="text-gray-500">系列: </span> <span id="detail-series" class="text-blue-400"></span></div>
                                 <div id="detail-label-box" class="hidden"><span class="text-gray-500">厂牌: </span> <span id="detail-label" class="text-blue-400"></span></div>
+                                <div id="detail-studio-box" class="hidden"><span class="text-gray-500">制作商: </span> <span id="detail-studios" class="text-blue-400"></span></div>
                             </div>
                         </div>
                     </div>
@@ -156,9 +156,7 @@
                             </div>
                         </div>
 
-                        <div class="flex gap-3 mb-6">
                         <div id="detail-play-actions" class="flex flex-wrap gap-2 mb-6"></div>
-                        </div>
 
                         <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base line-clamp-4 hover:line-clamp-none transition-all cursor-pointer mb-4">暂无简介...</p>
                         
@@ -172,6 +170,11 @@
                 <div class="mb-10 z-10">
                     <h3 class="text-sm text-gray-500 font-bold mb-4 uppercase tracking-wider">演职人员 CAST & CREW</h3>
                     <div id="detail-actors-list" class="flex gap-6 overflow-x-auto pb-4 no-scrollbar"></div>
+                </div>
+
+                <div id="detail-stills-section" class="mb-10 z-10 hidden">
+                    <h3 class="text-sm text-gray-500 font-bold mb-4 uppercase tracking-wider">剧照 STILLS</h3>
+                    <div id="detail-stills-list" class="flex gap-4 overflow-x-auto pb-4 no-scrollbar"></div>
                 </div>
 
                 <div class="mb-20 z-10">
@@ -200,15 +203,14 @@
                             </div>
                         </div>
 
-                        <!-- 新增：STRM 文件详情展示 -->
                         <div class="mt-4 border-t border-gray-800 pt-4 flex flex-col gap-3">
                             <div>
                                 <div class="text-xs text-gray-500 font-bold mb-1 uppercase">STRM 文件路径</div>
                                 <div id="detail-strm-path" class="text-sm font-mono text-gray-400 bg-black/30 p-2 rounded break-all select-all">暂无路径</div>
                             </div>
                             <div>
-                                <div class="text-xs text-gray-500 font-bold mb-1 uppercase">STRM 文件内容 (解码后)</div>
-                                <div id="detail-strm-content" class="text-sm font-mono text-gray-400 bg-black/30 p-2 rounded break-all select-all">暂无内容</div>
+                                <div class="text-xs text-gray-500 font-bold mb-1 uppercase">STRM 文件内容 (多片段已合并)</div>
+                                <div id="detail-strm-content" class="text-sm font-mono text-gray-400 bg-black/30 p-2 rounded break-all select-all whitespace-pre-wrap">暂无内容</div>
                             </div>
                         </div>
                     </div>
@@ -377,7 +379,6 @@
                 
                 cachedItems = data.items;
 
-                // 卡片布局重构：图片上，标题和年份在下方
                 grid.innerHTML = data.items.map(item => {
                     const imgUrl = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
                     const ratingHtml = item.rating > 0 ? `<div class="absolute bottom-2 right-2 bg-yellow-500 text-black font-bold text-xs px-2 py-0.5 rounded shadow-lg border border-yellow-400">${item.rating.toFixed(1)}</div>` : '';
@@ -405,7 +406,7 @@
             const title = document.getElementById('player-title');
             
             const item = cachedItems.find(i => i.id === currentPlayingItemId);
-            if(item) title.innerText = item.title;
+            if(item) title.innerText = item.title + (item.parts && item.parts.length > 1 ? ` (CD${partIndex + 1})` : '');
 
             playerModal.classList.remove('hidden');
             loading.classList.remove('hidden');
@@ -440,21 +441,6 @@
 
             document.getElementById('detail-year').innerText = item.year || '未知年份';
             document.getElementById('detail-rating-val').innerText = item.rating > 0 ? item.rating.toFixed(1) : '暂无';
-            const parts = item.parts || [];
-            const playActions = document.getElementById('detail-play-actions');
-            if (parts.length <= 1) {
-                playActions.innerHTML = `
-                <button onclick="playVideo(0)" class="bg-white text-black hover:bg-gray-200 px-6 py-2 rounded-full font-bold flex items-center gap-2 transition shadow-lg shadow-white/20">
-                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
-                    播放
-                </button>`;
-            } else {
-                playActions.innerHTML = parts.map((_, i) => `
-                <button onclick="playVideo(${i})" class="bg-white text-black hover:bg-gray-200 px-5 py-2 rounded-full font-bold flex items-center gap-2 transition shadow-lg shadow-white/20">
-                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
-                    播放 CD${i + 1}
-                </button>`).join('');
-            }
             
             if (item.runtime > 0) {
                 const h = Math.floor(item.runtime / 60), m = item.runtime % 60;
@@ -477,6 +463,8 @@
             if (item.series) { document.getElementById('detail-series').innerText = item.series; seriesBox.classList.remove('hidden'); } else { seriesBox.classList.add('hidden'); }
             const labelBox = document.getElementById('detail-label-box');
             if (item.label) { document.getElementById('detail-label').innerText = item.label; labelBox.classList.remove('hidden'); } else { labelBox.classList.add('hidden'); }
+            const studioBox = document.getElementById('detail-studio-box');
+            if (item.studios) { document.getElementById('detail-studios').innerText = item.studios; studioBox.classList.remove('hidden'); } else { studioBox.classList.add('hidden'); }
 
             const updateTextBlock = (id, valId, value) => {
                 const el = document.getElementById(id);
@@ -505,6 +493,22 @@
                 actorsContainer.innerHTML = `<div class="text-gray-500 text-sm">暂无演员信息</div>`;
             }
 
+            const parts = item.parts || [];
+            const playActions = document.getElementById('detail-play-actions');
+            if (parts.length <= 1) {
+                playActions.innerHTML = `
+                <button onclick="playVideo(0)" class="bg-white text-black hover:bg-gray-200 px-6 py-2 rounded-full font-bold flex items-center gap-2 transition shadow-lg shadow-white/20">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
+                    播放
+                </button>`;
+            } else {
+                playActions.innerHTML = parts.map((_, i) => `
+                <button onclick="playVideo(${i})" class="bg-white text-black hover:bg-gray-200 px-5 py-2 rounded-full font-bold flex items-center gap-2 transition shadow-lg shadow-white/20">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
+                    播放 CD${i + 1}
+                </button>`).join('');
+            }
+
             const posterImg = document.getElementById('detail-poster');
             posterImg.src = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
 
@@ -515,13 +519,23 @@
             const sizeEl = document.getElementById('detail-file-size');
             if (item.size > 0) { sizeEl.innerText = `${(item.size / (1024 * 1024 * 1024)).toFixed(2)} GB`; } else { sizeEl.innerText = '未知'; }
 
-            // 渲染 STRM 路径和内容
             document.getElementById('detail-strm-path').innerText = item.file_path || '暂无路径';
             let strmContent = item.strm_content || '暂无内容';
-            try {
-                strmContent = decodeURIComponent(strmContent);
-            } catch(e) {}
+            try { strmContent = decodeURIComponent(strmContent); } catch(e) {}
             document.getElementById('detail-strm-content').innerText = strmContent;
+
+            const stillsSection = document.getElementById('detail-stills-section');
+            const stillsList = document.getElementById('detail-stills-list');
+            if (item.stills && item.stills.length > 0) {
+                stillsList.innerHTML = item.stills.map((_, index) => `
+                    <div class="w-64 md:w-96 shrink-0 aspect-video bg-gray-800 rounded-lg overflow-hidden border border-gray-700 shadow-lg hover:border-blue-500 transition-colors">
+                        <img src="/api/images/${item.id}/stills?index=${index}&token=${token}" class="w-full h-full object-cover" loading="lazy" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMTIwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjEyMCIgZmlsbD0iIzM3NDE1MSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE0IiBmaWxsPSIjOWNhM2FmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg=='">
+                    </div>
+                `).join('');
+                stillsSection.classList.remove('hidden');
+            } else {
+                stillsSection.classList.add('hidden');
+            }
 
             document.getElementById('detail-modal').classList.remove('hidden');
             document.body.style.overflow = 'hidden';
