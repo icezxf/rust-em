@@ -8,6 +8,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-900 text-white font-sans h-screen flex flex-col md:flex-row overflow-hidden">
+    <!-- 登录页 -->
     <div id="login-view" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 px-4">
         <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-sm">
             <h2 class="text-2xl mb-6 text-center font-bold text-blue-400">Rust-Em</h2>
@@ -17,62 +18,84 @@
         </div>
     </div>
 
+    <!-- 主界面 -->
     <div id="main-view" class="hidden flex-1 flex flex-col md:flex-row h-full">
-        <div class="hidden md:flex w-64 bg-gray-800 p-4 flex-col border-r border-gray-700">
-            <h1 class="text-xl font-bold mb-8 text-blue-400 px-2">🎬 Rust-Em</h1>
-            <button onclick="switchTab('library')" class="text-left px-4 py-3 hover:bg-gray-700 rounded-lg mb-2 transition">媒体库</button>
-            <button onclick="switchTab('settings')" class="text-left px-4 py-3 hover:bg-gray-700 rounded-lg mb-2 transition">设置</button>
-            <button onclick="logout()" class="mt-auto text-left px-4 py-3 text-red-400 hover:bg-gray-700 rounded-lg transition">退出登录</button>
-        </div>
-        <div class="md:hidden bg-gray-800 p-4 flex justify-between items-center shadow-md z-10">
-            <h1 class="text-xl font-bold text-blue-400" id="mobile-title">媒体库</h1>
-            <button onclick="logout()" class="text-gray-400 text-sm">退出</button>
-        </div>
-        
-        <div class="flex-1 overflow-y-auto p-4 md:p-8 pb-20 md:pb-8">
-            <!-- 媒体库 -->
-            <div id="tab-library" class="hidden">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-xl font-bold">全部媒体</h2>
-                    <button onclick="loadMedia()" class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-sm text-blue-300">刷新</button>
-                </div>
-                <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-4"></div>
-            </div>
+        <!-- PC 侧边栏 -->
+        <div class="hidden md:flex w-64 bg-gray-800 p-4 flex-col border-r border-gray-700 overflow-y-auto">
+            <h1 class="text-xl font-bold mb-6 text-blue-400 px-2">🎬 Rust-Em</h1>
             
-            <!-- 设置 -->
-            <div id="tab-settings" class="hidden max-w-2xl mx-auto">
-                <div class="bg-gray-800 p-5 md:p-6 rounded-xl shadow-lg mb-6">
-                    <h3 class="text-lg font-bold mb-4 text-blue-300 border-b border-gray-700 pb-2">添加媒体库</h3>
-                    <input id="lib-name" placeholder="媒体库名称 (如: 电影)" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-blue-500">
-                    <select id="lib-type" class="p-3 mb-4 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-blue-500">
-                        <option value="movies">电影</option>
-                        <option value="tvshows">电视剧</option>
-                    </select>
-                    <div class="mb-4">
-                        <label class="block text-sm text-gray-400 mb-2">已选路径/文件:</label>
-                        <div id="selected-paths" class="flex flex-col gap-2 mb-2"></div>
-                        <button onclick="openPathPicker()" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-sm transition w-full border border-gray-600 border-dashed">+ 添加路径或文件</button>
-                    </div>
-                    <button onclick="addLibrary()" class="w-full bg-green-600 hover:bg-green-700 px-4 py-3 rounded-lg font-bold mt-2 transition">保存并扫描</button>
-                </div>
+            <div class="text-xs text-gray-500 font-bold mb-2 px-2 uppercase tracking-wider">媒体库</div>
+            <div id="sidebar-libs" class="flex flex-col gap-1 mb-6">
+                <!-- 动态渲染侧边栏库列表 -->
+            </div>
 
-                <div class="bg-gray-800 p-5 md:p-6 rounded-xl shadow-lg mb-6">
-                    <h3 class="text-lg font-bold mb-4 text-yellow-300 border-b border-gray-700 pb-2">修改管理员账号</h3>
-                    <input id="old-pwd" type="password" placeholder="当前密码" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none">
-                    <input id="new-user" type="text" placeholder="新用户名" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none">
-                    <input id="new-pwd" type="password" placeholder="新密码" class="p-3 mb-4 bg-gray-700 rounded-lg w-full outline-none">
-                    <button onclick="updateUser()" class="w-full bg-yellow-600 hover:bg-yellow-700 px-4 py-3 rounded-lg font-bold transition">更新账号</button>
-                </div>
+            <button onclick="switchTab('settings')" class="text-left px-4 py-3 hover:bg-gray-700 rounded-lg mb-2 transition mt-auto border-t border-gray-700">⚙️ 设置</button>
+            <button onclick="logout()" class="text-left px-4 py-3 text-red-400 hover:bg-gray-700 rounded-lg transition">🚪 退出登录</button>
+        </div>
+
+        <!-- 移动端顶栏 -->
+        <div class="md:hidden bg-gray-800 p-4 flex flex-col shadow-md z-10 sticky top-0">
+            <div class="flex justify-between items-center mb-3">
+                <h1 class="text-xl font-bold text-blue-400" id="mobile-title">媒体库</h1>
+                <button onclick="switchTab('settings')" class="text-gray-400 text-sm">⚙️ 设置</button>
+            </div>
+            <!-- 移动端横向滚动分类 -->
+            <div id="mobile-libs" class="flex overflow-x-auto gap-2 pb-1 no-scrollbar">
+                <!-- 动态渲染 -->
             </div>
         </div>
 
-        <div class="md:hidden fixed bottom-0 w-full bg-gray-800 border-t border-gray-700 flex justify-around p-3 pb-safe z-20">
-            <button onclick="switchTab('library')" class="flex flex-col items-center text-blue-400">
-                <span class="text-xl">🎬</span><span class="text-xs mt-1">媒体库</span>
-            </button>
-            <button onclick="switchTab('settings')" class="flex flex-col items-center text-gray-400 hover:text-white">
-                <span class="text-xl">⚙️</span><span class="text-xs mt-1">设置</span>
-            </button>
+        <!-- 内容区 -->
+        <div class="flex-1 flex flex-col h-full overflow-hidden bg-gray-900">
+            <!-- 顶部分类(电影/电视)筛选 -->
+            <div id="content-header" class="hidden p-4 md:p-6 pb-2 shrink-0">
+                <div class="flex gap-2">
+                    <button onclick="setTypeFilter('all')" id="btn-type-all" class="px-4 py-1.5 rounded-full text-sm font-bold bg-blue-600 text-white transition">全部</button>
+                    <button onclick="setTypeFilter('movies')" id="btn-type-movies" class="px-4 py-1.5 rounded-full text-sm font-bold bg-gray-800 text-gray-400 hover:bg-gray-700 transition">电影</button>
+                    <button onclick="setTypeFilter('tvshows')" id="btn-type-tvshows" class="px-4 py-1.5 rounded-full text-sm font-bold bg-gray-800 text-gray-400 hover:bg-gray-700 transition">电视剧</button>
+                </div>
+            </div>
+
+            <!-- 媒体网格展示区 -->
+            <div id="tab-library" class="hidden flex-1 overflow-y-auto p-4 md:p-6">
+                <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-4"></div>
+            </div>
+
+            <!-- 设置视图 -->
+            <div id="tab-settings" class="hidden flex-1 overflow-y-auto p-4 md:p-6 pb-20">
+                <div class="max-w-2xl mx-auto">
+                    <!-- 媒体库列表管理 -->
+                    <div class="bg-gray-800 p-5 md:p-6 rounded-xl shadow-lg mb-6">
+                        <h3 class="text-lg font-bold mb-4 text-green-300 border-b border-gray-700 pb-2">已添加的媒体库</h3>
+                        <div id="settings-lib-list" class="flex flex-col gap-2 mb-4"></div>
+                    </div>
+
+                    <!-- 添加媒体库 -->
+                    <div class="bg-gray-800 p-5 md:p-6 rounded-xl shadow-lg mb-6">
+                        <h3 class="text-lg font-bold mb-4 text-blue-300 border-b border-gray-700 pb-2">添加新媒体库</h3>
+                        <input id="lib-name" placeholder="媒体库名称 (如: 电影)" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-blue-500">
+                        <select id="lib-type" class="p-3 mb-4 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="movies">电影</option>
+                            <option value="tvshows">电视剧</option>
+                        </select>
+                        <div class="mb-4">
+                            <label class="block text-sm text-gray-400 mb-2">已选路径/文件:</label>
+                            <div id="selected-paths" class="flex flex-col gap-2 mb-2"></div>
+                            <button onclick="openPathPicker()" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-sm transition w-full border border-gray-600 border-dashed">+ 添加路径或文件</button>
+                        </div>
+                        <button onclick="addLibrary()" class="w-full bg-green-600 hover:bg-green-700 px-4 py-3 rounded-lg font-bold mt-2 transition">保存并扫描</button>
+                    </div>
+
+                    <!-- 修改管理员账号 -->
+                    <div class="bg-gray-800 p-5 md:p-6 rounded-xl shadow-lg mb-6">
+                        <h3 class="text-lg font-bold mb-4 text-yellow-300 border-b border-gray-700 pb-2">修改管理员账号</h3>
+                        <input id="old-pwd" type="password" placeholder="当前密码" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none">
+                        <input id="new-user" type="text" placeholder="新用户名" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none">
+                        <input id="new-pwd" type="password" placeholder="新密码" class="p-3 mb-4 bg-gray-700 rounded-lg w-full outline-none">
+                        <button onclick="updateUser()" class="w-full bg-yellow-600 hover:bg-yellow-700 px-4 py-3 rounded-lg font-bold transition">更新账号</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -91,10 +114,20 @@
         </div>
     </div>
 
+    <style>
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+
     <script>
         let token = localStorage.getItem('token');
         let currentPath = '/media';
         let selectedPaths = [];
+        let allLibraries = []; // 存储所有库信息
+        
+        // 状态筛选
+        let currentLibId = 'all';
+        let currentType = 'all';
 
         if (token) showMain();
 
@@ -125,32 +158,100 @@
         
         function logout() { localStorage.removeItem('token'); location.reload(); }
         
-        function showMain() {
+        async function showMain() {
             document.getElementById('login-view').classList.add('hidden');
             document.getElementById('main-view').classList.remove('hidden');
+            await fetchLibraries(); // 先获取库列表
             switchTab('library');
         }
         
         function switchTab(tab) {
             document.getElementById('tab-library').classList.add('hidden');
             document.getElementById('tab-settings').classList.add('hidden');
+            document.getElementById('content-header').classList.add('hidden');
+            
             document.getElementById(`tab-${tab}`).classList.remove('hidden');
-            if(window.innerWidth < 768) {
-                document.getElementById('mobile-title').innerText = tab === 'library' ? '媒体库' : '设置';
+            
+            if (tab === 'library') {
+                document.getElementById('content-header').classList.remove('hidden');
+                loadMedia();
+            } else if (tab === 'settings') {
+                renderSettingsLibraries();
             }
-            if (tab === 'library') loadMedia();
+        }
+
+        // ================= 库列表与筛选逻辑 =================
+        
+        async function fetchLibraries() {
+            const data = await api('/api/libraries');
+            if (data.libraries) {
+                allLibraries = data.libraries;
+                renderSidebarLibraries();
+            }
+        }
+
+        function renderSidebarLibraries() {
+            const desktopContainer = document.getElementById('sidebar-libs');
+            const mobileContainer = document.getElementById('mobile-libs');
+            
+            let html = `<button onclick="setLibraryFilter('all')" class="text-left px-3 py-2 rounded-lg transition ${currentLibId === 'all' ? 'bg-blue-600 text-white font-bold' : 'hover:bg-gray-700 text-gray-300'}">全部媒体</button>`;
+            
+            allLibraries.forEach(lib => {
+                const isActive = currentLibId === lib.id;
+                const cls = isActive ? 'bg-blue-600 text-white font-bold' : 'hover:bg-gray-700 text-gray-300';
+                const icon = lib.type === 'movies' ? '🎬' : '📺';
+                html += `<button onclick="setLibraryFilter(${lib.id})" class="text-left px-3 py-2 rounded-lg transition truncate ${cls}">${icon} ${lib.name}</button>`;
+            });
+
+            desktopContainer.innerHTML = html;
+            
+            // 移动端渲染成横向滑动形式
+            let mobileHtml = `<button onclick="setLibraryFilter('all')" class="whitespace-nowrap px-3 py-1.5 rounded-full text-sm ${currentLibId === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'}">全部</button>`;
+            allLibraries.forEach(lib => {
+                const isActive = currentLibId === lib.id;
+                const cls = isActive ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300';
+                mobileHtml += `<button onclick="setLibraryFilter(${lib.id})" class="whitespace-nowrap px-3 py-1.5 rounded-full text-sm ${cls}">${lib.name}</button>`;
+            });
+            mobileContainer.innerHTML = mobileHtml;
+        }
+
+        function setLibraryFilter(libId) {
+            currentLibId = libId;
+            renderSidebarLibraries();
+            loadMedia();
+        }
+
+        function setTypeFilter(type) {
+            currentType = type;
+            
+            // 更新按钮样式
+            ['all', 'movies', 'tvshows'].forEach(t => {
+                const btn = document.getElementById(`btn-type-${t}`);
+                if (t === type) {
+                    btn.className = 'px-4 py-1.5 rounded-full text-sm font-bold bg-blue-600 text-white transition';
+                } else {
+                    btn.className = 'px-4 py-1.5 rounded-full text-sm font-bold bg-gray-800 text-gray-400 hover:bg-gray-700 transition';
+                }
+            });
+            
+            loadMedia();
         }
 
         async function loadMedia() {
             try {
-                const data = await api('/api/items');
+                let url = `/api/items?`;
+                if (currentLibId !== 'all') url += `library_id=${currentLibId}&`;
+                if (currentType !== 'all') url += `lib_type=${currentType}`;
+
+                const data = await api(url);
                 const grid = document.getElementById('media-grid');
+                
                 if (!data.items || data.items.length === 0) {
-                    grid.innerHTML = `<div class="col-span-full text-center text-gray-500 mt-10">媒体库为空，请去设置里添加并扫描。</div>`;
+                    grid.innerHTML = `<div class="col-span-full text-center text-gray-500 mt-10">该分类下暂无媒体。</div>`;
                     return;
                 }
+                
                 grid.innerHTML = data.items.map(item => {
-                    // 拼接带 Token 的图片 URL
                     const imgUrl = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : '';
                     const posterHtml = imgUrl 
                         ? `<img src="${imgUrl}" class="w-full h-full object-cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
@@ -163,13 +264,57 @@
                             ${posterHtml}
                         </div>
                         <div class="font-bold text-sm truncate">${item.title}</div>
-                        <div class="text-xs text-gray-400 mt-1">${item.year || item.type}</div>
+                        <div class="text-xs text-gray-400 mt-1">${item.year || (item.type === 'movies' ? '电影' : '剧集')}</div>
                     </div>
                 `}).join('');
             } catch (e) {
                 console.error(e);
             }
         }
+
+        // ================= 设置页：库管理 =================
+        
+        function renderSettingsLibraries() {
+            const container = document.getElementById('settings-lib-list');
+            if (allLibraries.length === 0) {
+                container.innerHTML = `<div class="text-gray-500 text-sm">暂无媒体库</div>`;
+                return;
+            }
+            container.innerHTML = allLibraries.map(lib => `
+                <div class="flex justify-between items-center bg-gray-700 p-3 rounded-lg">
+                    <div class="flex items-center gap-2 truncate">
+                        <span>${lib.type === 'movies' ? '🎬' : '📺'}</span>
+                        <span class="font-bold">${lib.name}</span>
+                        <span class="text-xs text-gray-400">(${lib.type === 'movies' ? '电影' : '电视剧'})</span>
+                    </div>
+                    <div class="flex gap-2 shrink-0">
+                        <button onclick="rescanLibrary(${lib.id})" class="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm transition">重新扫描</button>
+                        <button onclick="deleteLibrary(${lib.id}, '${lib.name}')" class="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm transition">删除</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function deleteLibrary(id, name) {
+            if (!confirm(`确定要删除媒体库【${name}】及其所有媒体记录吗？`)) return;
+            await api(`/api/libraries/${id}`, 'DELETE');
+            await fetchLibraries(); // 刷新数据
+            renderSettingsLibraries();
+        }
+
+        async function rescanLibrary(id) {
+            const btn = event.target;
+            btn.innerText = '扫描中...';
+            btn.disabled = true;
+            await api(`/api/libraries/${id}/scan`, 'POST');
+            setTimeout(() => {
+                btn.innerText = '重新扫描';
+                btn.disabled = false;
+                alert('扫描任务已在后台启动，请稍后在媒体库刷新查看。');
+            }, 1000);
+        }
+
+        // ================= 添加媒体库 =================
 
         async function openPathPicker() {
             document.getElementById('path-modal').classList.remove('hidden');
@@ -305,6 +450,8 @@
             selectedPaths = [];
             renderSelectedPaths();
             document.getElementById('lib-name').value = '';
+            await fetchLibraries();
+            renderSettingsLibraries();
             switchTab('library');
         }
 
