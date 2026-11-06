@@ -16,6 +16,7 @@ pub struct NfoMovie {
     pub plot: Option<String>,
     pub year: Option<String>,
     pub premiered: Option<String>,
+    pub releasedate: Option<String>,
     pub runtime: Option<i32>,
     pub rating: Option<f64>,
     pub mpaa: Option<String>,
@@ -26,10 +27,30 @@ pub struct NfoMovie {
     pub poster: Option<String>,
     pub fanart: Option<String>,
     pub genres: Vec<String>,
+    pub tags: Vec<String>,
     pub directors: Vec<String>,
     pub studios: Vec<String>,
     pub actors: Vec<NfoActor>,
     pub unique_ids: Vec<(String, String)>,
+}
+
+fn extract_text(reader: &mut Reader<&[u8]>) -> String {
+    let mut text = String::new();
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Text(e)) => {
+                if let Ok(decoded) = e.unescape() { text.push_str(&decoded); }
+            }
+            Ok(Event::CData(e)) => {
+                if let Ok(decoded) = e.decode() { text.push_str(&decoded); }
+            }
+            Ok(Event::End(_)) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    text.trim().to_string()
 }
 
 pub fn read_nfo(path: &std::path::Path) -> Option<NfoMovie> {
@@ -91,6 +112,7 @@ fn process_text(text: &str, tag: &str, movie: &mut NfoMovie, current_actor: &mut
         "plot" => movie.plot = Some(text.to_string()),
         "year" => movie.year = Some(text.to_string()),
         "premiered" => movie.premiered = Some(text.to_string()),
+        "releasedate" => movie.releasedate = Some(text.to_string()),
         "runtime" => movie.runtime = text.parse::<i32>().ok(),
         "rating" => movie.rating = text.parse::<f64>().ok(),
         "mpaa" => movie.mpaa = Some(text.to_string()),
@@ -101,6 +123,7 @@ fn process_text(text: &str, tag: &str, movie: &mut NfoMovie, current_actor: &mut
         "poster" | "cover" => movie.poster = Some(text.to_string()),
         "fanart" => movie.fanart = Some(text.to_string()),
         "genre" => movie.genres.push(text.to_string()),
+        "tag" => movie.tags.push(text.to_string()),
         "director" => movie.directors.push(text.to_string()),
         "studio" => movie.studios.push(text.to_string()),
         "tmdbid" => movie.unique_ids.push(("tmdb".to_string(), text.to_string())),

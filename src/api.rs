@@ -6,7 +6,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::collections::HashMap;
+use std::collections::HashMap; // 确保导入了 HashMap
 use std::time::{Duration, Instant, UNIX_EPOCH};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
@@ -237,7 +237,6 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
             }
         }
 
-        // 扫描 extrafanart 文件夹
         let mut stills = Vec::new();
         let extrafanart_dir = parent.join("extrafanart");
         if extrafanart_dir.is_dir() {
@@ -305,7 +304,6 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
     Json(json!({ "items": items }))
 }
 
-// 支持根据索引获取剧照
 pub async fn get_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((id, img_type)): AxumPath<(i64, String)>, Query(params): Query<HashMap<String, String>>) -> Response {
     let path_opt = {
         let conn = pool.lock().unwrap();
