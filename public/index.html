@@ -16,6 +16,7 @@
         .snap-x-mandatory { scroll-snap-type: x mandatory; }
         .snap-start { scroll-snap-align: start; }
         .sidebar-transition { transition: width 0.3s ease-in-out, opacity 0.2s ease-in-out; }
+        .text-shadow-strong { text-shadow: 0 1px 3px rgba(0,0,0,0.8), 0 2px 6px rgba(0,0,0,0.5); }
     </style>
 </head>
 <body class="bg-[#0f1115] text-gray-200 font-sans h-screen flex flex-col overflow-hidden">
@@ -122,50 +123,51 @@
 
                 <div class="w-full max-w-5xl flex flex-col gap-6 mt-12 md:mt-24 z-10">
                     
-                    <div class="flex flex-col md:flex-row gap-8 items-start">
+                    <!-- 顶部信息区：左侧海报，右侧内容（含完整简介） -->
+                    <div class="flex flex-col md:flex-row gap-6 md:gap-8 items-start">
                         <!-- 左侧海报 -->
-                        <div class="w-48 md:w-64 shrink-0 aspect-[2/3] bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border border-gray-600/30">
+                        <div class="w-48 md:w-64 shrink-0 aspect-[2/3] bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border border-gray-600/30 sticky top-8">
                             <img id="detail-poster" src="" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzM3NDE1MSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjOWNhM2FmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg=='">
                         </div>
                         
                         <!-- 右侧信息区 -->
-                        <div class="flex-1 flex flex-col pt-2 w-full">
+                        <div class="flex-1 flex flex-col pt-1 w-full text-shadow-strong">
                             <!-- 标题 -->
                             <div class="flex items-center gap-3 mb-2">
-                                <h1 id="detail-title" class="text-3xl md:text-5xl font-black text-white tracking-tight drop-shadow-md">影片标题</h1>
+                                <h1 id="detail-title" class="text-2xl md:text-3xl font-black text-white tracking-tight drop-shadow-md">影片标题</h1>
                             </div>
                             
-                            <!-- 元数据（番号、年份、评分、时长） -->
-                            <div class="flex flex-wrap items-center gap-3 mb-6 text-sm font-medium text-gray-400">
-                                <span id="detail-num" class="hidden border border-blue-500/50 bg-blue-500/20 text-blue-300 px-2.5 py-1 rounded-md font-mono font-bold"></span>
-                                <span id="detail-year" class="bg-gray-800/80 px-2.5 py-1 rounded-md text-gray-200">未知年份</span>
-                                <span class="text-yellow-400 font-bold flex items-center gap-1 bg-gray-800/80 px-2.5 py-1 rounded-md">
-                                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+                            <!-- 元数据 -->
+                            <div class="flex flex-wrap items-center gap-2 mb-4 text-xs md:text-sm font-medium text-gray-400">
+                                <span id="detail-num" class="hidden border border-blue-500/50 bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-md font-mono font-bold"></span>
+                                <span id="detail-year" class="bg-gray-800/60 px-2 py-0.5 rounded-md text-gray-200">未知年份</span>
+                                <span class="text-yellow-400 font-bold flex items-center gap-1 bg-gray-800/60 px-2 py-0.5 rounded-md">
+                                    <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
                                     <span id="detail-rating-val">暂无</span>
                                 </span>
-                                <span id="detail-runtime" class="bg-gray-800/80 px-2.5 py-1 rounded-md text-gray-200">未知</span>
-                                <span id="detail-mpaa" class="border border-gray-600 text-gray-300 px-2 py-1 rounded-md text-xs hidden"></span>
+                                <span id="detail-runtime" class="bg-gray-800/60 px-2 py-0.5 rounded-md text-gray-200">未知</span>
+                                <span id="detail-mpaa" class="border border-gray-600 text-gray-300 px-1.5 py-0.5 rounded-md text-xs hidden"></span>
                             </div>
 
                             <!-- 类型标签 -->
-                            <div id="detail-genres" class="flex flex-wrap gap-2 mb-6 hidden">
-                                <div id="detail-genres-val" class="flex flex-wrap gap-2"></div>
+                            <div id="detail-genres" class="flex flex-wrap gap-1.5 mb-5 hidden">
+                                <div id="detail-genres-val" class="flex flex-wrap gap-1.5"></div>
                             </div>
 
                             <!-- 播放按钮 -->
-                            <div id="detail-play-actions" class="flex flex-wrap gap-3 mb-6"></div>
+                            <div id="detail-play-actions" class="flex flex-wrap gap-2 mb-6"></div>
 
-                            <!-- 简介 -->
-                            <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base max-h-40 overflow-y-auto pr-2 mb-4 whitespace-pre-wrap">暂无简介...</p>
+                            <!-- 完整简介（不加高度限制，自然撑开） -->
+                            <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base mb-6 whitespace-pre-wrap drop-shadow-md">暂无简介...</p>
                             
-                            <!-- 信息块：使用了更深的背景色和磨砂质感，彻底摆脱背景图干扰 -->
-                            <div class="flex flex-col gap-2.5 text-sm text-gray-300 mt-4 bg-[#16191f]/90 backdrop-blur-lg p-4 rounded-xl border border-gray-700/60 shadow-xl">
-                                <div id="detail-series-box" class="hidden"><span class="text-gray-500 w-16 inline-block">系列:</span> <span id="detail-series" class="text-blue-400 font-medium"></span></div>
-                                <div id="detail-label-box" class="hidden"><span class="text-gray-500 w-16 inline-block">厂牌:</span> <span id="detail-label" class="text-blue-400 font-medium"></span></div>
-                                <div id="detail-studio-box" class="hidden"><span class="text-gray-500 w-16 inline-block">制作商:</span> <span id="detail-studios" class="text-gray-200 font-medium"></span></div>
-                                <div id="detail-directors" class="hidden"><span class="text-gray-500 w-16 inline-block">导演:</span> <span class="text-gray-200 font-medium" id="detail-directors-val"></span></div>
+                            <!-- 详细信息（用细线隔开，避免悬空） -->
+                            <div class="flex flex-col gap-1.5 text-xs md:text-sm text-gray-300 pt-4 border-t border-gray-600/50">
+                                <div id="detail-series-box" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">系列:</span> <span id="detail-series" class="text-blue-400 font-medium drop-shadow-sm"></span></div>
+                                <div id="detail-label-box" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">厂牌:</span> <span id="detail-label" class="text-blue-400 font-medium drop-shadow-sm"></span></div>
+                                <div id="detail-studio-box" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">制作商:</span> <span id="detail-studios" class="text-gray-200 font-medium drop-shadow-sm"></span></div>
+                                <div id="detail-directors" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">导演:</span> <span class="text-gray-200 font-medium drop-shadow-sm" id="detail-directors-val"></span></div>
                                 <div id="detail-tags" class="hidden items-start mt-1">
-                                    <span class="text-gray-500 shrink-0 w-16 inline-block mt-0.5">标签:</span> 
+                                    <span class="text-gray-400 shrink-0 w-12 inline-block mt-0.5 font-medium">标签:</span> 
                                     <div class="flex flex-wrap gap-1.5 flex-1" id="detail-tags-val"></div>
                                 </div>
                             </div>
@@ -174,20 +176,20 @@
 
                     <!-- 剧照横滑区 -->
                     <div id="detail-stills-section" class="w-full mt-6 hidden relative group">
-                        <h3 class="text-sm text-gray-500 font-bold mb-3 uppercase tracking-wider">剧照 STILLS</h3>
+                        <h3 class="text-sm text-gray-500 font-bold mb-2 uppercase tracking-wider">剧照 STILLS</h3>
                         <button onclick="scrollStills(-1)" class="absolute left-0 top-1/2 -translate-y-1/2 z-20 bg-black/60 hover:bg-black/90 text-white p-2 rounded-full backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity hidden md:block border border-gray-600/50 shadow-xl"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg></button>
                         <div id="detail-stills-list" class="flex gap-4 overflow-x-auto pb-4 no-scrollbar snap-x-mandatory scroll-smooth"></div>
                         <button onclick="scrollStills(1)" class="absolute right-0 top-1/2 -translate-y-1/2 z-20 bg-black/60 hover:bg-black/90 text-white p-2 rounded-full backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity hidden md:block border border-gray-600/50 shadow-xl"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>
                     </div>
 
                     <!-- 演员 -->
-                    <div class="w-full mt-6">
+                    <div class="w-full mt-4">
                         <h3 class="text-sm text-gray-500 font-bold mb-3 uppercase tracking-wider">演职人员 CAST & CREW</h3>
-                        <div id="detail-actors-list" class="flex gap-6 overflow-x-auto pb-4 no-scrollbar snap-x-mandatory"></div>
+                        <div id="detail-actors-list" class="flex gap-4 overflow-x-auto pb-4 no-scrollbar snap-x-mandatory"></div>
                     </div>
 
                     <!-- 媒体文件 -->
-                    <div class="w-full mt-6 mb-20">
+                    <div class="w-full mt-4 mb-20">
                         <h3 class="text-sm text-gray-500 font-bold mb-3 uppercase tracking-wider">媒体文件 MEDIA FILES</h3>
                         <div class="bg-[#16191f]/80 backdrop-blur-md border border-gray-800 rounded-xl p-5 shadow-lg">
                             <div class="text-sm text-gray-400 mb-4 flex gap-6">
@@ -498,7 +500,7 @@
 
             const genresBox = document.getElementById('detail-genres');
             if (item.genres) {
-                document.getElementById('detail-genres-val').innerHTML = item.genres.split(' / ').map(g => `<span class="bg-gray-800/80 border border-gray-600/50 text-gray-300 px-2 py-0.5 rounded-md text-xs">${g}</span>`).join('');
+                document.getElementById('detail-genres-val').innerHTML = item.genres.split(' / ').map(g => `<span class="bg-gray-800/60 border border-gray-600/30 text-gray-300 px-2 py-0.5 rounded-md text-xs drop-shadow-sm">${g}</span>`).join('');
                 genresBox.classList.remove('hidden'); genresBox.classList.add('flex');
             } else { genresBox.classList.add('hidden'); }
 
@@ -520,7 +522,7 @@
             const tagsBox = document.getElementById('detail-tags');
             const tagsValBox = document.getElementById('detail-tags-val');
             if (item.tags) {
-                tagsValBox.innerHTML = item.tags.split(' / ').map(t => `<span class="bg-gray-800/80 border border-gray-600/30 text-gray-400 px-2 py-0.5 rounded-md text-xs whitespace-nowrap">${t}</span>`).join('');
+                tagsValBox.innerHTML = item.tags.split(' / ').map(t => `<span class="bg-gray-800/40 border border-gray-500/30 text-gray-200 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap drop-shadow-sm">${t}</span>`).join('');
                 tagsBox.classList.remove('hidden'); tagsBox.classList.add('flex');
             } else {
                 tagsBox.classList.add('hidden');
@@ -530,14 +532,14 @@
             const playActions = document.getElementById('detail-play-actions');
             if (parts.length <= 1) {
                 playActions.innerHTML = `
-                <button onclick="playVideo(0)" class="bg-white text-black hover:bg-gray-200 px-8 py-2.5 rounded-xl font-bold flex items-center gap-2 transition shadow-lg shadow-white/10 hover:shadow-white/20">
-                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
+                <button onclick="playVideo(0)" class="bg-white text-black hover:bg-gray-200 px-6 py-2 rounded-lg font-bold flex items-center gap-2 transition shadow-lg shadow-white/10 hover:shadow-white/20 text-sm">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
                     播放
                 </button>`;
             } else {
                 playActions.innerHTML = parts.map((_, i) => `
-                <button onclick="playVideo(${i})" class="bg-white text-black hover:bg-gray-200 px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 transition shadow-lg shadow-white/10 hover:shadow-white/20">
-                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
+                <button onclick="playVideo(${i})" class="bg-white text-black hover:bg-gray-200 px-5 py-2 rounded-lg font-bold flex items-center gap-2 transition shadow-lg shadow-white/10 hover:shadow-white/20 text-sm">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
                     播放 CD${i + 1}
                 </button>`).join('');
             }
@@ -565,11 +567,11 @@
                     const role = actor.role || '';
                     return `
                     <div class="flex flex-col items-center shrink-0 w-20 snap-start">
-                        <div class="w-16 h-16 rounded-full bg-gray-800 border-2 border-gray-700 overflow-hidden flex items-center justify-center mb-2 shadow-md">
-                            <span class="text-gray-400 text-xl font-bold">${name.charAt(0)}</span>
+                        <div class="w-14 h-14 rounded-full bg-gray-800 border-2 border-gray-700 overflow-hidden flex items-center justify-center mb-2 shadow-md">
+                            <span class="text-gray-400 text-lg font-bold">${name.charAt(0)}</span>
                         </div>
-                        <div class="text-xs text-white text-center font-medium w-full truncate">${name}</div>
-                        ${role ? `<div class="text-[10px] text-gray-400 text-center w-full truncate">${role}</div>` : ''}
+                        <div class="text-xs text-white text-center font-medium w-full truncate drop-shadow-md">${name}</div>
+                        ${role ? `<div class="text-[10px] text-gray-400 text-center w-full truncate drop-shadow-md">${role}</div>` : ''}
                     </div>`;
                 }).join('');
             } else {
