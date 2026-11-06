@@ -28,13 +28,19 @@
             <h1 class="text-xl font-bold text-blue-400" id="mobile-title">媒体库</h1>
             <button onclick="logout()" class="text-gray-400 text-sm">退出</button>
         </div>
+        
         <div class="flex-1 overflow-y-auto p-4 md:p-8 pb-20 md:pb-8">
+            <!-- 媒体库 -->
             <div id="tab-library" class="hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold">全部媒体</h2>
+                    <button onclick="loadMedia()" class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-sm text-blue-300">刷新</button>
+                </div>
                 <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-4"></div>
             </div>
             
+            <!-- 设置 -->
             <div id="tab-settings" class="hidden max-w-2xl mx-auto">
-                <!-- 添加媒体库 -->
                 <div class="bg-gray-800 p-5 md:p-6 rounded-xl shadow-lg mb-6">
                     <h3 class="text-lg font-bold mb-4 text-blue-300 border-b border-gray-700 pb-2">添加媒体库</h3>
                     <input id="lib-name" placeholder="媒体库名称 (如: 电影)" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-blue-500">
@@ -50,17 +56,16 @@
                     <button onclick="addLibrary()" class="w-full bg-green-600 hover:bg-green-700 px-4 py-3 rounded-lg font-bold mt-2 transition">保存并扫描</button>
                 </div>
 
-                <!-- 修改管理员账号 (已找回) -->
                 <div class="bg-gray-800 p-5 md:p-6 rounded-xl shadow-lg mb-6">
                     <h3 class="text-lg font-bold mb-4 text-yellow-300 border-b border-gray-700 pb-2">修改管理员账号</h3>
-                    <input id="old-pwd" type="password" placeholder="当前密码" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-yellow-500">
-                    <input id="new-user" type="text" placeholder="新用户名" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-yellow-500">
-                    <input id="new-pwd" type="password" placeholder="新密码" class="p-3 mb-4 bg-gray-700 rounded-lg w-full outline-none focus:ring-2 focus:ring-yellow-500">
+                    <input id="old-pwd" type="password" placeholder="当前密码" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none">
+                    <input id="new-user" type="text" placeholder="新用户名" class="p-3 mb-3 bg-gray-700 rounded-lg w-full outline-none">
+                    <input id="new-pwd" type="password" placeholder="新密码" class="p-3 mb-4 bg-gray-700 rounded-lg w-full outline-none">
                     <button onclick="updateUser()" class="w-full bg-yellow-600 hover:bg-yellow-700 px-4 py-3 rounded-lg font-bold transition">更新账号</button>
                 </div>
             </div>
-            
         </div>
+
         <div class="md:hidden fixed bottom-0 w-full bg-gray-800 border-t border-gray-700 flex justify-around p-3 pb-safe z-20">
             <button onclick="switchTab('library')" class="flex flex-col items-center text-blue-400">
                 <span class="text-xl">🎬</span><span class="text-xs mt-1">媒体库</span>
@@ -71,6 +76,7 @@
         </div>
     </div>
 
+    <!-- 路径选择弹窗 -->
     <div id="path-modal" class="hidden fixed inset-0 z-50 bg-black bg-opacity-75 flex items-end md:items-center justify-center">
         <div class="bg-gray-800 w-full md:w-2/3 lg:w-1/2 md:rounded-xl rounded-t-xl shadow-2xl flex flex-col h-[85vh] md:h-[75vh]">
             <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800 rounded-t-xl">
@@ -132,6 +138,37 @@
             if(window.innerWidth < 768) {
                 document.getElementById('mobile-title').innerText = tab === 'library' ? '媒体库' : '设置';
             }
+            if (tab === 'library') loadMedia();
+        }
+
+        async function loadMedia() {
+            try {
+                const data = await api('/api/items');
+                const grid = document.getElementById('media-grid');
+                if (!data.items || data.items.length === 0) {
+                    grid.innerHTML = `<div class="col-span-full text-center text-gray-500 mt-10">媒体库为空，请去设置里添加并扫描。</div>`;
+                    return;
+                }
+                grid.innerHTML = data.items.map(item => {
+                    // 拼接带 Token 的图片 URL
+                    const imgUrl = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : '';
+                    const posterHtml = imgUrl 
+                        ? `<img src="${imgUrl}" class="w-full h-full object-cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                           <div class="hidden w-full h-full items-center justify-center text-gray-500 text-sm">加载失败</div>`
+                        : `<div class="w-full h-full flex items-center justify-center text-gray-500 text-sm">无封面</div>`;
+
+                    return `
+                    <div class="bg-gray-800 p-2 rounded-lg shadow hover:ring-2 ring-blue-500 cursor-pointer transition" title="${item.plot || '无简介'}">
+                        <div class="bg-gray-700 aspect-[2/3] mb-2 rounded overflow-hidden">
+                            ${posterHtml}
+                        </div>
+                        <div class="font-bold text-sm truncate">${item.title}</div>
+                        <div class="text-xs text-gray-400 mt-1">${item.year || item.type}</div>
+                    </div>
+                `}).join('');
+            } catch (e) {
+                console.error(e);
+            }
         }
 
         async function openPathPicker() {
@@ -145,7 +182,6 @@
         async function browseDir(path) {
             const list = document.getElementById('dir-list');
             list.innerHTML = `<div class="p-4 text-center text-gray-500">加载中...</div>`;
-            
             const url = `/api/browse?path=${encodeURIComponent(path)}&t=${Date.now()}`;
             const res = await api(url, "GET");
 
@@ -175,17 +211,14 @@
                         if (e.target.tagName === 'INPUT') return;
                         browseDir(d.path);
                     };
-
                     const leftArea = document.createElement('div');
                     leftArea.className = "flex items-center flex-1 overflow-hidden pointer-events-none";
                     leftArea.innerHTML = `<span class="text-yellow-500 mr-2">📁</span> <span class="truncate">${d.name}</span>`;
-
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
                     checkbox.className = "w-5 h-5 accent-blue-500 cursor-pointer flex-shrink-0 ml-2";
                     checkbox.checked = selectedPaths.includes(d.path);
                     checkbox.onchange = (e) => togglePath(d.path, e.target.checked);
-
                     row.appendChild(leftArea);
                     row.appendChild(checkbox);
                     list.appendChild(row);
@@ -196,24 +229,20 @@
                 res.files.forEach(f => {
                     const row = document.createElement('div');
                     row.className = "p-3 border-b border-gray-700 flex justify-between items-center hover:bg-gray-700 transition";
-                    
                     row.onclick = (e) => {
                         if (e.target.tagName === 'INPUT') return;
                         const cb = row.querySelector('input[type="checkbox"]');
                         cb.checked = !cb.checked;
                         togglePath(f.path, cb.checked);
                     };
-
                     const leftArea = document.createElement('div');
                     leftArea.className = "flex items-center flex-1 overflow-hidden pointer-events-none text-gray-300";
                     leftArea.innerHTML = `<span class="text-blue-400 mr-2">📄</span> <span class="truncate">${f.name}</span>`;
-
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
                     checkbox.className = "w-5 h-5 accent-blue-500 cursor-pointer flex-shrink-0 ml-2";
                     checkbox.checked = selectedPaths.includes(f.path);
                     checkbox.onchange = (e) => togglePath(f.path, e.target.checked);
-
                     row.appendChild(leftArea);
                     row.appendChild(checkbox);
                     list.appendChild(row);
@@ -279,7 +308,6 @@
             switchTab('library');
         }
 
-        // 找回：修改账号逻辑
         async function updateUser() {
             const oldPwd = document.getElementById('old-pwd').value;
             const newUser = document.getElementById('new-user').value;
@@ -292,8 +320,6 @@
                 logout();
             } else if (res && res.error) {
                 alert(res.error);
-            } else {
-                alert('修改失败，请检查旧密码');
             }
         }
     </script>
