@@ -132,12 +132,11 @@
             const list = document.getElementById('dir-list');
             list.innerHTML = `<div class="p-4 text-center text-gray-500">加载中...</div>`;
             
-            // 【核心修改】：改用 GET 请求，带时间戳防缓存
+            // 改用 GET，带防缓存参数
             const url = `/api/browse?path=${encodeURIComponent(path)}&t=${Date.now()}`;
             const res = await api(url, "GET");
             
-            // 弹窗显示真实请求和返回
-            alert("前端请求路径: " + path + "\n\n后端返回:\n" + JSON.stringify(res, null, 2));
+            alert("前端请求: " + path + "\n后端返回:\n" + JSON.stringify(res, null, 2));
 
             if (res.error) {
                 list.innerHTML = `<div class="p-4 text-center text-red-500 text-sm font-bold bg-red-900 bg-opacity-20 rounded">错误:<br>${res.error}</div>`;
