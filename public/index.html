@@ -13,7 +13,7 @@
         .backdrop-blur-heavy { backdrop-filter: blur(40px) brightness(0.3); -webkit-backdrop-filter: blur(40px) brightness(0.3); }
         .media-card:hover .media-poster { transform: scale(1.05); }
         .media-card:hover { box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.4); }
-        /* 增加横向滚动的吸附效果 */
+        /* 剧照丝滑横滑吸附 */
         .snap-x-mandatory { scroll-snap-type: x mandatory; }
         .snap-start { scroll-snap-align: start; }
     </style>
@@ -177,7 +177,7 @@
 
                 <div id="detail-stills-section" class="mb-10 z-10 w-full max-w-6xl hidden">
                     <h3 class="text-sm text-gray-500 font-bold mb-4 uppercase tracking-wider">剧照 STILLS</h3>
-                    <!-- 开启丝滑横滑模式，尺寸改小，支持吸附 -->
+                    <!-- 开启横滑，尺寸变小 -->
                     <div id="detail-stills-list" class="flex gap-4 overflow-x-auto pb-4 no-scrollbar snap-x-mandatory"></div>
                 </div>
 
@@ -439,10 +439,15 @@
             if (!item) return;
             currentPlayingItemId = item.id;
 
+            // 1. 先填充简介（提到最前面，确保不被后面逻辑阻断）
+            document.getElementById('detail-plot').innerText = item.plot || '暂无简介...';
+
+            // 2. 填充标题
             document.getElementById('detail-title').innerText = item.title;
             const numEl = document.getElementById('detail-num');
             if (item.num) { numEl.innerText = item.num; numEl.classList.remove('hidden'); } else { numEl.classList.add('hidden'); }
 
+            // 3. 年份、评分、时长
             document.getElementById('detail-year').innerText = item.year || '未知年份';
             document.getElementById('detail-rating-val').innerText = item.rating > 0 ? item.rating.toFixed(1) : '暂无';
             
@@ -451,18 +456,22 @@
                 document.getElementById('detail-runtime').innerText = `${h > 0 ? h + 'h ' : ''}${m}min`;
             } else { document.getElementById('detail-runtime').innerText = '未知'; }
 
+            // 4. Tagline
             const tagBox = document.getElementById('detail-tagline-box');
             if (item.tagline) { document.getElementById('detail-tagline').innerText = item.tagline; tagBox.classList.remove('hidden'); } else { tagBox.classList.add('hidden'); }
 
+            // 5. 分级
             const mpaaEl = document.getElementById('detail-mpaa');
             if (item.mpaa) { mpaaEl.innerText = item.mpaa; mpaaEl.classList.remove('hidden'); } else { mpaaEl.classList.add('hidden'); }
 
+            // 6. 类型
             const genresBox = document.getElementById('detail-genres');
             if (item.genres) {
                 document.getElementById('detail-genres-val').innerHTML = item.genres.split(' / ').map(g => `<span class="bg-gray-800 border border-gray-600 text-gray-300 px-2 py-0.5 rounded-full text-[10px]">${g}</span>`).join('');
                 genresBox.classList.remove('hidden'); genresBox.classList.add('flex');
             } else { genresBox.classList.add('hidden'); }
 
+            // 7. 系列、厂牌、制作商
             const seriesBox = document.getElementById('detail-series-box');
             if (item.series) { document.getElementById('detail-series').innerText = item.series; seriesBox.classList.remove('hidden'); } else { seriesBox.classList.add('hidden'); }
             const labelBox = document.getElementById('detail-label-box');
@@ -470,6 +479,7 @@
             const studioBox = document.getElementById('detail-studio-box');
             if (item.studios) { document.getElementById('detail-studios').innerText = item.studios; studioBox.classList.remove('hidden'); } else { studioBox.classList.add('hidden'); }
 
+            // 8. 导演与标签
             const updateTextBlock = (id, valId, value) => {
                 const el = document.getElementById(id);
                 const valEl = document.getElementById(valId);
@@ -479,6 +489,7 @@
             updateTextBlock('detail-directors', 'detail-directors-val', item.directors);
             updateTextBlock('detail-tags', 'detail-tags-val', item.tags);
 
+            // 9. 演员
             const actorsContainer = document.getElementById('detail-actors-list');
             if (item.actors && item.actors.length > 0) {
                 actorsContainer.innerHTML = item.actors.map(actor => {
@@ -497,6 +508,7 @@
                 actorsContainer.innerHTML = `<div class="text-gray-500 text-sm">暂无演员信息</div>`;
             }
 
+            // 10. 多片段按钮渲染
             const parts = item.parts || [];
             const playActions = document.getElementById('detail-play-actions');
             if (parts.length <= 1) {
@@ -513,8 +525,7 @@
                 </button>`).join('');
             }
 
-            document.getElementById('detail-plot').innerText = item.plot || '暂无简介...';
-
+            // 11. 图片和大小
             const posterImg = document.getElementById('detail-poster');
             posterImg.src = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
 
@@ -525,11 +536,13 @@
             const sizeEl = document.getElementById('detail-file-size');
             if (item.size > 0) { sizeEl.innerText = `${(item.size / (1024 * 1024 * 1024)).toFixed(2)} GB`; } else { sizeEl.innerText = '未知'; }
 
+            // 12. STRM 路径及内容
             document.getElementById('detail-strm-path').innerText = item.file_path || '暂无路径';
             let strmContent = item.strm_content || '暂无内容';
             try { strmContent = decodeURIComponent(strmContent); } catch(e) {}
             document.getElementById('detail-strm-content').innerText = strmContent;
 
+            // 13. 剧照渲染
             const stillsSection = document.getElementById('detail-stills-section');
             const stillsList = document.getElementById('detail-stills-list');
             if (item.stills && item.stills.length > 0) {
