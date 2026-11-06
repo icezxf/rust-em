@@ -12,7 +12,8 @@ pub fn init_db(conn: &Connection) {
             id INTEGER PRIMARY KEY, library_id INTEGER, title TEXT, file_path TEXT UNIQUE,
             type TEXT, plot TEXT, year TEXT, poster_path TEXT, fanart_path TEXT,
             logo_path TEXT, thumb_path TEXT, banner_path TEXT, size INTEGER DEFAULT 0, mtime INTEGER DEFAULT 0,
-            rating REAL DEFAULT 0, mpaa TEXT, genres TEXT, directors TEXT, actors TEXT
+            rating REAL DEFAULT 0, mpaa TEXT, genres TEXT, directors TEXT, actors TEXT,
+            runtime INTEGER DEFAULT 0, premiered TEXT, tagline TEXT, studios TEXT, tmdb_id TEXT, imdb_id TEXT
         );
         INSERT OR IGNORE INTO users (username, password) VALUES ('admin', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918');"
     ).unwrap();
@@ -22,6 +23,8 @@ pub fn init_db(conn: &Connection) {
         ("logo_path", "TEXT"), ("thumb_path", "TEXT"), ("banner_path", "TEXT"),
         ("rating", "REAL DEFAULT 0"), ("mpaa", "TEXT"),
         ("genres", "TEXT"), ("directors", "TEXT"), ("actors", "TEXT"),
+        ("runtime", "INTEGER DEFAULT 0"), ("premiered", "TEXT"), ("tagline", "TEXT"),
+        ("studios", "TEXT"), ("tmdb_id", "TEXT"), ("imdb_id", "TEXT"),
     ];
 
     for (col_name, col_type) in missing_columns {

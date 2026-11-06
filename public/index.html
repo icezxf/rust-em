@@ -9,7 +9,7 @@
     <style>
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        .backdrop-blur-heavy { backdrop-filter: blur(24px) brightness(0.3); -webkit-backdrop-filter: blur(24px) brightness(0.3); }
+        .backdrop-blur-heavy { backdrop-filter: blur(40px) brightness(0.3); -webkit-backdrop-filter: blur(40px) brightness(0.3); }
         .media-card:hover .media-poster { transform: scale(1.05); }
         .media-card:hover { box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.4); }
     </style>
@@ -27,16 +27,13 @@
 
     <!-- 主界面 -->
     <div id="main-view" class="hidden flex-1 flex flex-col md:flex-row h-full">
-        <!-- PC 侧边栏 -->
         <div class="hidden md:flex w-64 bg-[#16191f] p-4 flex-col border-r border-gray-800 z-20">
             <h1 class="text-xl font-bold mb-8 text-blue-500 px-2 flex items-center gap-2">
                 <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
                 Rust-Em
             </h1>
-            
             <div class="text-xs text-gray-500 font-bold mb-3 px-2 uppercase tracking-wider">媒体库</div>
             <div id="sidebar-libs" class="flex flex-col gap-1 mb-6 overflow-y-auto"></div>
-            
             <button onclick="switchTab('settings')" class="flex items-center gap-3 text-left px-3 py-2.5 hover:bg-gray-800 rounded-lg mb-2 transition mt-auto text-gray-400 hover:text-white">
                 <span>⚙️</span> 系统设置
             </button>
@@ -45,7 +42,6 @@
             </button>
         </div>
 
-        <!-- 移动端顶栏 -->
         <div class="md:hidden bg-[#16191f] px-4 py-3 flex flex-col shadow-md z-10 sticky top-0 border-b border-gray-800">
             <div class="flex justify-between items-center mb-2">
                 <h1 class="text-lg font-bold text-blue-500" id="mobile-title">媒体库</h1>
@@ -54,9 +50,7 @@
             <div id="mobile-libs" class="flex overflow-x-auto gap-2 pb-1 no-scrollbar"></div>
         </div>
 
-        <!-- 内容区 -->
         <div class="flex-1 flex flex-col h-full overflow-hidden bg-[#0f1115]">
-            <!-- 顶部分类筛选 -->
             <div id="content-header" class="hidden p-4 md:px-8 md:pt-6 md:pb-2 shrink-0">
                 <div class="flex gap-3">
                     <button onclick="setTypeFilter('all')" id="btn-type-all" class="px-5 py-1.5 rounded-full text-sm font-medium bg-blue-600 text-white transition shadow-lg shadow-blue-500/30">全部</button>
@@ -65,23 +59,19 @@
                 </div>
             </div>
 
-            <!-- 媒体网格 -->
             <div id="tab-library" class="hidden flex-1 overflow-y-auto p-4 md:px-8 md:py-4">
                 <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6"></div>
             </div>
 
-            <!-- 设置视图 -->
             <div id="tab-settings" class="hidden flex-1 overflow-y-auto p-4 md:px-8 md:py-6 pb-20">
                 <div class="max-w-3xl mx-auto">
                     <h2 class="text-2xl font-bold mb-6">系统设置</h2>
-                    
                     <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
                         <h3 class="text-lg font-bold mb-4 text-blue-400 border-b border-gray-800 pb-2">媒体库管理</h3>
                         <div id="settings-lib-list" class="flex flex-col gap-3 mb-6"></div>
-                        
                         <div class="border-t border-gray-800 pt-6">
                             <h4 class="font-bold text-gray-300 mb-4">添加新媒体库</h4>
-                            <input id="lib-name" placeholder="媒体库名称 (如: 我的电影)" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none focus:border-blue-500 transition text-white">
+                            <input id="lib-name" placeholder="媒体库名称" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none focus:border-blue-500 transition text-white">
                             <select id="lib-type" class="p-3 mb-4 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none focus:border-blue-500 transition text-white">
                                 <option value="movies">电影</option>
                                 <option value="tvshows">电视剧</option>
@@ -94,7 +84,6 @@
                             <button onclick="addLibrary()" class="w-full bg-blue-600 hover:bg-blue-500 px-4 py-3 rounded-lg font-bold mt-2 transition text-white shadow-lg shadow-blue-500/20">保存并扫描</button>
                         </div>
                     </div>
-
                     <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
                         <h3 class="text-lg font-bold mb-4 text-yellow-400 border-b border-gray-800 pb-2">修改管理员账号</h3>
                         <input id="old-pwd" type="password" placeholder="当前密码" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none focus:border-yellow-500 text-white">
@@ -107,43 +96,94 @@
         </div>
     </div>
 
-    <!-- 沉浸式详情页 Modal -->
-    <div id="detail-modal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-black">
-        <div id="detail-fanart" class="fixed inset-0 bg-cover bg-center backdrop-blur-heavy transition-opacity duration-500"></div>
+    <!-- 沉浸式详情页 Modal (全新布局) -->
+    <div id="detail-modal" class="hidden fixed inset-0 z-50 overflow-y-auto bg-[#0b0e14]">
+        <div id="detail-fanart" class="fixed inset-0 bg-cover bg-top backdrop-blur-heavy transition-opacity duration-500 opacity-40"></div>
         
-        <div class="relative min-h-screen flex flex-col justify-center items-center p-4 md:p-8">
-            <button onclick="closeDetail()" class="absolute top-4 right-4 md:top-8 md:right-8 text-white bg-black/50 hover:bg-black/80 p-3 rounded-full z-20 backdrop-blur-md transition">
+        <div class="relative min-h-screen w-full max-w-7xl mx-auto p-4 md:p-8 flex flex-col">
+            <!-- 关闭按钮 -->
+            <button onclick="closeDetail()" class="fixed top-4 right-4 md:top-8 md:right-8 text-white bg-black/50 hover:bg-black/80 p-3 rounded-full z-20 backdrop-blur-md transition">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
             </button>
 
-            <div class="max-w-5xl w-full flex flex-col md:flex-row gap-6 md:gap-10 items-center md:items-start bg-[#16191f]/80 backdrop-blur-xl p-6 md:p-10 rounded-3xl shadow-2xl border border-gray-700/50 z-10">
-                <div class="w-56 md:w-72 shrink-0 aspect-[2/3] bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border border-gray-600/50 relative group">
+            <!-- 头部信息 -->
+            <div class="flex flex-col md:flex-row gap-8 mt-12 md:mt-24 mb-10 z-10">
+                <div class="w-48 md:w-64 shrink-0 aspect-[2/3] bg-gray-800 rounded-xl overflow-hidden shadow-2xl border border-gray-600/50">
                     <img id="detail-poster" src="" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzM3NDE1MSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjOWNhM2FmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg=='">
                 </div>
                 
-                <div class="flex-1 text-center md:text-left flex flex-col justify-center h-full pt-4 md:pt-2">
-                    <h1 id="detail-title" class="text-3xl md:text-5xl font-extrabold text-white mb-3 tracking-tight drop-shadow-lg">影片标题</h1>
+                <div class="flex-1 flex flex-col justify-end pb-2">
+                    <h1 id="detail-title" class="text-4xl md:text-6xl font-black text-white mb-2 tracking-tight drop-shadow-lg">影片标题</h1>
+                    <p id="detail-tagline" class="text-gray-400 italic text-lg mb-4 hidden"></p>
                     
-                    <div class="flex flex-wrap justify-center md:justify-start gap-3 mb-6 items-center">
-                        <span id="detail-rating" class="text-yellow-400 font-bold text-lg flex items-center gap-1">
-                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+                    <div class="flex flex-wrap items-center gap-3 mb-6 text-sm font-medium">
+                        <span id="detail-year" class="text-gray-300">2024</span>
+                        <span class="text-gray-500">•</span>
+                        <span class="text-yellow-400 font-bold flex items-center gap-1">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
                             <span id="detail-rating-val">0.0</span>
                         </span>
-                        <span class="w-1.5 h-1.5 rounded-full bg-gray-600"></span>
-                        <span id="detail-year" class="text-gray-300 font-medium text-lg">2024</span>
-                        <span id="detail-mpaa" class="border border-gray-500 text-gray-300 px-2 py-0.5 rounded text-sm font-medium"></span>
-                        <span id="detail-type" class="border border-gray-500 text-gray-300 px-3 py-0.5 rounded text-sm font-medium">电影</span>
-                    </div>
-                    
-                    <div class="text-sm text-gray-300 mb-6 flex flex-col gap-2">
-                        <div id="detail-genres" class="hidden"><span class="text-gray-500">类型: </span> <span class="text-gray-300" id="detail-genres-val"></span></div>
-                        <div id="detail-directors" class="hidden"><span class="text-gray-500">导演: </span> <span class="text-gray-300" id="detail-directors-val"></span></div>
-                        <div id="detail-actors" class="hidden"><span class="text-gray-500">主演: </span> <span class="text-gray-300" id="detail-actors-val"></span></div>
+                        <span class="text-gray-500">•</span>
+                        <span id="detail-mpaa" class="border border-gray-500 text-gray-300 px-2 py-0.5 rounded text-xs"></span>
+                        <span class="text-gray-500">•</span>
+                        <span id="detail-runtime" class="text-gray-300"></span>
+                        <!-- 占位：分辨率与编码（等探测功能实现后展示） -->
+                        <span class="text-gray-500">•</span>
+                        <span class="bg-gray-700 text-gray-300 px-2 py-0.5 rounded text-xs">1080p</span>
+                        <span class="bg-gray-700 text-gray-300 px-2 py-0.5 rounded text-xs">AVC</span>
                     </div>
 
-                    <div class="bg-black/30 rounded-xl p-5 border border-gray-800/50">
-                        <h3 class="text-gray-400 text-sm font-bold mb-2 uppercase tracking-wider">剧情简介</h3>
-                        <p id="detail-plot" class="text-gray-200 leading-relaxed max-h-48 md:max-h-64 overflow-y-auto pr-2 text-sm md:text-base">暂无简介...</p>
+                    <!-- 操作按钮 (占位) -->
+                    <div class="flex gap-3 mb-6">
+                        <button class="bg-white text-black hover:bg-gray-200 px-6 py-2 rounded-full font-bold flex items-center gap-2 transition">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
+                            播放
+                        </button>
+                        <button class="bg-gray-800/80 text-white hover:bg-gray-700 px-4 py-2 rounded-full font-bold flex items-center gap-2 transition border border-gray-600">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
+                        </button>
+                    </div>
+
+                    <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base max-w-4xl line-clamp-4 hover:line-clamp-none transition-all cursor-pointer">暂无简介...</p>
+                </div>
+            </div>
+
+            <!-- 演职人员 -->
+            <div class="mb-10 z-10">
+                <h3 class="text-sm text-gray-500 font-bold mb-4 uppercase tracking-wider">演职人员 CAST & CREW</h3>
+                <div id="detail-actors-list" class="flex gap-6 overflow-x-auto pb-4 no-scrollbar">
+                    <!-- JS 动态渲染 -->
+                </div>
+            </div>
+
+            <!-- 媒体文件区域 -->
+            <div class="mb-20 z-10">
+                <h3 class="text-sm text-gray-500 font-bold mb-4 uppercase tracking-wider">媒体文件 MEDIA FILES</h3>
+                <div class="bg-[#16191f]/80 backdrop-blur-md border border-gray-800 rounded-xl p-5">
+                    <div class="text-sm text-gray-400 mb-4 flex gap-4">
+                        <span>文件大小: <span id="detail-file-size" class="text-gray-200">计算中...</span></span>
+                        <span>容器格式: <span class="text-gray-200">STRM</span></span>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <!-- 视频流占位 -->
+                        <div class="bg-[#0f1115] border border-gray-700 rounded-lg p-4">
+                            <div class="text-xs text-blue-400 font-bold mb-2 uppercase">视频流 VIDEO</div>
+                            <div class="text-sm text-white mb-1">1080p HEVC</div>
+                            <div class="text-xs text-gray-500">等待媒体探测 (探测后显示码率、帧率)</div>
+                        </div>
+                        <!-- 音频流占位 -->
+                        <div class="bg-[#0f1115] border border-gray-700 rounded-lg p-4">
+                            <div class="text-xs text-green-400 font-bold mb-2 uppercase">音频流 AUDIO</div>
+                            <div class="text-sm text-white mb-1">Mandarin AC3</div>
+                            <div class="text-xs text-gray-500">等待媒体探测 (探测后显示声道、采样率)</div>
+                        </div>
+                        <!-- 字幕流占位 -->
+                        <div class="bg-[#0f1115] border border-gray-700 rounded-lg p-4">
+                            <div class="text-xs text-yellow-400 font-bold mb-2 uppercase">字幕流 SUBTITLE</div>
+                            <div class="text-sm text-white mb-1">Chinese (SRT)</div>
+                            <div class="text-xs text-gray-500">等待媒体探测</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -217,9 +257,7 @@
             document.getElementById('tab-library').classList.add('hidden');
             document.getElementById('tab-settings').classList.add('hidden');
             document.getElementById('content-header').classList.add('hidden');
-            
             document.getElementById(`tab-${tab}`).classList.remove('hidden');
-            
             if (tab === 'library') {
                 document.getElementById('content-header').classList.remove('hidden');
                 loadMedia();
@@ -239,7 +277,6 @@
         function renderSidebarLibraries() {
             const desktopContainer = document.getElementById('sidebar-libs');
             const mobileContainer = document.getElementById('mobile-libs');
-            
             let html = `<button onclick="setLibraryFilter('all')" class="flex items-center gap-3 text-left px-3 py-2.5 rounded-lg transition ${currentLibId === 'all' ? 'bg-gray-800 text-white font-medium shadow-sm' : 'hover:bg-gray-800/50 text-gray-400'}">全部媒体</button>`;
             allLibraries.forEach(lib => {
                 const isActive = currentLibId === lib.id;
@@ -248,7 +285,6 @@
                 html += `<button onclick="setLibraryFilter(${lib.id})" class="flex items-center gap-3 text-left px-3 py-2.5 rounded-lg transition truncate ${cls}"><span>${icon}</span> <span class="truncate">${lib.name}</span></button>`;
             });
             desktopContainer.innerHTML = html;
-            
             let mobileHtml = `<button onclick="setLibraryFilter('all')" class="whitespace-nowrap px-4 py-1.5 rounded-full text-sm ${currentLibId === 'all' ? 'bg-blue-600 text-white' : 'bg-[#0f1115] text-gray-400 border border-gray-700'}">全部</button>`;
             allLibraries.forEach(lib => {
                 const isActive = currentLibId === lib.id;
@@ -258,21 +294,13 @@
             mobileContainer.innerHTML = mobileHtml;
         }
 
-        function setLibraryFilter(libId) {
-            currentLibId = libId;
-            renderSidebarLibraries();
-            loadMedia();
-        }
-
+        function setLibraryFilter(libId) { currentLibId = libId; renderSidebarLibraries(); loadMedia(); }
         function setTypeFilter(type) {
             currentType = type;
             ['all', 'movies', 'tvshows'].forEach(t => {
                 const btn = document.getElementById(`btn-type-${t}`);
-                if (t === type) {
-                    btn.className = 'px-5 py-1.5 rounded-full text-sm font-medium bg-blue-600 text-white transition shadow-lg shadow-blue-500/30';
-                } else {
-                    btn.className = 'px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700';
-                }
+                if (t === type) btn.className = 'px-5 py-1.5 rounded-full text-sm font-medium bg-blue-600 text-white transition shadow-lg shadow-blue-500/30';
+                else btn.className = 'px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700';
             });
             loadMedia();
         }
@@ -311,8 +339,8 @@
                     <div onclick="openDetail(${item.id})" class="media-card bg-[#16191f] rounded-xl overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1 relative group border border-gray-800/50">
                         <div class="bg-gray-800 aspect-[2/3] overflow-hidden relative">
                             <img src="${imgUrl}" class="media-poster w-full h-full object-cover transition-transform duration-500" onerror="this.src='${defaultPosterSvg}'">
-                            <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                             ${ratingHtml}
+                            <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                         </div>
                         <div class="absolute bottom-0 w-full p-3 transform translate-y-2 group-hover:translate-y-0 transition-transform duration-300 pointer-events-none">
                             <div class="font-bold text-white text-sm truncate drop-shadow-md">${item.title}</div>
@@ -320,9 +348,7 @@
                         </div>
                     </div>
                 `}).join('');
-            } catch (e) {
-                console.error(e);
-            }
+            } catch (e) { console.error(e); }
         }
 
         function openDetail(itemId) {
@@ -331,33 +357,66 @@
 
             document.getElementById('detail-title').innerText = item.title;
             document.getElementById('detail-year').innerText = item.year || '未知年份';
-            document.getElementById('detail-type').innerText = item.type === 'movies' ? '电影' : '剧集';
-            document.getElementById('detail-plot').innerText = item.plot || '暂无简介。';
             document.getElementById('detail-rating-val').innerText = item.rating > 0 ? item.rating.toFixed(1) : '暂无';
+            document.getElementById('detail-plot').innerText = item.plot || '暂无简介。';
             
+            // 时长格式化
+            if (item.runtime > 0) {
+                const h = Math.floor(item.runtime / 60);
+                const m = item.runtime % 60;
+                document.getElementById('detail-runtime').innerText = `${h > 0 ? h + 'h ' : ''}${m}min`;
+            } else {
+                document.getElementById('detail-runtime').innerText = '未知';
+            }
+
+            // Tagline
+            const tagEl = document.getElementById('detail-tagline');
+            if (item.tagline) { tagEl.innerText = item.tagline; tagEl.classList.remove('hidden'); }
+            else { tagEl.classList.add('hidden'); }
+
+            // 分级
             const mpaaEl = document.getElementById('detail-mpaa');
             if (item.mpaa) { mpaaEl.innerText = item.mpaa; mpaaEl.classList.remove('hidden'); }
             else { mpaaEl.classList.add('hidden'); }
 
-            const updateTextBlock = (id, valId, value) => {
-                const el = document.getElementById(id);
-                const valEl = document.getElementById(valId);
-                if (value) { valEl.innerText = value; el.classList.remove('hidden'); }
-                else { el.classList.add('hidden'); }
-            };
-            updateTextBlock('detail-genres', 'detail-genres-val', item.genres);
-            updateTextBlock('detail-directors', 'detail-directors-val', item.directors);
-            updateTextBlock('detail-actors', 'detail-actors-val', item.actors);
+            // 演员列表 (拆分字符串)
+            const actorsContainer = document.getElementById('detail-actors-list');
+            if (item.actors) {
+                const actors = item.actors.split(" / ");
+                actorsContainer.innerHTML = actors.map(actorStr => {
+                    // 尝试解析 "名字 (角色)" 格式
+                    let name = actorStr;
+                    let role = "";
+                    const match = actorStr.match(/(.*?)\s*\((.*?)\)/);
+                    if (match) { name = match[1]; role = match[2]; }
 
+                    return `
+                    <div class="flex flex-col items-center shrink-0 w-20">
+                        <div class="w-16 h-16 rounded-full bg-gray-800 border-2 border-gray-700 overflow-hidden flex items-center justify-center mb-2 shadow-md">
+                            <span class="text-gray-400 text-xl font-bold">${name.charAt(0)}</span>
+                        </div>
+                        <div class="text-xs text-white text-center font-medium w-full truncate">${name}</div>
+                        ${role ? `<div class="text-[10px] text-gray-400 text-center w-full truncate">${role}</div>` : ''}
+                    </div>`;
+                }).join('');
+            } else {
+                actorsContainer.innerHTML = `<div class="text-gray-500 text-sm">暂无演员信息</div>`;
+            }
+
+            // 图片
             const posterImg = document.getElementById('detail-poster');
             posterImg.src = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
 
             const fanartDiv = document.getElementById('detail-fanart');
-            if (item.has_poster) {
-                fanartDiv.style.backgroundImage = `url('/api/images/${item.id}/fanart?token=${token}')`;
-            } else {
-                fanartDiv.style.backgroundImage = 'none';
-            }
+            if (item.has_poster) fanartDiv.style.backgroundImage = `url('/api/images/${item.id}/fanart?token=${token}')`;
+            else fanartDiv.style.backgroundImage = 'none';
+
+            // 媒体文件大小格式化
+            const sizeEl = document.getElementById('detail-file-size');
+            if (item.size > 0) {
+                const sizeGB = (item.size / (1024 * 1024 * 1024)).toFixed(2);
+                sizeEl.innerText = `${sizeGB} GB`;
+            } else { sizeEl.innerText = '未知'; }
 
             document.getElementById('detail-modal').classList.remove('hidden');
             document.body.style.overflow = 'hidden';
@@ -368,13 +427,9 @@
             document.body.style.overflow = 'auto';
         }
 
-        // ... 设置页管理 (和原来一样)
         function renderSettingsLibraries() {
             const container = document.getElementById('settings-lib-list');
-            if (allLibraries.length === 0) {
-                container.innerHTML = `<div class="text-gray-500 text-sm py-2">暂无已添加的媒体库</div>`;
-                return;
-            }
+            if (allLibraries.length === 0) { container.innerHTML = `<div class="text-gray-500 text-sm py-2">暂无已添加的媒体库</div>`; return; }
             container.innerHTML = allLibraries.map(lib => `
                 <div class="flex justify-between items-center bg-[#0f1115] border border-gray-800 p-3 rounded-xl">
                     <div class="flex items-center gap-3 truncate">
@@ -391,10 +446,9 @@
         }
 
         async function deleteLibrary(id, name) {
-            if (!confirm(`⚠️ 确定要删除媒体库【${name}】吗？这将移除库内所有数据，但不会删除本地文件。`)) return;
+            if (!confirm(`⚠️ 确定要删除媒体库【${name}】吗？`)) return;
             await api(`/api/libraries/${id}`, 'DELETE');
-            await fetchLibraries();
-            renderSettingsLibraries();
+            await fetchLibraries(); renderSettingsLibraries();
         }
 
         async function rescanLibrary(id) {
@@ -408,10 +462,7 @@
             }, 1000);
         }
 
-        async function openPathPicker() {
-            document.getElementById('path-modal').classList.remove('hidden');
-            await browseDir(currentPath);
-        }
+        async function openPathPicker() { document.getElementById('path-modal').classList.remove('hidden'); await browseDir(currentPath); }
         function closePathPicker() { document.getElementById('path-modal').classList.add('hidden'); }
 
         async function browseDir(path) {

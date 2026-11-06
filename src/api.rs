@@ -1,9 +1,7 @@
 use axum::{
     extract::{State, Request, Json, Query, Path as AxumPath},
     http::{StatusCode, header::{LOCATION, USER_AGENT, CONTENT_TYPE}, HeaderMap},
-    middleware::Next,
-    response::{IntoResponse, Response},
-    body::Bytes,
+    middleware::Next, response::{IntoResponse, Response}, body::Bytes,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -17,7 +15,6 @@ use tokio::io::AsyncReadExt;
 
 static TOKENS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 static STRM_CACHE: OnceLock<Mutex<HashMap<String, (String, Instant)>>> = OnceLock::new();
-
 const MAX_STRM_SIZE: u64 = 16 * 1024;
 
 fn extract_emby_token(headers: &HeaderMap, query_str: Option<&str>) -> Option<String> {
@@ -202,11 +199,16 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         let mut genres = String::new();
         let mut directors = String::new();
         let mut actors = String::new();
-        
+        let mut runtime = 0;
+        let mut premiered = String::new();
+        let mut tagline = String::new();
+        let mut studios = String::new();
+        let mut tmdb_id = String::new();
+        let mut imdb_id = String::new();
         let mut nfo_poster = String::new();
         let mut nfo_fanart = String::new();
 
-        // 1. 优先解析 NFO
+        // 1. NFO 解析
         for nfo in nfo_candidates {
             if nfo.exists() {
                 if let Some(meta) = crate::nfo::read_nfo(&nfo) {
@@ -215,13 +217,24 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                     if let Some(y) = meta.year { year = y.to_string(); }
                     if let Some(r) = meta.rating { rating = r; }
                     if let Some(m) = meta.mpaa { mpaa = m; }
+                    if let Some(rt) = meta.runtime { runtime = rt; }
+                    if let Some(pr) = meta.premiered { premiered = pr; }
+                    if let Some(tg) = meta.tagline { tagline = tg; }
                     if !meta.genres.is_empty() { genres = meta.genres.join(" / "); }
                     if !meta.directors.is_empty() { directors = meta.directors.join(" / "); }
+                    if !meta.studios.is_empty() { studios = meta.studios.join(" / "); }
                     if !meta.actors.is_empty() {
-                        actors = meta.actors.iter().filter_map(|a| a.name.clone()).collect::<Vec<_>>().join(" / ");
+                        actors = meta.actors.iter().map(|a| {
+                            if let Some(role) = &a.role { format!("{} ({})", a.name.clone().unwrap_or_default(), role) }
+                            else { a.name.clone().unwrap_or_default() }
+                        }).collect::<Vec<_>>().join(" / ");
                     }
-                    
-                    // 解析 NFO 中指定的图片 URL
+                    for uid in meta.unique_ids {
+                        if let Some(t) = uid.id_type {
+                            if t.to_lowercase() == "tmdb" { tmdb_id = uid.text; }
+                            if t.to_lowercase() == "imdb" { imdb_id = uid.text; }
+                        }
+                    }
                     if let Some(thumb) = meta.thumbs.first() { nfo_poster = thumb.text.clone(); }
                     if let Some(fanart) = meta.fanart {
                         if let Some(thumb) = fanart.thumbs.first() { nfo_fanart = thumb.text.clone(); }
@@ -231,9 +244,8 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
             }
         }
 
-        // 2. 扫描本地图片，优先级高于 NFO 中的 URL
-        let mut final_poster = nfo_poster;
-        let mut final_fanart = nfo_fanart;
+        // 2. 本地图片
+        let mut final_poster = nfo_poster; let mut final_fanart = nfo_fanart;
         let mut logo = String::new(); let mut thumb = String::new(); let mut banner = String::new();
 
         if let Ok(entries) = std::fs::read_dir(parent) {
@@ -243,19 +255,16 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                 if let (Some(ext), Some(file_stem)) = (p.extension().and_then(|e| e.to_str()), p.file_stem().and_then(|s| s.to_str())) {
                     let ext = ext.to_lowercase();
                     if !["jpg", "jpeg", "png", "webp"].contains(&ext.as_str()) { continue; }
-                    
                     let is_match_media = file_stem.starts_with(&format!("{}-", stem));
                     let test_stem = if is_match_media { file_stem.trim_start_matches(&format!("{}-", stem)) } else { file_stem };
                     
                     if let Some(img_type) = get_image_type(test_stem) {
                         let p_str = p.to_string_lossy().to_string();
                         match img_type {
-                            "poster" => final_poster = p_str, // 本地覆盖网络
-                            "fanart" => final_fanart = p_str, // 本地覆盖网络
+                            "poster" => final_poster = p_str, "fanart" => final_fanart = p_str,
                             "logo" => if logo.is_empty() { logo = p_str },
                             "thumb" => if thumb.is_empty() { thumb = p_str },
-                            "banner" => if banner.is_empty() { banner = p_str },
-                            _ => {}
+                            "banner" => if banner.is_empty() { banner = p_str }, _ => {}
                         }
                     }
                 }
@@ -266,15 +275,14 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         {
             let conn = match pool.lock() { Ok(c) => c, Err(_) => continue };
             let _ = conn.execute(
-                "INSERT INTO items (library_id, title, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime, rating, mpaa, genres, directors, actors) 
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+                "INSERT INTO items (library_id, title, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime, rating, mpaa, genres, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id) 
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
                  ON CONFLICT(file_path) DO UPDATE SET 
-                 title=excluded.title, size=excluded.size, mtime=excluded.mtime,
-                 plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, 
-                 fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, 
-                 thumb_path=excluded.thumb_path, banner_path=excluded.banner_path,
-                 rating=excluded.rating, mpaa=excluded.mpaa, genres=excluded.genres, directors=excluded.directors, actors=excluded.actors",
-                rusqlite::params![lib_id, title, path_str, lib_type, plot, year, final_poster, final_fanart, logo, thumb, banner, size, mtime, rating, mpaa, genres, directors, actors]
+                 title=excluded.title, size=excluded.size, mtime=excluded.mtime, plot=excluded.plot, year=excluded.year, 
+                 poster_path=excluded.poster_path, fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, thumb_path=excluded.thumb_path, banner_path=excluded.banner_path,
+                 rating=excluded.rating, mpaa=excluded.mpaa, genres=excluded.genres, directors=excluded.directors, actors=excluded.actors,
+                 runtime=excluded.runtime, premiered=excluded.premiered, tagline=excluded.tagline, studios=excluded.studios, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id",
+                rusqlite::params![lib_id, title, path_str, lib_type, plot, year, final_poster, final_fanart, logo, thumb, banner, size, mtime, rating, mpaa, genres, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id]
             );
         }
         updated += 1;
@@ -287,7 +295,7 @@ pub struct ItemQuery { library_id: Option<i64>, lib_type: Option<String> }
 
 pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<ItemQuery>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, rating, mpaa, genres, directors, actors FROM items WHERE 1=1".to_string();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, rating, mpaa, genres, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id FROM items WHERE 1=1".to_string();
     if let Some(lid) = query.library_id { sql.push_str(&format!(" AND library_id = {}", lid)); }
     if let Some(lt) = query.lib_type { sql.push_str(&format!(" AND type = '{}'", lt)); }
     sql.push_str(" ORDER BY title ASC");
@@ -300,7 +308,10 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
             "plot": row.get::<_, String>(4).unwrap_or_default(), "has_poster": !row.get::<_, String>(5).unwrap_or_default().is_empty(),
             "rating": row.get::<_, f64>(6).unwrap_or(0.0), "mpaa": row.get::<_, String>(7).unwrap_or_default(),
             "genres": row.get::<_, String>(8).unwrap_or_default(), "directors": row.get::<_, String>(9).unwrap_or_default(),
-            "actors": row.get::<_, String>(10).unwrap_or_default(),
+            "actors": row.get::<_, String>(10).unwrap_or_default(), "runtime": row.get::<_, i32>(11).unwrap_or(0),
+            "premiered": row.get::<_, String>(12).unwrap_or_default(), "tagline": row.get::<_, String>(13).unwrap_or_default(),
+            "studios": row.get::<_, String>(14).unwrap_or_default(), "tmdb_id": row.get::<_, String>(15).unwrap_or_default(),
+            "imdb_id": row.get::<_, String>(16).unwrap_or_default()
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "items": items }))
@@ -319,9 +330,7 @@ pub async fn get_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((id,
     };
     if let Some(path_str) = path_opt {
         if !path_str.is_empty() {
-            if path_str.starts_with("http") {
-                return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response();
-            }
+            if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
             if let Ok(bytes) = tokio::fs::read(&path_str).await {
                 let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
                 return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
@@ -345,7 +354,9 @@ pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
     } else { (StatusCode::BAD_REQUEST, Json(json!({"error": "旧密码错误"}))) }
 }
 
-// Emby 兼容层 (略，保持原有逻辑即可，不影响前端)
+// ==========================================
+// Emby 兼容层 (略微精简，保持核心转发)
+// ==========================================
 pub async fn emby_public_info() -> impl IntoResponse { Json(json!({ "ServerName": "Rust-Em", "Version": "4.8.0.0", "Id": "rust-em-server", "OperatingSystem": "Linux", "StartupWizardCompleted": true })) }
 pub async fn emby_info() -> impl IntoResponse { Json(json!({ "ServerName": "Rust-Em", "Version": "4.8.0.0", "Id": "rust-em-server", "OperatingSystem": "Linux", "OperatingSystemDisplayName": "Linux", "HasPendingRestart": false, "IsShuttingDown": false, "SupportsLibraryMonitor": false, "SupportsHttps": true, "HttpServerPortNumber": 8096 })) }
 pub async fn emby_auth_keys() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
@@ -457,9 +468,7 @@ pub async fn emby_item_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPat
     };
     if let Some(path_str) = path_opt {
         if !path_str.is_empty() {
-            if path_str.starts_with("http") {
-                return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response();
-            }
+            if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
             if let Ok(bytes) = tokio::fs::read(&path_str).await {
                 let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
                 return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
