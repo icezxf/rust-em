@@ -56,16 +56,20 @@ pub async fn browse_dir(Query(req): Query<BrowseReq>) -> impl IntoResponse {
     let result = tokio::task::spawn_blocking(move || {
         let dir_path = Path::new(&base_path);
         let mut dirs = Vec::new();
+        let mut files = Vec::new();
         let mut error_msg = None;
 
         match std::fs::read_dir(dir_path) {
             Ok(entries) => {
                 for entry in entries.filter_map(|e| e.ok()) {
-                    if entry.path().is_dir() {
-                        dirs.push(json!({
-                            "name": entry.file_name().to_string_lossy(),
-                            "path": entry.path().to_string_lossy()
-                        }));
+                    let path = entry.path();
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let path_str = path.to_string_lossy().to_string();
+                    
+                    if path.is_dir() {
+                        dirs.push(json!({ "name": name, "path": path_str }));
+                    } else if path.is_file() {
+                        files.push(json!({ "name": name, "path": path_str }));
                     }
                 }
             }
@@ -75,13 +79,16 @@ pub async fn browse_dir(Query(req): Query<BrowseReq>) -> impl IntoResponse {
         }
         
         dirs.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-        (dirs, error_msg, base_path)
+        files.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+        
+        (dirs, files, error_msg, base_path)
     }).await.unwrap();
 
-    let (dirs, error, current) = result;
+    let (dirs, files, error, current) = result;
     Json(json!({
         "current": current,
         "dirs": dirs,
+        "files": files,
         "error": error
     }))
 }
@@ -120,22 +127,33 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoR
 
 fn scan_strm(paths: Vec<String>, lib_type: String, pool: Arc<Mutex<Connection>>) {
     let conn = pool.lock().unwrap();
-    for path in paths {
-        for entry in walkdir::WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
-            let file_path = entry.path();
-            if file_path.extension().map_or(false, |ext| ext == "strm") {
-                let nfo_path = file_path.with_extension("nfo");
-                let mut title = file_path.file_stem().unwrap().to_string_lossy().to_string();
-                if let Some(nfo) = crate::nfo::read_nfo(&nfo_path) {
-                    if let Some(t) = nfo.title { title = t; }
-                }
-                
-                let path_str = file_path.to_string_lossy().to_string();
-                let _ = conn.execute(
-                    "INSERT INTO items (library_id, title, file_path, type) VALUES (1, ?1, ?2, ?3)",
-                    rusqlite::params![title, path_str, lib_type]
-                );
+    
+    let process_file = |file_path: &Path| {
+        if file_path.extension().map_or(false, |ext| ext == "strm") {
+            let nfo_path = file_path.with_extension("nfo");
+            let mut title = file_path.file_stem().unwrap().to_string_lossy().to_string();
+            if let Some(nfo) = crate::nfo::read_nfo(&nfo_path) {
+                if let Some(t) = nfo.title { title = t; }
             }
+            
+            let path_str = file_path.to_string_lossy().to_string();
+            let _ = conn.execute(
+                "INSERT INTO items (library_id, title, file_path, type) VALUES (1, ?1, ?2, ?3)",
+                rusqlite::params![title, path_str, lib_type]
+            );
+        }
+    };
+
+    for path_str in paths {
+        let path = Path::new(&path_str);
+        if path.is_dir() {
+            for entry in walkdir::WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+                if entry.file_type().is_file() {
+                    process_file(entry.path());
+                }
+            }
+        } else if path.is_file() {
+            process_file(path);
         }
     }
 }
