@@ -189,7 +189,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
 
         let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
         let parent = path.parent().unwrap_or(Path::new(""));
-        let mut nfo_candidates = vec![path.with_extension("nfo"), parent.join("movie.nfo")];
+        let nfo_candidates = vec![path.with_extension("nfo"), parent.join("movie.nfo")];
         
         let mut title = stem.clone();
         let mut plot = String::new();
@@ -231,8 +231,8 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                     }
                     for uid in meta.unique_ids {
                         if let Some(t) = uid.id_type {
-                            if t.to_lowercase() == "tmdb" { tmdb_id = uid.text; }
-                            if t.to_lowercase() == "imdb" { imdb_id = uid.text; }
+                            if t.to_lowercase() == "tmdb" { tmdb_id = uid.text.clone(); }
+                            if t.to_lowercase() == "imdb" { imdb_id = uid.text.clone(); }
                         }
                     }
                     if let Some(thumb) = meta.thumbs.first() { nfo_poster = thumb.text.clone(); }
@@ -513,7 +513,7 @@ pub struct ResumeVisibilityQuery { #[serde(rename = "Hide")] pub hide: Option<St
 #[derive(Deserialize)]
 pub struct ResumeVisibilityBody { #[serde(rename = "Hide")] pub hide: bool }
 
-fn emby_user_item_data_json(item_id: &str, is_hidden: bool) -> Value {
+fn emby_user_item_data_json(_item_id: &str, is_hidden: bool) -> Value {
     json!({ "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "HideFromResume": is_hidden })
 }
 

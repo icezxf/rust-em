@@ -294,7 +294,8 @@
             mobileContainer.innerHTML = mobileHtml;
         }
 
-        function setLibraryFilter(libId) { currentLibId = libId; renderSidebarLibraries(); loadMedia(); }
+        function setLibraryFilter(libId) {
+            switchTab('library'); currentLibId = libId; renderSidebarLibraries(); loadMedia(); }
         function setTypeFilter(type) {
             currentType = type;
             ['all', 'movies', 'tvshows'].forEach(t => {
