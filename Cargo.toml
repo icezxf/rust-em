@@ -5,12 +5,15 @@ edition = "2021"
 
 [dependencies]
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 quick-xml = { version = "0.37", features = ["serialize"] }
-revelo = "0.5"
 rusqlite = { version = "0.32", features = ["bundled"] }
+sha2 = "0.10"
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+walkdir = "2"
+uuid = { version = "1", features = ["v4"] }
 
 [profile.release]
 opt-level = "z"

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rust-Em 控制台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white font-sans">
+    <div id="login-view" class="flex items-center justify-center h-screen">
+        <div class="bg-gray-800 p-8 rounded-lg shadow-lg w-96">
+            <h2 class="text-2xl mb-6 text-center">Rust-Em 登录</h2>
+            <input id="username" type="text" placeholder="用户名 (默认 admin)" class="w-full p-2 mb-4 bg-gray-700 rounded border border-gray-600">
+            <input id="password" type="password" placeholder="密码 (默认 admin)" class="w-full p-2 mb-4 bg-gray-700 rounded border border-gray-600">
+            <button onclick="login()" class="w-full bg-blue-600 hover:bg-blue-700 p-2 rounded">登录</button>
+        </div>
+    </div>
+
+    <div id="main-view" class="hidden h-screen flex">
+        <div class="w-64 bg-gray-800 p-4 flex flex-col">
+            <h1 class="text-xl font-bold mb-6 text-blue-400">Rust-Em</h1>
+            <button onclick="switchTab('library')" class="text-left p-2 hover:bg-gray-700 rounded mb-2">🎬 媒体库</button>
+            <button onclick="switchTab('settings')" class="text-left p-2 hover:bg-gray-700 rounded mb-2">⚙️ 设置</button>
+            <button onclick="logout()" class="mt-auto text-left p-2 text-red-400 hover:bg-gray-700 rounded">🚪 退出</button>
+        </div>
+        <div class="flex-1 p-8 overflow-y-auto">
+            <div id="tab-library" class="hidden">
+                <h2 class="text-2xl mb-4">媒体库</h2>
+                <div id="media-grid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4"></div>
+            </div>
+            <div id="tab-settings" class="hidden">
+                <h2 class="text-2xl mb-4">设置</h2>
+                <div class="bg-gray-800 p-6 rounded mb-6">
+                    <h3 class="text-lg mb-2">添加媒体库 (STRM)</h3>
+                    <input id="lib-name" placeholder="媒体库名称 (如: 电影)" class="p-2 mb-2 bg-gray-700 rounded w-full">
+                    <input id="lib-path" placeholder="服务器本地绝对路径 (如: /media/movies)" class="p-2 mb-2 bg-gray-700 rounded w-full">
+                    <select id="lib-type" class="p-2 mb-2 bg-gray-700 rounded w-full">
+                        <option value="movies">电影</option>
+                        <option value="tvshows">电视剧</option>
+                    </select>
+                    <button onclick="addLibrary()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded mt-2">添加并扫描</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let token = localStorage.getItem('token');
+        if (token) showMain();
+        async function api(path, method = 'GET', body = null) {
+            const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+            const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : null });
+            if (res.status === 401) { logout(); return; }
+            return res.json();
+        }
+        async function login() {
+            const u = document.getElementById('username').value;
+            const p = document.getElementById('password').value;
+            const res = await fetch('/api/login', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ username: u, password: p })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                token = data.token;
+                localStorage.setItem('token', token);
+                showMain();
+            } else alert('登录失败');
+        }
+        function logout() { localStorage.removeItem('token'); location.reload(); }
+        function showMain() {
+            document.getElementById('login-view').classList.add('hidden');
+            document.getElementById('main-view').classList.remove('hidden');
+            switchTab('library');
+        }
+        function switchTab(tab) {
+            document.getElementById('tab-library').classList.add('hidden');
+            document.getElementById('tab-settings').classList.add('hidden');
+            document.getElementById(`tab-${tab}`).classList.remove('hidden');
+            if (tab === 'library') loadMedia();
+        }
+        async function loadMedia() {
+            const data = await api('/api/items');
+            const grid = document.getElementById('media-grid');
+            grid.innerHTML = data.items.map(item => `
+                <div class="bg-gray-800 p-2 rounded">
+                    <div class="bg-gray-700 h-48 mb-2 rounded flex items-center justify-center">封面</div>
+                    <div class="font-bold truncate">${item.title}</div>
+                    <div class="text-xs text-gray-400">${item.type}</div>
+                </div>
+            `).join('');
+        }
+        async function addLibrary() {
+            const name = document.getElementById('lib-name').value;
+            const path = document.getElementById('lib-path').value;
+            const type = document.getElementById('lib-type').value;
+            await api('/api/libraries', 'POST', { name, path, type });
+            alert('媒体库已添加，后台开始扫描...');
+            switchTab('library');
+        }
+    </script>
+</body>
+</html>

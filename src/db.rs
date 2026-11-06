@@ -1,0 +1,26 @@
+use rusqlite::Connection;
+
+pub fn init_db(conn: &Connection) {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY,
+            username TEXT UNIQUE,
+            password TEXT
+        );
+        CREATE TABLE IF NOT EXISTS libraries (
+            id INTEGER PRIMARY KEY,
+            name TEXT,
+            path TEXT,
+            type TEXT
+        );
+        CREATE TABLE IF NOT EXISTS items (
+            id INTEGER PRIMARY KEY,
+            library_id INTEGER,
+            title TEXT,
+            file_path TEXT,
+            type TEXT
+        );
+        -- admin 的 SHA256 密码就是 admin 的哈希
+        INSERT OR IGNORE INTO users (username, password) VALUES ('admin', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918');"
+    ).unwrap();
+}
