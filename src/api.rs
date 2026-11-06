@@ -304,7 +304,6 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
     Json(json!({ "items": items }))
 }
 
-// 修复 Handler 推断错误，改为 ImageQuery 结构体
 #[derive(Deserialize)]
 pub struct ImageQuery { index: Option<usize> }
 
@@ -490,33 +489,44 @@ pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, Axum
 }
 
 pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>, headers: HeaderMap) -> Response {
-    let path_opt = { let conn = pool.lock().unwrap(); conn.query_row("SELECT file_path FROM items WHERE id = ?1", [item_id], |row| row.get::<_, String>(0)).ok() };
-    let Some(strm_path) = path_opt else { return StatusCode::NOT_FOUND.into_response(); };
-    let file = match tokio::fs::File::open(&strm_path).await { Ok(f) => f, Err(_) => return StatusCode::NOT_FOUND.into_response() };
-    let mut contents = String::new();
-    if file.take(MAX_STRM_SIZE).read_to_string(&mut contents).await.is_err() { return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
-    let url = contents.lines().map(str::trim).find(|s| !s.is_empty()).unwrap_or("");
-    if !url.starts_with("http") { return StatusCode::NOT_FOUND.into_response(); }
     let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
-    let cache_key = format!("{}|{}|{}", url, ip, ua);
+    
+    // 【核心优化】：缓存 Key 直接使用 item_id + IP + UA，完全不需要去读库或读文件！
+    let cache_key = format!("{}|{}|{}", item_id, ip, ua);
     let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     { 
         let cache_lock = cache.lock().unwrap(); 
         if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) { 
             if Instant::now() < *expire_at { 
-                println!("🚀 [302 缓存命中] 客户端: {}, 直链: {}", ua, cached_url);
+                println!("🚀 [302 缓存命中] ItemID: {}, 客户端: {}, 直链: {}", item_id, ua, cached_url);
                 return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); 
             } 
         } 
     }
+
+    // 缓存没命中，才去查库拿 .strm 路径
+    let path_opt = { let conn = pool.lock().unwrap(); conn.query_row("SELECT file_path FROM items WHERE id = ?1", [item_id], |row| row.get::<_, String>(0)).ok() };
+    let Some(strm_path) = path_opt else { return StatusCode::NOT_FOUND.into_response(); };
+    
+    // 读取 .strm 内容
+    let file = match tokio::fs::File::open(&strm_path).await { Ok(f) => f, Err(_) => return StatusCode::NOT_FOUND.into_response() };
+    let mut contents = String::new();
+    if file.take(MAX_STRM_SIZE).read_to_string(&mut contents).await.is_err() { return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
+    let url = contents.lines().map(str::trim).find(|s| !s.is_empty()).unwrap_or("");
+    if !url.starts_with("http") { return StatusCode::NOT_FOUND.into_response(); }
+
+    // 去请求网盘/OpenList 拿最终直链
     let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(15)).build().unwrap();
     let mut final_url = url.to_string();
     if let Ok(resp) = client.get(url).header(USER_AGENT, ua).send().await {
         if resp.status().is_redirection() { if let Some(location) = resp.headers().get("location") { if let Ok(loc_str) = location.to_str() { final_url = loc_str.to_string(); } } }
     }
+    
+    // 写入缓存 (5秒)
     { let mut cache_lock = cache.lock().unwrap(); cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(5))); }
-    println!("🚀 [302 解析成功] 客户端: {}, 原始URL: {}, 真实直链: {}", ua, url, final_url);
+    
+    println!("🚀 [302 解析成功] ItemID: {}, 客户端: {}, 原始URL: {}, 真实直链: {}", item_id, ua, url, final_url);
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
 }
 
