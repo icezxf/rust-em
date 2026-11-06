@@ -12,15 +12,14 @@ async fn main() {
     db::init_db(&conn);
     let db_pool = Arc::new(Mutex::new(conn));
 
-    // API 路由 (需要状态)
     let api_routes = Router::new()
         .route("/login", post(api::login))
         .route("/libraries", post(api::add_library).get(api::get_libraries))
         .route("/items", get(api::get_items))
-        .layer(middleware::from_fn_with_state(db_pool.clone(), api::auth))
+        // 修复：不需要用 from_fn_with_state，直接用 from_fn
+        .layer(middleware::from_fn(api::auth))
         .with_state(db_pool.clone());
 
-    // 外部兼容路由 + 静态文件
     let app = Router::new()
         .nest("/api", api_routes)
         .route("/System/Info", get(api::emby_info))

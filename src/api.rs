@@ -34,10 +34,10 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
     }
 }
 
-pub async fn auth(State(_pool): State<Arc<Mutex<Connection>>>, req: Request, next: Next) -> Result<Response, StatusCode> {
+// 修复：去掉了 State 参数，直接使用全局静态变量
+pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     if let Some(auth_header) = req.headers().get("Authorization") {
         if let Some(token) = auth_header.to_str().unwrap_or("").strip_prefix("Bearer ") {
-            // 修复：通过 if let 绑定，避免借用临时值
             if let Some(tokens) = TOKENS.get() {
                 if tokens.lock().unwrap().contains(&token.to_string()) {
                     return Ok(next.run(req).await);
@@ -90,9 +90,12 @@ fn scan_strm(path: &str, lib_type: &str, pool: Arc<Mutex<Connection>>) {
             if let Some(nfo) = crate::nfo::read_nfo(&nfo_path) {
                 if let Some(t) = nfo.title { title = t; }
             }
+            
+            // 修复：用 params! 宏解决类型和生命周期问题
+            let path_str = file_path.to_string_lossy().to_string();
             let _ = conn.execute(
                 "INSERT INTO items (library_id, title, file_path, type) VALUES (1, ?1, ?2, ?3)",
-                [&title, &file_path.to_string_lossy().to_string(), &lib_type]
+                rusqlite::params![title, path_str, lib_type]
             );
         }
     }
