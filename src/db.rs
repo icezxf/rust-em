@@ -9,12 +9,13 @@ pub fn init_db(conn: &Connection) {
             logo_path TEXT, thumb_path TEXT, banner_path TEXT, size INTEGER DEFAULT 0, mtime INTEGER DEFAULT 0,
             rating REAL DEFAULT 0, mpaa TEXT, genres TEXT, tags TEXT, directors TEXT, actors TEXT,
             runtime INTEGER DEFAULT 0, num TEXT, premiered TEXT, tagline TEXT, studios TEXT, tmdb_id TEXT, imdb_id TEXT,
-            series TEXT, label TEXT, set_name TEXT, strm_content TEXT, stills TEXT
+            series TEXT, label TEXT, set_name TEXT, strm_content TEXT, stills TEXT,
+            parts TEXT -- 新增：存储多个片段路径的JSON数组
         );
         INSERT OR IGNORE INTO users (username, password) VALUES ('admin', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918');"
     ).unwrap();
     let missing_columns = [
-        ("size", "INTEGER DEFAULT 0"), ("mtime", "INTEGER DEFAULT 0"), ("logo_path", "TEXT"), ("thumb_path", "TEXT"), ("banner_path", "TEXT"), ("rating", "REAL DEFAULT 0"), ("mpaa", "TEXT"), ("genres", "TEXT"), ("tags", "TEXT"), ("directors", "TEXT"), ("actors", "TEXT"), ("runtime", "INTEGER DEFAULT 0"), ("num", "TEXT"), ("premiered", "TEXT"), ("tagline", "TEXT"), ("studios", "TEXT"), ("tmdb_id", "TEXT"), ("imdb_id", "TEXT"), ("series", "TEXT"), ("label", "TEXT"), ("set_name", "TEXT"), ("strm_content", "TEXT"), ("stills", "TEXT"),
+        ("size", "INTEGER DEFAULT 0"), ("mtime", "INTEGER DEFAULT 0"), ("logo_path", "TEXT"), ("thumb_path", "TEXT"), ("banner_path", "TEXT"), ("rating", "REAL DEFAULT 0"), ("mpaa", "TEXT"), ("genres", "TEXT"), ("tags", "TEXT"), ("directors", "TEXT"), ("actors", "TEXT"), ("runtime", "INTEGER DEFAULT 0"), ("num", "TEXT"), ("premiered", "TEXT"), ("tagline", "TEXT"), ("studios", "TEXT"), ("tmdb_id", "TEXT"), ("imdb_id", "TEXT"), ("series", "TEXT"), ("label", "TEXT"), ("set_name", "TEXT"), ("strm_content", "TEXT"), ("stills", "TEXT"), ("parts", "TEXT"),
     ];
     for (col_name, col_type) in missing_columns {
         let check_sql = format!("SELECT {} FROM items LIMIT 1", col_name);
