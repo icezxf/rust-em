@@ -1,6 +1,6 @@
 use axum::{
-    extract::{State, Request, Json, Query},
-    http::StatusCode,
+    extract::{State, Request, Json, Query, Path as AxumPath},
+    http::{StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -34,12 +34,28 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
     }
 }
 
+// 支持从 Header 或 URL 参数 (针对 img 标签) 获取 Token
 pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
+    // 1. 从 Header 获取
     if let Some(auth_header) = req.headers().get("Authorization") {
         if let Some(token) = auth_header.to_str().unwrap_or("").strip_prefix("Bearer ") {
             if let Some(tokens) = TOKENS.get() {
                 if tokens.lock().unwrap().contains(&token.to_string()) {
                     return Ok(next.run(req).await);
+                }
+            }
+        }
+    }
+    // 2. 从 URL 参数获取
+    if let Some(query) = req.uri().query() {
+        for pair in query.split('&') {
+            if let Some((key, value)) = pair.split_once('=') {
+                if key == "token" {
+                    if let Some(tokens) = TOKENS.get() {
+                        if tokens.lock().unwrap().contains(&value.to_string()) {
+                            return Ok(next.run(req).await);
+                        }
+                    }
                 }
             }
         }
@@ -52,7 +68,6 @@ pub struct BrowseReq { path: String }
 
 pub async fn browse_dir(Query(req): Query<BrowseReq>) -> impl IntoResponse {
     let base_path = req.path;
-    
     let result = tokio::task::spawn_blocking(move || {
         let dir_path = Path::new(&base_path);
         let mut dirs = Vec::new();
@@ -65,7 +80,6 @@ pub async fn browse_dir(Query(req): Query<BrowseReq>) -> impl IntoResponse {
                     let path = entry.path();
                     let name = entry.file_name().to_string_lossy().to_string();
                     let path_str = path.to_string_lossy().to_string();
-                    
                     if path.is_dir() {
                         dirs.push(json!({ "name": name, "path": path_str }));
                     } else if path.is_file() {
@@ -73,89 +87,128 @@ pub async fn browse_dir(Query(req): Query<BrowseReq>) -> impl IntoResponse {
                     }
                 }
             }
-            Err(e) => {
-                error_msg = Some(format!("无法读取目录 [{}]: {}", base_path, e));
-            }
+            Err(e) => { error_msg = Some(format!("无法读取目录 [{}]: {}", base_path, e)); }
         }
-        
         dirs.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
         files.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-        
         (dirs, files, error_msg, base_path)
     }).await.unwrap();
 
     let (dirs, files, error, current) = result;
-    Json(json!({
-        "current": current,
-        "dirs": dirs,
-        "files": files,
-        "error": error
-    }))
+    Json(json!({ "current": current, "dirs": dirs, "files": files, "error": error }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct AddLibReq { name: String, paths: Vec<String>, #[serde(rename = "type")] lib_type: String }
 
 pub async fn add_library(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<AddLibReq>) -> impl IntoResponse {
-    let conn = pool.lock().unwrap();
-    let paths_json = serde_json::to_string(&payload.paths).unwrap();
-    
-    conn.execute("INSERT INTO libraries (name, path, type) VALUES (?1, ?2, ?3)", 
-        [&payload.name, &paths_json, &payload.lib_type]).unwrap();
-    
-    let paths = payload.paths.clone();
-    let lib_type = payload.lib_type.clone();
     let pool_clone = pool.clone();
-    tokio::spawn(async move {
-        scan_strm(paths, lib_type, pool_clone);
-    });
+    tokio::task::spawn_blocking(move || {
+        let conn = pool_clone.lock().unwrap();
+        let paths_json = serde_json::to_string(&payload.paths).unwrap();
+        conn.execute("INSERT INTO libraries (name, path, type) VALUES (?1, ?2, ?3)", 
+            [&payload.name, &paths_json, &payload.lib_type]).unwrap();
+        let lib_id = conn.last_insert_rowid();
+
+        for path_str in payload.paths {
+            let path = Path::new(&path_str);
+            if path.is_dir() {
+                for entry in walkdir::WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+                    if entry.file_type().is_file() {
+                        process_file(entry.path(), &payload.lib_type, lib_id, &conn);
+                    }
+                }
+            } else if path.is_file() {
+                process_file(path, &payload.lib_type, lib_id, &conn);
+            }
+        }
+    }).await.unwrap();
 
     Json(json!({"status": "scanning"}))
+}
+
+fn process_file(file_path: &Path, lib_type: &str, lib_id: i64, conn: &Connection) {
+    if file_path.extension().map_or(false, |ext| ext == "strm") {
+        let stem = file_path.file_stem().unwrap().to_string_lossy().to_string();
+        let parent = file_path.parent().unwrap_or(Path::new(""));
+        
+        // 解析 NFO
+        let nfo_path = file_path.with_extension("nfo");
+        let mut title = stem.clone();
+        let mut plot = "".to_string();
+        let mut year = "".to_string();
+        
+        if let Some(nfo) = crate::nfo::read_nfo(&nfo_path) {
+            if let Some(t) = nfo.title { title = t; }
+            if let Some(p) = nfo.plot { plot = p; }
+            if let Some(y) = nfo.year { year = y.to_string(); }
+        }
+
+        // 寻找海报和背景图
+        let mut poster_path = "".to_string();
+        let mut fanart_path = "".to_string();
+        
+        let poster_names = [format!("{}-poster.jpg", stem), "poster.jpg".to_string(), "folder.jpg".to_string()];
+        for name in poster_names {
+            let p = parent.join(&name);
+            if p.exists() { poster_path = p.to_string_lossy().to_string(); break; }
+        }
+
+        let fanart_names = [format!("{}-fanart.jpg", stem), "fanart.jpg".to_string(), "background.jpg".to_string()];
+        for name in fanart_names {
+            let p = parent.join(&name);
+            if p.exists() { fanart_path = p.to_string_lossy().to_string(); break; }
+        }
+
+        let path_str = file_path.to_string_lossy().to_string();
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO items (library_id, title, file_path, type, plot, year, poster_path, fanart_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![lib_id, title, path_str, lib_type, plot, year, poster_path, fanart_path]
+        );
+    }
 }
 
 pub async fn get_libraries() -> impl IntoResponse { Json(json!([])) }
 
 pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT title, type FROM items").unwrap();
+    let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path FROM items").unwrap();
     let items: Vec<Value> = stmt.query_map([], |row| {
-        Ok(json!({"title": row.get::<_, String>(0)?, "type": row.get::<_, String>(1)?}))
+        let id: i64 = row.get(0).unwrap_or_default();
+        let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
+        Ok(json!({
+            "id": id,
+            "title": row.get::<_, String>(1).unwrap_or_default(),
+            "type": row.get::<_, String>(2).unwrap_or_default(),
+            "year": row.get::<_, String>(3).unwrap_or_default(),
+            "plot": row.get::<_, String>(4).unwrap_or_default(),
+            "has_poster": has_poster,
+        }))
     }).unwrap().filter_map(Result::ok).collect();
 
     Json(json!({ "items": items }))
 }
 
-fn scan_strm(paths: Vec<String>, lib_type: String, pool: Arc<Mutex<Connection>>) {
+pub async fn get_image(
+    State(pool): State<Arc<Mutex<Connection>>>,
+    AxumPath((id, img_type)): AxumPath<(i64, String)>,
+) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
+    let query = if img_type == "poster" { "SELECT poster_path FROM items WHERE id = ?1" } else { "SELECT fanart_path FROM items WHERE id = ?1" };
     
-    let process_file = |file_path: &Path| {
-        if file_path.extension().map_or(false, |ext| ext == "strm") {
-            let nfo_path = file_path.with_extension("nfo");
-            let mut title = file_path.file_stem().unwrap().to_string_lossy().to_string();
-            if let Some(nfo) = crate::nfo::read_nfo(&nfo_path) {
-                if let Some(t) = nfo.title { title = t; }
+    let mut stmt = conn.prepare(query).unwrap();
+    let path_opt: Result<String, _> = stmt.query_row([id], |row| row.get(0));
+    
+    if let Ok(path_str) = path_opt {
+        if !path_str.is_empty() {
+            if let Ok(bytes) = tokio::fs::read(&path_str).await {
+                // 简单根据后缀判断，默认 jpeg
+                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
+                return (StatusCode::OK, [(header::CONTENT_TYPE, mime)], bytes).into_response();
             }
-            
-            let path_str = file_path.to_string_lossy().to_string();
-            let _ = conn.execute(
-                "INSERT INTO items (library_id, title, file_path, type) VALUES (1, ?1, ?2, ?3)",
-                rusqlite::params![title, path_str, lib_type]
-            );
-        }
-    };
-
-    for path_str in paths {
-        let path = Path::new(&path_str);
-        if path.is_dir() {
-            for entry in walkdir::WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
-                if entry.file_type().is_file() {
-                    process_file(entry.path());
-                }
-            }
-        } else if path.is_file() {
-            process_file(path);
         }
     }
+    StatusCode::NOT_FOUND.into_response()
 }
 
 #[derive(Deserialize)]
