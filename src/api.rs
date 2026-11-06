@@ -41,13 +41,10 @@ fn extract_emby_token(headers: &HeaderMap, query_str: Option<&str>) -> Option<St
 
 #[derive(Deserialize)]
 pub struct LoginReq { username: String, password: String }
-
 pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<LoginReq>) -> impl IntoResponse {
     let mut hasher = Sha256::new(); hasher.update(&payload.password);
-    let hashed_pwd = format!("{:x}", hasher.finalize());
     let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id FROM users WHERE username = ?1 AND password = ?2").unwrap();
-    if stmt.exists([&payload.username, &hashed_pwd]).unwrap() {
+    if conn.prepare("SELECT id FROM users WHERE username = ?1 AND password = ?2").unwrap().exists([&payload.username, &format!("{:x}", hasher.finalize())]).unwrap() {
         let token = uuid::Uuid::new_v4().to_string();
         TOKENS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap().push(token.clone());
         (StatusCode::OK, Json(json!({ "token": token })))
@@ -65,48 +62,36 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
 
 #[derive(Deserialize)]
 pub struct BrowseReq { path: String }
-
 pub async fn browse_dir(Query(req): Query<BrowseReq>) -> impl IntoResponse {
     let base_path = req.path;
     let result = tokio::task::spawn_blocking(move || {
         let dir_path = Path::new(&base_path);
-        let mut dirs = Vec::new(); let mut files = Vec::new(); let mut error_msg = None;
-        match std::fs::read_dir(dir_path) {
-            Ok(entries) => {
-                for entry in entries.filter_map(|e| e.ok()) {
-                    let path = entry.path();
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    let path_str = path.to_string_lossy().to_string();
-                    if path.is_dir() { dirs.push(json!({ "name": name, "path": path_str })); }
-                    else if path.is_file() { files.push(json!({ "name": name, "path": path_str })); }
-                }
+        let mut dirs = Vec::new(); let mut files = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(dir_path) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
+                let path_str = path.to_string_lossy().to_string();
+                if path.is_dir() { dirs.push(json!({ "name": name, "path": path_str })); }
+                else if path.is_file() { files.push(json!({ "name": name, "path": path_str })); }
             }
-            Err(e) => { error_msg = Some(format!("无法读取目录: {}", e)); }
         }
-        dirs.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-        files.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-        (dirs, files, error_msg, base_path)
+        (dirs, files, base_path)
     }).await.unwrap();
-    let (dirs, files, error, current) = result;
-    Json(json!({ "current": current, "dirs": dirs, "files": files, "error": error }))
+    Json(json!({ "current": result.2, "dirs": result.0, "files": result.1, "error": null }))
 }
 
 #[derive(Deserialize, Clone)]
 pub struct AddLibReq { name: String, paths: Vec<String>, #[serde(rename = "type")] lib_type: String }
-
 pub async fn add_library(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<AddLibReq>) -> impl IntoResponse {
     let pool_clone = pool.clone();
     tokio::task::spawn_blocking(move || {
         let lib_id = {
             let conn = pool_clone.lock().unwrap();
-            let paths_json = serde_json::to_string(&payload.paths).unwrap();
-            conn.execute("INSERT INTO libraries (name, path, type) VALUES (?1, ?2, ?3)", 
-                [&payload.name, &paths_json, &payload.lib_type]).unwrap();
+            conn.execute("INSERT INTO libraries (name, path, type) VALUES (?1, ?2, ?3)", [&payload.name, &serde_json::to_string(&payload.paths).unwrap(), &payload.lib_type]).unwrap();
             conn.last_insert_rowid()
         };
-        for path_str in payload.paths {
-            scan_directory(pool_clone.clone(), lib_id, payload.lib_type.clone(), path_str);
-        }
+        for path_str in payload.paths { scan_directory(pool_clone.clone(), lib_id, payload.lib_type.clone(), path_str); }
     }).await.unwrap();
     Json(json!({"status": "scanning"}))
 }
@@ -114,9 +99,7 @@ pub async fn add_library(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
 pub async fn get_libraries(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut stmt = conn.prepare("SELECT id, name, type FROM libraries").unwrap();
-    let libs: Vec<Value> = stmt.query_map([], |row| {
-        Ok(json!({ "id": row.get::<_, i64>(0).unwrap_or_default(), "name": row.get::<_, String>(1).unwrap_or_default(), "type": row.get::<_, String>(2).unwrap_or_default() }))
-    }).unwrap().filter_map(Result::ok).collect();
+    let libs: Vec<Value> = stmt.query_map([], |r| Ok(json!({ "id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?, "type": r.get::<_, String>(2)? }))).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "libraries": libs }))
 }
 
@@ -130,15 +113,12 @@ pub async fn delete_library(State(pool): State<Arc<Mutex<Connection>>>, AxumPath
 pub async fn rescan_library(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(id): AxumPath<i64>) -> impl IntoResponse {
     let pool_clone = pool.clone();
     tokio::task::spawn_blocking(move || {
-        let (paths_json, lib_type) = {
+        if let Ok((paths_json, lib_type)) = {
             let conn = pool_clone.lock().unwrap();
-            match conn.query_row("SELECT name, path, type FROM libraries WHERE id = ?1", [id], |row| Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?))) {
-                Ok(res) => res, Err(_) => return,
-            }
-        };
-        let paths: Vec<String> = serde_json::from_str(&paths_json).unwrap_or_default();
-        for path_str in paths {
-            scan_directory(pool_clone.clone(), id, lib_type.clone(), path_str);
+            conn.query_row("SELECT path, type FROM libraries WHERE id = ?1", [id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        } {
+            let paths: Vec<String> = serde_json::from_str(&paths_json).unwrap_or_default();
+            for path_str in paths { scan_directory(pool_clone.clone(), id, lib_type.clone(), path_str); }
         }
     }).await.unwrap();
     Json(json!({"status": "scanning"}))
@@ -146,26 +126,17 @@ pub async fn rescan_library(State(pool): State<Arc<Mutex<Connection>>>, AxumPath
 
 fn get_image_type(stem: &str) -> Option<&'static str> {
     let lower = stem.to_lowercase();
-    let base = if let Some((b, suffix)) = lower.rsplit_once('-') {
-        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) { b } else { &lower }
-    } else { &lower };
-    match base {
-        "poster" => Some("poster"), "fanart" | "backdrop" => Some("fanart"),
-        "logo" | "clearlogo" => Some("logo"), "thumb" | "thumbnail" => Some("thumb"),
-        "banner" => Some("banner"), _ => None,
-    }
+    let base = if let Some((b, suffix)) = lower.rsplit_once('-') { if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) { b } else { &lower } } else { &lower };
+    match base { "poster" => Some("poster"), "fanart" | "backdrop" => Some("fanart"), "logo" | "clearlogo" => Some("logo"), "thumb" | "thumbnail" => Some("thumb"), "banner" => Some("banner"), _ => None }
 }
 
 fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, dir_path: String) {
     println!("🔍 开始扫描目录: {:?}", dir_path);
-    let mut count = 0; let mut updated = 0;
-    let dir_path = Path::new(&dir_path);
+    let mut count = 0;
     let mut strm_files = Vec::new();
-    
-    for entry in walkdir::WalkDir::new(dir_path).into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if path.is_file() && path.extension().and_then(|e| e.to_str()).map_or(false, |e| e.eq_ignore_ascii_case("strm")) {
-            strm_files.push(path.to_path_buf());
+    for entry in walkdir::WalkDir::new(&dir_path).into_iter().filter_map(|e| e.ok()) {
+        if entry.path().is_file() && entry.path().extension().and_then(|e| e.to_str()).map_or(false, |e| e.eq_ignore_ascii_case("strm")) {
+            strm_files.push(entry.path().to_path_buf());
         }
     }
 
@@ -176,39 +147,17 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         let mtime = metadata.modified().unwrap_or(UNIX_EPOCH).duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
         let path_str = path.to_string_lossy().to_string();
 
-        {
-            let conn = match pool.lock() { Ok(c) => c, Err(_) => continue };
-            let mut stmt = match conn.prepare("SELECT id, size, mtime FROM items WHERE file_path = ?1") {
-                Ok(s) => s, Err(_) => continue,
-            };
-            let existing: Option<(i64, i64, i64)> = stmt.query_row([&path_str], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).ok();
-            if let Some((_, db_size, db_mtime)) = existing {
-                if db_size == size && db_mtime == mtime { continue; }
-            }
-        }
-
         let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
         let parent = path.parent().unwrap_or(Path::new(""));
         let nfo_candidates = vec![path.with_extension("nfo"), parent.join("movie.nfo")];
         
-        let mut title = stem.clone();
-        let mut plot = String::new();
-        let mut year = String::new();
-        let mut rating = 0.0;
-        let mut mpaa = String::new();
-        let mut genres = String::new();
-        let mut directors = String::new();
-        let mut actors = String::new();
-        let mut runtime = 0;
-        let mut premiered = String::new();
-        let mut tagline = String::new();
-        let mut studios = String::new();
-        let mut tmdb_id = String::new();
-        let mut imdb_id = String::new();
-        let mut nfo_poster = String::new();
-        let mut nfo_fanart = String::new();
+        let mut title = stem.clone(); let mut plot = String::new(); let mut year = String::new();
+        let mut rating = 0.0; let mut mpaa = String::new(); let mut genres = String::new();
+        let mut directors = String::new(); let mut actors_json = String::new();
+        let mut runtime = 0; let mut premiered = String::new(); let mut tagline = String::new();
+        let mut studios = String::new(); let mut tmdb_id = String::new(); let mut imdb_id = String::new();
+        let mut nfo_poster = String::new(); let mut nfo_fanart = String::new();
 
-        // 1. NFO 解析
         for nfo in nfo_candidates {
             if nfo.exists() {
                 if let Some(meta) = crate::nfo::read_nfo(&nfo) {
@@ -223,12 +172,15 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                     if !meta.genres.is_empty() { genres = meta.genres.join(" / "); }
                     if !meta.directors.is_empty() { directors = meta.directors.join(" / "); }
                     if !meta.studios.is_empty() { studios = meta.studios.join(" / "); }
-                    if !meta.actors.is_empty() {
-                        actors = meta.actors.iter().map(|a| {
-                            if let Some(role) = &a.role { format!("{} ({})", a.name.clone().unwrap_or_default(), role) }
-                            else { a.name.clone().unwrap_or_default() }
-                        }).collect::<Vec<_>>().join(" / ");
-                    }
+                    
+                    // 演员解析为 JSON
+                    let actors_arr: Vec<Value> = meta.actors.into_iter().filter(|a| a.name.is_some()).map(|a| json!({
+                        "name": a.name.unwrap_or_default(),
+                        "role": a.role.unwrap_or_default(),
+                        "thumb": a.thumb.unwrap_or_default()
+                    })).collect();
+                    actors_json = serde_json::to_string(&actors_arr).unwrap_or_default();
+
                     for uid in meta.unique_ids {
                         if let Some(t) = uid.id_type {
                             if t.to_lowercase() == "tmdb" { tmdb_id = uid.text.clone(); }
@@ -236,15 +188,12 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                         }
                     }
                     if let Some(thumb) = meta.thumbs.first() { nfo_poster = thumb.text.clone(); }
-                    if let Some(fanart) = meta.fanart {
-                        if let Some(thumb) = fanart.thumbs.first() { nfo_fanart = thumb.text.clone(); }
-                    }
+                    if let Some(fanart) = meta.fanart { if let Some(thumb) = fanart.thumbs.first() { nfo_fanart = thumb.text.clone(); } }
                     break;
                 }
             }
         }
 
-        // 2. 本地图片
         let mut final_poster = nfo_poster; let mut final_fanart = nfo_fanart;
         let mut logo = String::new(); let mut thumb = String::new(); let mut banner = String::new();
 
@@ -257,61 +206,54 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                     if !["jpg", "jpeg", "png", "webp"].contains(&ext.as_str()) { continue; }
                     let is_match_media = file_stem.starts_with(&format!("{}-", stem));
                     let test_stem = if is_match_media { file_stem.trim_start_matches(&format!("{}-", stem)) } else { file_stem };
-                    
                     if let Some(img_type) = get_image_type(test_stem) {
                         let p_str = p.to_string_lossy().to_string();
                         match img_type {
                             "poster" => final_poster = p_str, "fanart" => final_fanart = p_str,
-                            "logo" => if logo.is_empty() { logo = p_str },
-                            "thumb" => if thumb.is_empty() { thumb = p_str },
-                            "banner" => if banner.is_empty() { banner = p_str }, _ => {}
+                            "logo" => if logo.is_empty() { logo = p_str }, "thumb" => if thumb.is_empty() { thumb = p_str }, "banner" => if banner.is_empty() { banner = p_str }, _ => {}
                         }
                     }
                 }
             }
         }
 
-        // 3. 入库
         {
             let conn = match pool.lock() { Ok(c) => c, Err(_) => continue };
             let _ = conn.execute(
                 "INSERT INTO items (library_id, title, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime, rating, mpaa, genres, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id) 
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
                  ON CONFLICT(file_path) DO UPDATE SET 
-                 title=excluded.title, size=excluded.size, mtime=excluded.mtime, plot=excluded.plot, year=excluded.year, 
-                 poster_path=excluded.poster_path, fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, thumb_path=excluded.thumb_path, banner_path=excluded.banner_path,
-                 rating=excluded.rating, mpaa=excluded.mpaa, genres=excluded.genres, directors=excluded.directors, actors=excluded.actors,
-                 runtime=excluded.runtime, premiered=excluded.premiered, tagline=excluded.tagline, studios=excluded.studios, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id",
-                rusqlite::params![lib_id, title, path_str, lib_type, plot, year, final_poster, final_fanart, logo, thumb, banner, size, mtime, rating, mpaa, genres, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id]
+                 title=excluded.title, size=excluded.size, mtime=excluded.mtime, plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, thumb_path=excluded.thumb_path, banner_path=excluded.banner_path, rating=excluded.rating, mpaa=excluded.mpaa, genres=excluded.genres, directors=excluded.directors, actors=excluded.actors, runtime=excluded.runtime, premiered=excluded.premiered, tagline=excluded.tagline, studios=excluded.studios, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id",
+                rusqlite::params![lib_id, title, path_str, lib_type, plot, year, final_poster, final_fanart, logo, thumb, banner, size, mtime, rating, mpaa, genres, directors, actors_json, runtime, premiered, tagline, studios, tmdb_id, imdb_id]
             );
         }
-        updated += 1;
     }
-    println!("✅ 扫描完成。发现 {} 个，更新 {} 个。", count, updated);
+    println!("✅ 扫描完成。共处理 {} 个文件。", count);
 }
 
 #[derive(Deserialize)]
 pub struct ItemQuery { library_id: Option<i64>, lib_type: Option<String> }
-
 pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<ItemQuery>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, rating, mpaa, genres, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id FROM items WHERE 1=1".to_string();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, rating, mpaa, genres, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, size FROM items WHERE 1=1".to_string();
     if let Some(lid) = query.library_id { sql.push_str(&format!(" AND library_id = {}", lid)); }
     if let Some(lt) = query.lib_type { sql.push_str(&format!(" AND type = '{}'", lt)); }
     sql.push_str(" ORDER BY title ASC");
     
     let mut stmt = conn.prepare(&sql).unwrap();
     let items: Vec<Value> = stmt.query_map([], |row| {
+        let actors_json: String = row.get(10).unwrap_or_else(|_| "[]".to_string());
+        let actors: Value = serde_json::from_str(&actors_json).unwrap_or(json!([]));
         Ok(json!({
             "id": row.get::<_, i64>(0).unwrap_or_default(), "title": row.get::<_, String>(1).unwrap_or_default(),
             "type": row.get::<_, String>(2).unwrap_or_default(), "year": row.get::<_, String>(3).unwrap_or_default(),
             "plot": row.get::<_, String>(4).unwrap_or_default(), "has_poster": !row.get::<_, String>(5).unwrap_or_default().is_empty(),
             "rating": row.get::<_, f64>(6).unwrap_or(0.0), "mpaa": row.get::<_, String>(7).unwrap_or_default(),
             "genres": row.get::<_, String>(8).unwrap_or_default(), "directors": row.get::<_, String>(9).unwrap_or_default(),
-            "actors": row.get::<_, String>(10).unwrap_or_default(), "runtime": row.get::<_, i32>(11).unwrap_or(0),
+            "actors": actors, "runtime": row.get::<_, i32>(11).unwrap_or(0),
             "premiered": row.get::<_, String>(12).unwrap_or_default(), "tagline": row.get::<_, String>(13).unwrap_or_default(),
             "studios": row.get::<_, String>(14).unwrap_or_default(), "tmdb_id": row.get::<_, String>(15).unwrap_or_default(),
-            "imdb_id": row.get::<_, String>(16).unwrap_or_default()
+            "imdb_id": row.get::<_, String>(16).unwrap_or_default(), "size": row.get::<_, i64>(17).unwrap_or(0)
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "items": items }))
@@ -342,7 +284,6 @@ pub async fn get_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((id,
 
 #[derive(Deserialize)]
 pub struct UpdateUserReq { old_password: String, new_username: String, new_password: String }
-
 pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<UpdateUserReq>) -> impl IntoResponse {
     let mut hasher_old = Sha256::new(); hasher_old.update(&payload.old_password);
     let mut hasher_new = Sha256::new(); hasher_new.update(&payload.new_password);
@@ -354,9 +295,6 @@ pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
     } else { (StatusCode::BAD_REQUEST, Json(json!({"error": "旧密码错误"}))) }
 }
 
-// ==========================================
-// Emby 兼容层 (略微精简，保持核心转发)
-// ==========================================
 pub async fn emby_public_info() -> impl IntoResponse { Json(json!({ "ServerName": "Rust-Em", "Version": "4.8.0.0", "Id": "rust-em-server", "OperatingSystem": "Linux", "StartupWizardCompleted": true })) }
 pub async fn emby_info() -> impl IntoResponse { Json(json!({ "ServerName": "Rust-Em", "Version": "4.8.0.0", "Id": "rust-em-server", "OperatingSystem": "Linux", "OperatingSystemDisplayName": "Linux", "HasPendingRestart": false, "IsShuttingDown": false, "SupportsLibraryMonitor": false, "SupportsHttps": true, "HttpServerPortNumber": 8096 })) }
 pub async fn emby_auth_keys() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
@@ -408,14 +346,11 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
 
 #[derive(Deserialize, Default)]
 pub struct EmbyItemsQuery { #[serde(rename = "ParentId")] parent_id: Option<String> }
-
 pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path FROM items WHERE 1=1".to_string();
     if let Some(pid) = &query.parent_id {
-        if pid.starts_with("lib_") {
-            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); }
-        }
+        if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
     }
     sql.push_str(" ORDER BY id DESC LIMIT 100");
     let mut stmt = conn.prepare(&sql).unwrap();
@@ -512,21 +447,12 @@ pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(it
 pub struct ResumeVisibilityQuery { #[serde(rename = "Hide")] pub hide: Option<String> }
 #[derive(Deserialize)]
 pub struct ResumeVisibilityBody { #[serde(rename = "Hide")] pub hide: bool }
-
-fn emby_user_item_data_json(_item_id: &str, is_hidden: bool) -> Value {
-    json!({ "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "HideFromResume": is_hidden })
-}
-
+fn emby_user_item_data_json(_item_id: &str, is_hidden: bool) -> Value { json!({ "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "HideFromResume": is_hidden }) }
 pub async fn emby_hide_from_resume(AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Query(query): Query<ResumeVisibilityQuery>, body: Bytes) -> Response { emby_handle_hide(item_id, query, body) }
 pub async fn emby_hide_from_resume_without_user(AxumPath(item_id): AxumPath<String>, Query(query): Query<ResumeVisibilityQuery>, body: Bytes) -> Response { emby_handle_hide(item_id, query, body) }
-
 fn emby_handle_hide(item_id: String, query: ResumeVisibilityQuery, body: Bytes) -> Response {
     let query_hide = match query.hide.as_deref().map(str::parse::<bool>).transpose() { Ok(value) => value, Err(_) => return StatusCode::BAD_REQUEST.into_response() };
     let body_hide = if body.is_empty() { None } else { match serde_json::from_slice::<ResumeVisibilityBody>(&body) { Ok(body) => Some(body.hide), Err(_) => return StatusCode::BAD_REQUEST.into_response() } };
-    let hidden = match (query_hide, body_hide) {
-        (Some(q), Some(b)) if q != b => return StatusCode::BAD_REQUEST.into_response(),
-        (Some(h), _) | (_, Some(h)) => h,
-        (None, None) => return StatusCode::BAD_REQUEST.into_response(),
-    };
+    let hidden = match (query_hide, body_hide) { (Some(q), Some(b)) if q != b => return StatusCode::BAD_REQUEST.into_response(), (Some(h), _) | (_, Some(h)) => h, (None, None) => return StatusCode::BAD_REQUEST.into_response() };
     Json(emby_user_item_data_json(&item_id, hidden)).into_response()
 }
