@@ -17,9 +17,9 @@
         .snap-start { scroll-snap-align: start; }
     </style>
 </head>
-<body class="bg-[#0f1115] text-gray-200 font-sans h-screen flex flex-col md:flex-row overflow-hidden">
+<body class="bg-[#0f1115] text-gray-200 font-sans h-screen flex flex-col overflow-hidden">
     <!-- 登录页 -->
-    <div id="login-view" class="fixed inset-0 z-50 flex items-center justify-center bg-[#0f1115] px-4">
+    <div id="login-view" class="fixed inset-0 z-[100] flex items-center justify-center bg-[#0f1115] px-4">
         <div class="bg-[#1a1d24] p-8 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-800">
             <h2 class="text-2xl mb-8 text-center font-bold text-white tracking-wider">RUST-EM</h2>
             <input id="username" type="text" placeholder="用户名" class="w-full p-3 mb-4 bg-[#0f1115] rounded-lg outline-none text-white border border-gray-700 focus:border-blue-500 transition-colors">
@@ -29,15 +29,24 @@
     </div>
 
     <!-- 主界面 -->
-    <div id="main-view" class="hidden flex-1 flex flex-col md:flex-row h-full">
-        <!-- PC 侧边栏 -->
-        <div class="hidden md:flex w-64 bg-[#16191f] p-4 flex-col border-r border-gray-800 z-[60] shrink-0">
-            <h1 class="text-xl font-bold mb-8 text-blue-500 px-2 flex items-center gap-2">
-                <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-                Rust-Em
-            </h1>
+    <div id="main-view" class="hidden flex-1 flex flex-row h-full relative overflow-hidden">
+        
+        <!-- 左侧边栏 (抽屉式) -->
+        <div id="desktop-sidebar" class="absolute md:relative w-64 h-full bg-[#16191f] p-4 flex-col border-r border-gray-800 z-[80] shrink-0 transition-transform duration-300 ease-in-out -translate-x-full md:translate-x-0 flex">
+            <div class="flex justify-between items-center mb-8 px-2">
+                <h1 class="text-xl font-bold text-blue-500 flex items-center gap-2">
+                    <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                    Rust-Em
+                </h1>
+                <!-- 收起按钮 -->
+                <button onclick="toggleSidebar(false)" class="text-gray-400 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
+                </button>
+            </div>
+            
             <div class="text-xs text-gray-500 font-bold mb-3 px-2 uppercase tracking-wider">媒体库</div>
-            <div id="sidebar-libs" class="flex flex-col gap-1 mb-6 overflow-y-auto"></div>
+            <div id="sidebar-libs" class="flex flex-col gap-1 mb-6 overflow-y-auto no-scrollbar"></div>
+            
             <button onclick="switchTab('settings')" class="flex items-center gap-3 text-left px-3 py-2.5 hover:bg-gray-800 rounded-lg mb-2 transition mt-auto text-gray-400 hover:text-white">
                 <span>⚙️</span> 系统设置
             </button>
@@ -46,22 +55,25 @@
             </button>
         </div>
 
-        <!-- 移动端顶栏 -->
-        <div class="md:hidden bg-[#16191f] px-4 py-3 flex flex-col shadow-md z-50 sticky top-0 border-b border-gray-800 shrink-0">
-            <div class="flex justify-between items-center mb-2">
-                <h1 class="text-lg font-bold text-blue-500" id="mobile-title">媒体库</h1>
-                <button onclick="switchTab('settings')" class="text-gray-400 text-sm">⚙️</button>
-            </div>
-            <div id="mobile-libs" class="flex overflow-x-auto gap-2 pb-1 no-scrollbar"></div>
-        </div>
+        <!-- 侧边栏遮罩层 (移动端弹出时点击遮罩关闭) -->
+        <div id="sidebar-overlay" onclick="toggleSidebar(false)" class="hidden fixed inset-0 bg-black/60 z-[75]"></div>
 
-        <!-- 内容区 -->
-        <div class="flex-1 flex flex-col h-full overflow-hidden bg-[#0f1115] relative">
-            <div id="content-header" class="hidden p-4 md:px-8 md:pt-6 md:pb-2 shrink-0">
-                <div class="flex gap-3">
-                    <button onclick="setTypeFilter('all')" id="btn-type-all" class="px-5 py-1.5 rounded-full text-sm font-medium bg-blue-600 text-white transition shadow-lg shadow-blue-500/30">全部</button>
-                    <button onclick="setTypeFilter('movies')" id="btn-type-movies" class="px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700">电影</button>
-                    <button onclick="setTypeFilter('tvshows')" id="btn-type-tvshows" class="px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700">剧集</button>
+        <!-- 右侧内容区 -->
+        <div class="flex-1 flex flex-col h-full overflow-hidden bg-[#0f1115] relative w-full">
+            
+            <!-- 顶部栏 (包含拉出侧边栏的按钮) -->
+            <div class="px-4 py-3 md:px-8 md:py-6 flex flex-col shadow-sm z-50 shrink-0 border-b border-gray-800/50 bg-[#0f1115]/80 backdrop-blur-md">
+                <div class="flex items-center gap-4">
+                    <!-- 悬浮展开按钮 -->
+                    <button onclick="toggleSidebar(true)" id="open-sidebar-btn" class="text-gray-400 hover:text-white bg-gray-800 p-2 rounded-lg transition">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                    </button>
+                    
+                    <div id="content-header" class="hidden flex gap-3">
+                        <button onclick="setTypeFilter('all')" id="btn-type-all" class="px-5 py-1.5 rounded-full text-sm font-medium bg-blue-600 text-white transition shadow-lg shadow-blue-500/30">全部</button>
+                        <button onclick="setTypeFilter('movies')" id="btn-type-movies" class="px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700">电影</button>
+                        <button onclick="setTypeFilter('tvshows')" id="btn-type-tvshows" class="px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700">剧集</button>
+                    </div>
                 </div>
             </div>
 
@@ -101,11 +113,12 @@
             </div>
         </div>
 
-        <!-- 沉浸式详情页 Modal -->
-        <div id="detail-modal" class="hidden fixed inset-0 md:left-64 z-[70] overflow-y-auto bg-[#0b0e14]">
-            <div id="detail-fanart" class="fixed inset-0 md:left-64 bg-cover bg-top backdrop-blur-heavy transition-opacity duration-500 opacity-40"></div>
+        <!-- 沉浸式详情页 Modal (全屏，不偏移) -->
+        <div id="detail-modal" class="hidden fixed inset-0 z-[70] overflow-y-auto bg-[#0b0e14]">
+            <div id="detail-fanart" class="fixed inset-0 bg-cover bg-top backdrop-blur-heavy transition-opacity duration-500 opacity-40"></div>
             
             <div class="relative min-h-screen w-full p-4 md:p-8 flex flex-col items-center">
+                <!-- 关闭详情页 -->
                 <button onclick="closeDetail()" class="fixed top-4 right-4 md:top-8 md:right-8 text-white bg-black/50 hover:bg-black/80 p-3 rounded-full z-50 backdrop-blur-md transition">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
@@ -113,7 +126,6 @@
                 <!-- 核心内容容器 -->
                 <div class="w-full max-w-5xl flex flex-col gap-6 mt-12 md:mt-24 z-10">
                     
-                    <!-- 上部分：海报与主信息 -->
                     <div class="flex flex-col md:flex-row gap-8 items-start">
                         <!-- 左侧海报 -->
                         <div class="w-48 md:w-64 shrink-0 aspect-[2/3] bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border border-gray-600/30">
@@ -153,25 +165,15 @@
                         </div>
                     </div>
 
-                    <!-- 下部分：带左右按钮的剧照横滑区 -->
+                    <!-- 剧照横滑区 -->
                     <div id="detail-stills-section" class="w-full mt-6 hidden relative group">
                         <h3 class="text-sm text-gray-500 font-bold mb-3 uppercase tracking-wider">剧照 STILLS</h3>
-                        
-                        <!-- 左按钮 (PC端显示) -->
-                        <button onclick="scrollStills(-1)" class="absolute left-0 top-1/2 -translate-y-1/2 z-20 bg-black/60 hover:bg-black/90 text-white p-2 rounded-full backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity hidden md:block border border-gray-600/50 shadow-xl">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
-                        </button>
-
-                        <!-- 剧照容器 -->
+                        <button onclick="scrollStills(-1)" class="absolute left-0 top-1/2 -translate-y-1/2 z-20 bg-black/60 hover:bg-black/90 text-white p-2 rounded-full backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity hidden md:block border border-gray-600/50 shadow-xl"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg></button>
                         <div id="detail-stills-list" class="flex gap-4 overflow-x-auto pb-4 no-scrollbar snap-x-mandatory scroll-smooth"></div>
-
-                        <!-- 右按钮 (PC端显示) -->
-                        <button onclick="scrollStills(1)" class="absolute right-0 top-1/2 -translate-y-1/2 z-20 bg-black/60 hover:bg-black/90 text-white p-2 rounded-full backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity hidden md:block border border-gray-600/50 shadow-xl">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-                        </button>
+                        <button onclick="scrollStills(1)" class="absolute right-0 top-1/2 -translate-y-1/2 z-20 bg-black/60 hover:bg-black/90 text-white p-2 rounded-full backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity hidden md:block border border-gray-600/50 shadow-xl"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>
                     </div>
 
-                    <!-- 演职人员 -->
+                    <!-- 演员 -->
                     <div class="w-full mt-6">
                         <h3 class="text-sm text-gray-500 font-bold mb-3 uppercase tracking-wider">演职人员 CAST & CREW</h3>
                         <div id="detail-actors-list" class="flex gap-6 overflow-x-auto pb-4 no-scrollbar snap-x-mandatory"></div>
@@ -185,7 +187,6 @@
                                 <span>文件大小: <span id="detail-file-size" class="text-gray-200 font-medium">计算中...</span></span>
                                 <span>容器格式: <span class="text-gray-200 font-medium">STRM</span></span>
                             </div>
-                            
                             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
                                 <div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-4">
                                     <div class="text-xs text-blue-400 font-bold mb-2 uppercase tracking-wider">视频流 VIDEO</div>
@@ -203,7 +204,6 @@
                                     <div class="text-xs text-gray-500">探测后显示语言、格式</div>
                                 </div>
                             </div>
-
                             <div class="border-t border-gray-800/80 pt-4 flex flex-col gap-4">
                                 <div>
                                     <div class="text-xs text-gray-500 font-bold mb-1 uppercase tracking-wider">STRM 文件路径</div>
@@ -264,10 +264,34 @@
         let currentType = 'all';
         let cachedItems = [];
         let currentPlayingItemId = null;
+        let isSidebarOpen = window.innerWidth >= 768; // 默认桌面端打开，移动端关闭
 
-        const defaultPosterSvg = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzFhMWQyNCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjNGI1NTYzIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg==';
+        // 初始化侧边栏状态
+        updateSidebarUI();
 
         if (token) showMain();
+
+        function toggleSidebar(open) {
+            const sidebar = document.getElementById('desktop-sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            isSidebarOpen = open;
+
+            if (open) {
+                sidebar.classList.remove('-translate-x-full');
+                sidebar.classList.add('translate-x-0');
+                // 移动端才显示遮罩
+                if (window.innerWidth < 768) overlay.classList.remove('hidden');
+            } else {
+                sidebar.classList.add('-translate-x-full');
+                sidebar.classList.remove('translate-x-0');
+                overlay.classList.add('hidden');
+            }
+        }
+
+        function updateSidebarUI() {
+            // 强制保证初始状态正确
+            toggleSidebar(isSidebarOpen);
+        }
 
         async function api(path, method = 'GET', body = null) {
             const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
@@ -309,12 +333,15 @@
             document.getElementById('tab-settings').classList.add('hidden');
             document.getElementById('content-header').classList.add('hidden');
             document.getElementById(`tab-${tab}`).classList.remove('hidden');
+            
             if (tab === 'library') {
                 document.getElementById('content-header').classList.remove('hidden');
                 loadMedia();
             } else if (tab === 'settings') {
                 renderSettingsLibraries();
             }
+            // 移动端点击导航后收起侧边栏
+            if (window.innerWidth < 768) toggleSidebar(false);
         }
 
         async function fetchLibraries() {
@@ -326,8 +353,7 @@
         }
 
         function renderSidebarLibraries() {
-            const desktopContainer = document.getElementById('sidebar-libs');
-            const mobileContainer = document.getElementById('mobile-libs');
+            const container = document.getElementById('sidebar-libs');
             let html = `<button onclick="setLibraryFilter('all')" class="flex items-center gap-3 text-left px-3 py-2.5 rounded-lg transition ${currentLibId === 'all' ? 'bg-gray-800 text-white font-medium shadow-sm' : 'hover:bg-gray-800/50 text-gray-400'}">全部媒体</button>`;
             allLibraries.forEach(lib => {
                 const isActive = currentLibId === lib.id;
@@ -335,14 +361,7 @@
                 const icon = lib.type === 'movies' ? '🎬' : '📺';
                 html += `<button onclick="setLibraryFilter(${lib.id})" class="flex items-center gap-3 text-left px-3 py-2.5 rounded-lg transition truncate ${cls}"><span>${icon}</span> <span class="truncate">${lib.name}</span></button>`;
             });
-            desktopContainer.innerHTML = html;
-            let mobileHtml = `<button onclick="setLibraryFilter('all')" class="whitespace-nowrap px-4 py-1.5 rounded-full text-sm ${currentLibId === 'all' ? 'bg-blue-600 text-white' : 'bg-[#0f1115] text-gray-400 border border-gray-700'}">全部</button>`;
-            allLibraries.forEach(lib => {
-                const isActive = currentLibId === lib.id;
-                const cls = isActive ? 'bg-blue-600 text-white' : 'bg-[#0f1115] text-gray-400 border border-gray-700';
-                mobileHtml += `<button onclick="setLibraryFilter(${lib.id})" class="whitespace-nowrap px-4 py-1.5 rounded-full text-sm ${cls}">${lib.name}</button>`;
-            });
-            mobileContainer.innerHTML = mobileHtml;
+            container.innerHTML = html;
         }
 
         function setLibraryFilter(libId) { 
@@ -434,7 +453,6 @@
 
         function scrollStills(direction) {
             const container = document.getElementById('detail-stills-list');
-            // 每次滑动一个卡片的宽度(约 200px) 加上 gap(16px)
             const scrollAmount = 280 * direction;
             container.scrollBy({ left: scrollAmount, behavior: 'smooth' });
         }
@@ -444,15 +462,17 @@
             if (!item) return;
             currentPlayingItemId = item.id;
 
-            // 1. 简介 (最优先渲染)
+            // 进入详情页自动收起侧边栏
+            if (window.innerWidth >= 768) {
+                toggleSidebar(false);
+            }
+
             document.getElementById('detail-plot').innerText = item.plot || '暂无简介...';
 
-            // 2. 标题与番号
             document.getElementById('detail-title').innerText = item.title;
             const numEl = document.getElementById('detail-num');
             if (item.num) { numEl.innerText = item.num; numEl.classList.remove('hidden'); } else { numEl.classList.add('hidden'); }
 
-            // 3. 年份、评分、时长、分级
             document.getElementById('detail-year').innerText = item.year || '未知年份';
             document.getElementById('detail-rating-val').innerText = item.rating > 0 ? item.rating.toFixed(1) : '暂无';
             
@@ -464,14 +484,12 @@
             const mpaaEl = document.getElementById('detail-mpaa');
             if (item.mpaa) { mpaaEl.innerText = item.mpaa; mpaaEl.classList.remove('hidden'); } else { mpaaEl.classList.add('hidden'); }
 
-            // 4. 标签 (Gerne)
             const genresBox = document.getElementById('detail-genres');
             if (item.genres) {
                 document.getElementById('detail-genres-val').innerHTML = item.genres.split(' / ').map(g => `<span class="bg-gray-800/80 border border-gray-600/50 text-gray-300 px-2 py-0.5 rounded-md text-xs">${g}</span>`).join('');
                 genresBox.classList.remove('hidden'); genresBox.classList.add('flex');
             } else { genresBox.classList.add('hidden'); }
 
-            // 5. 系列、厂牌等
             const seriesBox = document.getElementById('detail-series-box');
             if (item.series) { document.getElementById('detail-series').innerText = item.series; seriesBox.classList.remove('hidden'); } else { seriesBox.classList.add('hidden'); }
             const labelBox = document.getElementById('detail-label-box');
@@ -488,7 +506,6 @@
             updateTextBlock('detail-directors', 'detail-directors-val', item.directors);
             updateTextBlock('detail-tags', 'detail-tags-val', item.tags);
 
-            // 6. 多片段按钮
             const parts = item.parts || [];
             const playActions = document.getElementById('detail-play-actions');
             if (parts.length <= 1) {
@@ -505,7 +522,6 @@
                 </button>`).join('');
             }
 
-            // 7. 海报、背景图
             const posterImg = document.getElementById('detail-poster');
             posterImg.src = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
 
@@ -513,7 +529,6 @@
             if (item.has_poster) fanartDiv.style.backgroundImage = `url('/api/images/${item.id}/fanart?token=${token}')`;
             else fanartDiv.style.backgroundImage = 'none';
 
-            // 8. 文件大小、路径
             const sizeEl = document.getElementById('detail-file-size');
             if (item.size > 0) { sizeEl.innerText = `${(item.size / (1024 * 1024 * 1024)).toFixed(2)} GB`; } else { sizeEl.innerText = '未知'; }
 
@@ -522,7 +537,6 @@
             try { strmContent = decodeURIComponent(strmContent); } catch(e) {}
             document.getElementById('detail-strm-content').innerText = strmContent;
 
-            // 9. 演员
             const actorsContainer = document.getElementById('detail-actors-list');
             if (item.actors && item.actors.length > 0) {
                 actorsContainer.innerHTML = item.actors.map(actor => {
@@ -541,7 +555,6 @@
                 actorsContainer.innerHTML = `<div class="text-gray-500 text-sm">暂无演员信息</div>`;
             }
 
-            // 10. 剧照
             const stillsSection = document.getElementById('detail-stills-section');
             const stillsList = document.getElementById('detail-stills-list');
             if (item.stills && item.stills.length > 0) {
