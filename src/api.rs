@@ -450,7 +450,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, Query
             "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
             "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
             "Overview": row.get::<_, String>(4).unwrap_or_default(),
-            "ImageTags": if has_poster { json!({"Primary": "tag"}) } else { json!({}) }, "BackdropImageTags": [], "DateCreated": "2024-01-01T00:00:00.0000000Z", "SortName": row.get::<_, String>(1).unwrap_or_default(),
+            "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) }, "BackdropImageTags": [], "DateCreated": "2024-01-01T00:00:00.0000000Z", "SortName": row.get::<_, String>(1).unwrap_or_default(),
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(items).into_response()
@@ -483,7 +483,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
             "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
             "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
-            "Overview": row.get::<_, String>(4).unwrap_or_default(), "ImageTags": if has_poster { json!({"Primary": "tag"}) } else { json!({}) }, "BackdropImageTags": [], "DateCreated": "2024-01-01T00:00:00.0000000Z", "SortName": row.get::<_, String>(1).unwrap_or_default(),
+            "Overview": row.get::<_, String>(4).unwrap_or_default(), "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) }, "BackdropImageTags": [], "DateCreated": "2024-01-01T00:00:00.0000000Z", "SortName": row.get::<_, String>(1).unwrap_or_default(),
             "Path": row.get::<_, String>(6).unwrap_or_default(),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
             "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
@@ -524,7 +524,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
             "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
             "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
-            "Overview": row.get::<_, String>(4).unwrap_or_default(), "ImageTags": if has_poster { json!({"Primary": "tag"}) } else { json!({}) }, "BackdropImageTags": [], "DateCreated": "2024-01-01T00:00:00.0000000Z", "SortName": row.get::<_, String>(1).unwrap_or_default(),
+            "Overview": row.get::<_, String>(4).unwrap_or_default(), "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) }, "BackdropImageTags": [], "DateCreated": "2024-01-01T00:00:00.0000000Z", "SortName": row.get::<_, String>(1).unwrap_or_default(),
             "Path": row.get::<_, String>(6).unwrap_or_default(), "Studios": studios,
             "MediaSources": media_sources,
             "RunTimeTicks": (runtime as i64) * 60 * 10_000_000,
