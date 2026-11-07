@@ -3,96 +3,51 @@ use quick_xml::reader::Reader;
 use std::fs;
 
 #[derive(Debug, Clone, Default)]
-pub struct NfoActor {
-    pub name: Option<String>,
-    pub role: Option<String>,
-    pub thumb: Option<String>,
-}
+pub struct NfoActor { pub name: Option<String>, pub role: Option<String>, pub thumb: Option<String> }
 
 #[derive(Debug, Clone, Default)]
 pub struct NfoMovie {
-    pub title: Option<String>,
-    pub num: Option<String>,
-    pub plot: Option<String>,
-    pub year: Option<String>,
-    pub premiered: Option<String>,
-    pub releasedate: Option<String>,
-    pub runtime: Option<i32>,
-    pub rating: Option<f64>,
-    pub mpaa: Option<String>,
-    pub tagline: Option<String>,
-    pub series: Option<String>,
-    pub label: Option<String>,
-    pub set: Option<String>,
-    pub poster: Option<String>,
-    pub fanart: Option<String>,
-    pub genres: Vec<String>,
-    pub tags: Vec<String>,
-    pub directors: Vec<String>,
-    pub studios: Vec<String>,
-    pub actors: Vec<NfoActor>,
-    pub unique_ids: Vec<(String, String)>,
-}
-
-fn extract_text(reader: &mut Reader<&[u8]>) -> String {
-    let mut text = String::new();
-    let mut buf = Vec::new();
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Text(e)) => {
-                if let Ok(decoded) = e.unescape() { text.push_str(&decoded); }
-            }
-            Ok(Event::CData(e)) => {
-                if let Ok(decoded) = e.decode() { text.push_str(&decoded); }
-            }
-            Ok(Event::End(_)) => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-    text.trim().to_string()
+    pub title: Option<String>, pub original_title: Option<String>, pub sort_title: Option<String>,
+    pub num: Option<String>, pub plot: Option<String>, pub year: Option<String>,
+    pub premiered: Option<String>, pub releasedate: Option<String>, pub runtime: Option<i32>,
+    pub rating: Option<f64>, pub mpaa: Option<String>, pub tagline: Option<String>,
+    pub series: Option<String>, pub label: Option<String>, pub set: Option<String>,
+    pub poster: Option<String>, pub fanart: Option<String>, pub trailer: Option<String>,
+    pub genres: Vec<String>, pub tags: Vec<String>, pub directors: Vec<String>,
+    pub writers: Vec<String>, pub studios: Vec<String>, pub countries: Vec<String>,
+    pub languages: Vec<String>, pub actors: Vec<NfoActor>, pub unique_ids: Vec<(String, String)>,
 }
 
 pub fn read_nfo(path: &std::path::Path) -> Option<NfoMovie> {
     let bytes = fs::read(path).ok()?;
     let xml = String::from_utf8_lossy(&bytes);
-    
     let mut reader = Reader::from_str(&xml);
     let mut movie = NfoMovie::default();
     let mut buf = Vec::new();
     let mut current_actor: Option<NfoActor> = None;
     let mut current_tag = String::new();
-
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => {
                 current_tag = String::from_utf8_lossy(e.name().as_ref()).to_lowercase();
-                if current_tag == "actor" {
-                    current_actor = Some(NfoActor::default());
-                }
+                if current_tag == "actor" { current_actor = Some(NfoActor::default()); }
             }
             Ok(Event::Text(e)) => {
                 if let Ok(decoded) = e.unescape() {
                     let text = decoded.trim().to_string();
-                    if !text.is_empty() {
-                        process_text(&text, &current_tag, &mut movie, &mut current_actor);
-                    }
+                    if !text.is_empty() { process_text(&text, &current_tag, &mut movie, &mut current_actor); }
                 }
             }
             Ok(Event::CData(e)) => {
                 if let Ok(decoded) = e.decode() {
                     let text = decoded.trim().to_string();
-                    if !text.is_empty() {
-                        process_text(&text, &current_tag, &mut movie, &mut current_actor);
-                    }
+                    if !text.is_empty() { process_text(&text, &current_tag, &mut movie, &mut current_actor); }
                 }
             }
             Ok(Event::End(e)) => {
                 let tag = String::from_utf8_lossy(e.name().as_ref()).to_lowercase();
                 if tag == "actor" {
-                    if let Some(actor) = current_actor.take() {
-                        if actor.name.is_some() { movie.actors.push(actor); }
-                    }
+                    if let Some(actor) = current_actor.take() { if actor.name.is_some() { movie.actors.push(actor); } }
                 }
                 current_tag.clear();
             }
@@ -108,6 +63,8 @@ pub fn read_nfo(path: &std::path::Path) -> Option<NfoMovie> {
 fn process_text(text: &str, tag: &str, movie: &mut NfoMovie, current_actor: &mut Option<NfoActor>) {
     match tag {
         "title" => movie.title = Some(text.to_string()),
+        "originaltitle" => movie.original_title = Some(text.to_string()),
+        "sorttitle" => movie.sort_title = Some(text.to_string()),
         "num" => movie.num = Some(text.to_string()),
         "plot" => movie.plot = Some(text.to_string()),
         "year" => movie.year = Some(text.to_string()),
@@ -122,16 +79,20 @@ fn process_text(text: &str, tag: &str, movie: &mut NfoMovie, current_actor: &mut
         "set" => movie.set = Some(text.to_string()),
         "poster" | "cover" => movie.poster = Some(text.to_string()),
         "fanart" => movie.fanart = Some(text.to_string()),
+        "trailer" => movie.trailer = Some(text.to_string()),
         "genre" => movie.genres.push(text.to_string()),
         "tag" => movie.tags.push(text.to_string()),
         "director" => movie.directors.push(text.to_string()),
+        "writer" | "credits" => movie.writers.push(text.to_string()),
         "studio" => movie.studios.push(text.to_string()),
+        "country" => movie.countries.push(text.to_string()),
+        "language" => movie.languages.push(text.to_string()),
         "tmdbid" => movie.unique_ids.push(("tmdb".to_string(), text.to_string())),
         "imdbid" => movie.unique_ids.push(("imdb".to_string(), text.to_string())),
-        "name" => { if let Some(actor) = current_actor.as_mut() { actor.name = Some(text.to_string()); } }
-        "role" => { if let Some(actor) = current_actor.as_mut() { actor.role = Some(text.to_string()); } }
+        "name" => { if let Some(a) = current_actor.as_mut() { a.name = Some(text.to_string()); } }
+        "role" => { if let Some(a) = current_actor.as_mut() { a.role = Some(text.to_string()); } }
         "thumb" => {
-            if let Some(actor) = current_actor.as_mut() { actor.thumb = Some(text.to_string()); }
+            if let Some(a) = current_actor.as_mut() { a.thumb = Some(text.to_string()); }
             else if movie.poster.is_none() { movie.poster = Some(text.to_string()); }
         }
         _ => {}

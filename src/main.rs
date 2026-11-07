@@ -18,6 +18,7 @@ async fn main() {
     std::fs::create_dir_all("data").unwrap();
     let conn = rusqlite::Connection::open("data/data.db").unwrap();
     db::init_db(&conn);
+    db::ensure_extra_columns(&conn);
     let pool = Arc::new(Mutex::new(conn));
 
     let cors = CorsLayer::new()
