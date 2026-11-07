@@ -22,8 +22,6 @@ async fn main() {
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any)
-        .expose_headers(Any)
-        .allow_credentials(true);
 
     // Emby 兼容路由 (全面使用 Axum 0.8 的 {param} 语法)
     let emby_routes = Router::new()
