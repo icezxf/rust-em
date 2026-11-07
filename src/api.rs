@@ -426,6 +426,7 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
 #[serde(default)]
 pub struct EmbyItemsQuery {
     #[serde(rename = "ParentId")] parent_id: Option<String>,
+    #[serde(rename = "ListItemIds")] list_item_ids: Option<String>,
     #[serde(rename = "StartIndex")] start_index: Option<i64>,
     #[serde(rename = "Limit")] limit: Option<i64>,
 }
@@ -461,6 +462,7 @@ pub async fn emby_items_next_up() -> impl IntoResponse { Json(json!({ "Items": [
 
 pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
 async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -> Response {
+    if query.list_item_ids.is_some() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path FROM items WHERE 1=1".to_string();
     if let Some(pid) = &query.parent_id {
@@ -518,7 +520,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             })
         }).collect();
         let media_sources: Vec<Value> = parts.iter().enumerate().map(|(i, path)| {
-            json!({ "Id": format!("{}_cd{}", id, i), "Path": path, "Name": if parts.len() > 1 { format!("CD{}", i + 1) } else { "Default".to_string() }, "Protocol": "Http", "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsTranscoding": false, "Container": "mkv", "MediaStreams": [{"Type":"Video", "Index":0, "Codec":"h264", "DisplayTitle":"1080p H264", "Width":1920, "Height":1080, "IsDefault": true, "IsForced": false, "IsExternal": false}, {"Type":"Audio", "Index":1, "Codec":"aac", "DisplayTitle":"AAC 2.0", "Channels":2, "IsDefault": true, "IsForced": false, "IsExternal": false}], "DirectStreamUrl": format!("/videos/{}/original.mkv?MediaSourceId={}_cd{}", id, id, i) })
+            json!({ "Id": format!("{}_cd{}", id, i), "Path": path, "Name": if parts.len() > 1 { format!("CD{}", i + 1) } else { "Default".to_string() }, "Protocol": "Http", "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsTranscoding": false, "Container": "mkv", "MediaStreams": [{"Type":"Video", "Index":0, "Codec":"h264", "DisplayTitle":"1080p H264", "Width":1920, "Height":1080, "IsDefault": true, "IsForced": false, "IsExternal": false}, {"Type":"Audio", "Index":1, "Codec":"aac", "DisplayTitle":"AAC 2.0", "Channels":2, "IsDefault": true, "IsForced": false, "IsExternal": false}], "DirectStreamUrl": format!("/Videos/{}/original.strm?MediaSourceId={}_cd{}", id, id, i) })
         }).collect();
         Ok(json!({
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
@@ -585,7 +587,7 @@ pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, Axum
             "SupportsDirectPlay": true,
             "SupportsDirectStream": true,
             "SupportsTranscoding": false, "Container": "mkv", "MediaStreams": [{"Type":"Video", "Index":0, "Codec":"h264", "DisplayTitle":"1080p H264", "Width":1920, "Height":1080, "IsDefault": true, "IsForced": false, "IsExternal": false}, {"Type":"Audio", "Index":1, "Codec":"aac", "DisplayTitle":"AAC 2.0", "Channels":2, "IsDefault": true, "IsForced": false, "IsExternal": false}],
-            "DirectStreamUrl": format!("/videos/{}/original.mkv?MediaSourceId={}_cd{}", item_id, item_id, i)
+            "DirectStreamUrl": format!("/Videos/{}/original.strm?MediaSourceId={}_cd{}", item_id, item_id, i)
         })
     }).collect();
     Json(json!({ "MediaSources": media_sources })).into_response()
