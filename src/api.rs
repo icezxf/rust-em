@@ -686,3 +686,40 @@ pub async fn emby_action() -> impl IntoResponse { StatusCode::OK.into_response()
 pub async fn emby_playing() -> impl IntoResponse { StatusCode::OK.into_response() }
 pub async fn emby_playing_progress() -> impl IntoResponse { StatusCode::OK.into_response() }
 pub async fn emby_playing_stopped() -> impl IntoResponse { StatusCode::OK.into_response() }
+
+// 临时调试中间件：只打印 PlaybackInfo 和 /Videos/ 的完整请求/响应
+pub async fn debug_body_logger(req: Request, next: Next) -> Response {
+    let path = req.uri().path().to_string();
+    if !path.contains("PlaybackInfo") && !path.contains("/Videos/") {
+        return next.run(req).await;
+    }
+
+    println!("\n🕵️ [YAMBY-DEBUG] ===== {} {} =====", req.method(), path);
+    for (name, value) in req.headers() {
+        let name_str = name.as_str().to_lowercase();
+        if name_str != "authorization" && name_str != "x-emby-token" {
+            println!("🕵️ [HEADER] {}: {:?}", name, value);
+        }
+    }
+
+    let (parts, body) = req.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
+    if !bytes.is_empty() {
+        println!("🕵️ [REQ-BODY] {}", String::from_utf8_lossy(&bytes));
+    }
+
+    let req = Request::from_parts(parts, axum::body::Body::from(bytes));
+    let response = next.run(req).await;
+
+    println!("🕵️ [RESP-STATUS] {}", response.status());
+    let (parts, body) = response.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap_or_default();
+
+    if let Ok(json_str) = std::str::from_utf8(&bytes) {
+        if json_str.starts_with('{') {
+            println!("🕵️ [RESP-BODY] {}", json_str);
+        }
+    }
+
+    Response::from_parts(parts, axum::body::Body::from(bytes))
+}
