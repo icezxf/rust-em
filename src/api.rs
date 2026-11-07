@@ -18,7 +18,7 @@ static STRM_CACHE: OnceLock<Mutex<HashMap<String, (String, Instant)>>> = OnceLoc
 const MAX_STRM_SIZE: u64 = 16 * 1024;
 const NORMALIZED_CREDENTIAL_HEADER: &str = "x-lux-internal-emby-credential";
 
-// 请求日志拦截
+// ======= 日志拦截 =======
 pub async fn logger_middleware(req: Request, next: Next) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
@@ -34,7 +34,7 @@ pub async fn logger_middleware(req: Request, next: Next) -> Response {
     res
 }
 
-// 万能 Token 提取与规范化
+// ======= 凭据规范化 =======
 fn normalize_credentials(req: Request, next: Next) -> impl std::future::Future<Output = Response> {
     async move {
         let mut req = req;
@@ -67,10 +67,10 @@ fn normalize_credentials(req: Request, next: Next) -> impl std::future::Future<O
     }
 }
 
+// ======= 鉴权中间件 =======
 pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     if req.method() == Method::OPTIONS { return Ok(next.run(req).await); }
     let path = req.uri().path();
-    // 放行公开路由和图片请求
     if !path.starts_with("/api") && !path.starts_with("/emby") && !path.starts_with("/Items") && !path.starts_with("/Users") && !path.starts_with("/Videos") && !path.starts_with("/System") && !path.starts_with("/Auth") && !path.starts_with("/auth") && !path.starts_with("/Sessions") && !path.starts_with("/DisplayPreferences") {
         return Ok(next.run(req).await);
     }
@@ -86,11 +86,10 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     Err(StatusCode::UNAUTHORIZED)
 }
 
-pub async fn cors_and_credentials_middleware(req: Request, next: Next) -> Response { normalize_credentials(req, next).await }
-
 // ======= Web API =======
 #[derive(Deserialize)]
 pub struct LoginReq { username: String, password: String }
+
 pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<LoginReq>) -> impl IntoResponse {
     let mut hasher = Sha256::new(); hasher.update(&payload.password);
     let conn = pool.lock().unwrap();
@@ -103,6 +102,7 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
 
 #[derive(Deserialize)]
 pub struct BrowseReq { path: String }
+
 pub async fn browse_dir(Query(req): Query<BrowseReq>) -> impl IntoResponse {
     let base_path = req.path;
     let result = tokio::task::spawn_blocking(move || {
@@ -124,6 +124,7 @@ pub async fn browse_dir(Query(req): Query<BrowseReq>) -> impl IntoResponse {
 
 #[derive(Deserialize, Clone)]
 pub struct AddLibReq { name: String, paths: Vec<String>, #[serde(rename = "type")] lib_type: String }
+
 pub async fn add_library(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<AddLibReq>) -> impl IntoResponse {
     let pool_clone = pool.clone();
     tokio::task::spawn_blocking(move || {
@@ -298,6 +299,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
 // ======= Web 接口 =======
 #[derive(Deserialize)]
 pub struct ItemQuery { library_id: Option<i64>, lib_type: Option<String> }
+
 pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<ItemQuery>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT id, title, num, type, year, plot, poster_path, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, size, series, label, set_name, file_path, strm_content, stills, parts FROM items WHERE 1=1".to_string();
@@ -369,6 +371,7 @@ async fn serve_file(path_str: &str) -> Response {
 
 #[derive(Deserialize)]
 pub struct UpdateUserReq { old_password: String, new_username: String, new_password: String }
+
 pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<UpdateUserReq>) -> impl IntoResponse {
     let mut hasher_old = Sha256::new(); hasher_old.update(&payload.old_password);
     let mut hasher_new = Sha256::new(); hasher_new.update(&payload.new_password);
@@ -418,9 +421,9 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_items_latest() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_items_resume() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_items_next_up() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
+pub async fn emby_items_latest(State(_pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(_query): Query<EmbyItemsQuery>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
+pub async fn emby_items_resume(State(_pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(_query): Query<EmbyItemsQuery>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
+pub async fn emby_items_next_up(State(_pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(_query): Query<EmbyItemsQuery>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
