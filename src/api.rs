@@ -651,7 +651,6 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
     
     { let mut cache_lock = cache.lock().unwrap(); cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(300))); }
     println!("🚀 [STREAM-302] item={} real_url={}", item_id, final_url);
-    println!("🚀 [STREAM-302] item={} real_url={}", item_id, final_url);
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
 }
 
