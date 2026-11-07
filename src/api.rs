@@ -391,7 +391,7 @@ pub async fn emby_ping() -> impl IntoResponse { "Emby Server" }
 pub async fn emby_public_users() -> impl IntoResponse { Json(json!([])) }
 pub async fn emby_auth_keys() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 pub async fn emby_display_preferences() -> impl IntoResponse { Json(json!({"Id": "default", "ViewType": "Poster", "SortBy": "SortName", "PrimaryImageHeight": 250, "PrimaryImageWidth": 250, "ScrollDirection": "Horizontal"})) }
-pub async fn emby_user() -> impl IntoResponse { Json(json!({"Id": "1", "Name": "admin", "ServerId": "rust-em-server", "HasPassword": true, "Policy": {"IsAdministrator": true, "EnableAllFolders": true}})) }
+pub async fn emby_user() -> impl IntoResponse { Json(build_user_json("1", "admin")) }
 
 pub async fn emby_authenticate(State(pool): State<Arc<Mutex<Connection>>>, headers: HeaderMap, body: Bytes) -> Response {
     let content_type = headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("");
@@ -408,7 +408,7 @@ pub async fn emby_authenticate(State(pool): State<Arc<Mutex<Connection>>>, heade
     if let Some((id, name)) = user_opt {
         let token = uuid::Uuid::new_v4().to_string();
         TOKENS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap().push(token.clone());
-        (StatusCode::OK, Json(json!({ "User": { "Id": id.to_string(), "Name": name, "ServerId": "rust-em-server", "HasPassword": true, "Policy": { "IsAdministrator": true, "EnableAllFolders": true } }, "SessionInfo": { "Id": uuid::Uuid::new_v4().to_string(), "UserId": id.to_string() }, "AccessToken": token, "ServerId": "rust-em-server" }))).into_response()
+        (StatusCode::OK, Json(json!({ "User": build_user_json(&id.to_string(), &name), "SessionInfo": { "Id": uuid::Uuid::new_v4().to_string(), "UserId": id.to_string() }, "AccessToken": token, "ServerId": "rust-em-server" }))).into_response()
     } else { (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid credentials" }))).into_response() }
 }
 
@@ -808,4 +808,25 @@ pub async fn emby_playback_info(
         })
     }).collect();
     Json(json!({ "MediaSources": media_sources, "PlaySessionId": play_session_id })).into_response()
+}
+
+fn build_user_json(id: &str, name: &str) -> Value {
+    json!({
+        "Id": id, "Name": name, "ServerId": "rust-em-server", "HasPassword": true,
+        "Configuration": {
+            "PlayDefaultAudioTrack": true, "SubtitleMode": "Smart",
+            "RememberAudioSelections": true, "RememberSubtitleSelections": true,
+            "EnableNextEpisodeAutoPlay": true, "LatestItemsExcludes": [],
+            "MyMediaExcludes": [], "GroupedFolders": [], "OrderedViews": []
+        },
+        "Policy": {
+            "IsAdministrator": true, "IsHidden": false, "IsDisabled": false,
+            "EnableAllFolders": true, "EnableContentDownloading": false,
+            "EnableSubtitleDownloading": false, "EnablePlaybackRemuxing": false,
+            "EnableVideoPlaybackTranscoding": false, "EnableAudioPlaybackTranscoding": false,
+            "EnablePlaybackTranscoding": false, "EnableRemoteAccess": true,
+            "EnableMediaPlayback": true, "EnabledDevices": [],
+            "EnabledChannels": [], "EnabledFolders": [], "BlockedTags": [], "AllowedTags": []
+        }
+    })
 }
