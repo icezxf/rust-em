@@ -105,7 +105,6 @@ async fn main() {
         .fallback_service(ServeDir::new("public"))
         .layer(cors)
         .layer(axum::middleware::from_fn(api::logger_middleware))
-        .layer(axum::middleware::from_fn(api::debug_body_logger))
         .layer(axum::middleware::from_fn(api::auth))
         .with_state(pool);
 
