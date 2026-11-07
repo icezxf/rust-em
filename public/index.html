@@ -103,7 +103,7 @@
             </div>
         </div>
 
-        <!-- 沉浸式详情页 Modal -->
+        <!-- 沉浸式详情页 Modal (全屏，展开侧边栏时右移) -->
         <div id="detail-modal" class="hidden fixed top-0 bottom-0 right-0 left-0 z-[70] overflow-y-auto bg-[#0b0e14] modal-transition">
             <div id="detail-fanart" class="fixed top-0 bottom-0 right-0 left-0 bg-cover bg-top backdrop-blur-heavy modal-transition opacity-40"></div>
             
@@ -112,22 +112,22 @@
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
 
-                <!-- 内容上边距压缩，模块间距微调 -->
-                <div class="w-full max-w-5xl flex flex-col gap-4 md:gap-5 mt-14 md:mt-16 z-10">
+                <!-- 间距全面压缩 -->
+                <div class="w-full max-w-5xl flex flex-col gap-3 md:gap-4 mt-12 md:mt-14 z-10">
                     
-                    <div class="flex flex-col md:flex-row gap-6 md:gap-8 items-start">
+                    <div class="flex flex-col md:flex-row gap-5 md:gap-6 items-start">
                         <!-- 左侧海报 -->
-                        <div class="w-48 md:w-64 shrink-0 aspect-[2/3] bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border border-gray-600/30 sticky top-6">
+                        <div class="w-48 md:w-64 shrink-0 aspect-[2/3] bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border border-gray-600/30 sticky top-6 mb-2">
                             <img id="detail-poster" src="" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzM3NDE1MSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjOWNhM2FmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg=='">
                         </div>
                         
                         <!-- 右侧信息区 -->
-                        <div class="flex-1 flex flex-col pt-1 w-full text-shadow-strong">
-                            <div class="flex items-center gap-3 mb-2">
+                        <div class="flex-1 flex flex-col pt-0 w-full text-shadow-strong">
+                            <div class="flex items-center gap-3 mb-1">
                                 <h1 id="detail-title" class="text-2xl md:text-3xl font-black text-white tracking-tight drop-shadow-md">影片标题</h1>
                             </div>
                             
-                            <div class="flex flex-wrap items-center gap-2 mb-4 text-xs md:text-sm font-medium text-gray-400">
+                            <div class="flex flex-wrap items-center gap-2 mb-3 text-xs md:text-sm font-medium text-gray-400">
                                 <span id="detail-num" class="hidden border border-blue-500/50 bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-md font-mono font-bold"></span>
                                 <span id="detail-year" class="bg-gray-800/60 px-2 py-0.5 rounded-md text-gray-200">未知年份</span>
                                 <span class="text-yellow-400 font-bold flex items-center gap-1 bg-gray-800/60 px-2 py-0.5 rounded-md">
@@ -138,15 +138,15 @@
                                 <span id="detail-mpaa" class="border border-gray-600 text-gray-300 px-1.5 py-0.5 rounded-md text-xs hidden"></span>
                             </div>
 
-                            <div id="detail-genres" class="flex flex-wrap gap-1.5 mb-4 hidden">
+                            <div id="detail-genres" class="flex flex-wrap gap-1.5 mb-3 hidden">
                                 <div id="detail-genres-val" class="flex flex-wrap gap-1.5"></div>
                             </div>
 
-                            <div id="detail-play-actions" class="flex flex-wrap gap-2 mb-5"></div>
+                            <div id="detail-play-actions" class="flex flex-wrap gap-2 mb-4"></div>
 
                             <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base mb-4 whitespace-pre-wrap drop-shadow-md">暂无简介...</p>
                             
-                            <div class="flex flex-col gap-1.5 text-xs md:text-sm text-gray-300 pt-4 border-t border-gray-600/50">
+                            <div class="flex flex-col gap-1 text-xs md:text-sm text-gray-300 pt-3 border-t border-gray-600/50">
                                 <div id="detail-series-box" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">系列:</span> <span id="detail-series" class="text-blue-400 font-medium drop-shadow-sm"></span></div>
                                 <div id="detail-label-box" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">厂牌:</span> <span id="detail-label" class="text-blue-400 font-medium drop-shadow-sm"></span></div>
                                 <div id="detail-studio-box" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">制作商:</span> <span id="detail-studios" class="text-gray-200 font-medium drop-shadow-sm"></span></div>
@@ -170,42 +170,42 @@
                     <!-- 演员 -->
                     <div class="w-full mt-2">
                         <h3 class="text-sm text-gray-500 font-bold mb-2 uppercase tracking-wider">演职人员 CAST & CREW</h3>
-                        <div id="detail-actors-list" class="flex gap-4 overflow-x-auto pb-4 no-scrollbar snap-x-mandatory"></div>
+                        <div id="detail-actors-list" class="flex gap-4 overflow-x-auto pb-2 no-scrollbar snap-x-mandatory"></div>
                     </div>
 
                     <!-- 媒体文件 -->
-                    <div class="w-full mt-2 mb-20">
+                    <div class="w-full mt-2 mb-16">
                         <h3 class="text-sm text-gray-500 font-bold mb-2 uppercase tracking-wider">媒体文件 MEDIA FILES</h3>
-                        <div class="bg-[#16191f]/80 backdrop-blur-md border border-gray-800 rounded-xl p-5 shadow-lg">
-                            <div class="text-sm text-gray-400 mb-4 flex gap-6">
+                        <div class="bg-[#16191f]/80 backdrop-blur-md border border-gray-800 rounded-xl p-4 shadow-lg">
+                            <div class="text-sm text-gray-400 mb-3 flex gap-6">
                                 <span>文件大小: <span id="detail-file-size" class="text-gray-200 font-medium">计算中...</span></span>
                                 <span>容器格式: <span class="text-gray-200 font-medium">STRM</span></span>
                             </div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
-                                <div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-4">
-                                    <div class="text-xs text-blue-400 font-bold mb-2 uppercase tracking-wider">视频流 VIDEO</div>
-                                    <div class="text-sm text-gray-300 mb-1">等待媒体探测</div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                                <div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
+                                    <div class="text-xs text-blue-400 font-bold mb-1 uppercase tracking-wider">视频流 VIDEO</div>
+                                    <div class="text-sm text-gray-300 mb-0.5">等待媒体探测</div>
                                     <div class="text-xs text-gray-500">探测后显示码率、帧率</div>
                                 </div>
-                                <div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-4">
-                                    <div class="text-xs text-green-400 font-bold mb-2 uppercase tracking-wider">音频流 AUDIO</div>
-                                    <div class="text-sm text-gray-300 mb-1">等待媒体探测</div>
+                                <div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
+                                    <div class="text-xs text-green-400 font-bold mb-1 uppercase tracking-wider">音频流 AUDIO</div>
+                                    <div class="text-sm text-gray-300 mb-0.5">等待媒体探测</div>
                                     <div class="text-xs text-gray-500">探测后显示声道、采样率</div>
                                 </div>
-                                <div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-4">
-                                    <div class="text-xs text-yellow-400 font-bold mb-2 uppercase tracking-wider">字幕流 SUBTITLE</div>
-                                    <div class="text-sm text-gray-300 mb-1">等待媒体探测</div>
+                                <div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
+                                    <div class="text-xs text-yellow-400 font-bold mb-1 uppercase tracking-wider">字幕流 SUBTITLE</div>
+                                    <div class="text-sm text-gray-300 mb-0.5">等待媒体探测</div>
                                     <div class="text-xs text-gray-500">探测后显示语言、格式</div>
                                 </div>
                             </div>
-                            <div class="border-t border-gray-800/80 pt-4 flex flex-col gap-4">
+                            <div class="border-t border-gray-800/80 pt-3 flex flex-col gap-3">
                                 <div>
                                     <div class="text-xs text-gray-500 font-bold mb-1 uppercase tracking-wider">STRM 文件路径</div>
-                                    <div id="detail-strm-path" class="text-sm font-mono text-gray-400 bg-black/40 p-3 rounded-lg break-all select-all border border-gray-800/50">暂无路径</div>
+                                    <div id="detail-strm-path" class="text-sm font-mono text-gray-400 bg-black/40 p-2 rounded-lg break-all select-all border border-gray-800/50">暂无路径</div>
                                 </div>
                                 <div>
                                     <div class="text-xs text-gray-500 font-bold mb-1 uppercase tracking-wider">STRM 文件内容 (多片段已合并)</div>
-                                    <div id="detail-strm-content" class="text-sm font-mono text-gray-400 bg-black/40 p-3 rounded-lg break-all select-all whitespace-pre-wrap border border-gray-800/50">暂无内容</div>
+                                    <div id="detail-strm-content" class="text-sm font-mono text-gray-400 bg-black/40 p-2 rounded-lg break-all select-all whitespace-pre-wrap border border-gray-800/50">暂无内容</div>
                                 </div>
                             </div>
                         </div>
