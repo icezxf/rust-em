@@ -708,6 +708,8 @@ pub struct ProbeScanReq { pub path: String, pub interval_ms: Option<u64> }
 
 #[derive(Deserialize)]
 
+pub struct ProbeScanReq { pub path: String, pub interval_ms: Option<u64> }
+
 pub async fn probe_scan(Json(req): Json<ProbeScanReq>) -> impl IntoResponse {
     let root = PathBuf::from(&req.path);
     if !root.is_dir() { return (StatusCode::BAD_REQUEST, Json(json!({"error":"路径不存在"}))).into_response(); }
