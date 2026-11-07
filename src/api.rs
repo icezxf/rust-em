@@ -1,6 +1,6 @@
 use axum::{
     extract::{State, Request, Json, Query, Path as AxumPath},
-    http::{StatusCode, header::{LOCATION, USER_AGENT, CONTENT_TYPE}, HeaderMap, HeaderValue, Method},
+    http::{StatusCode, header::{LOCATION, USER_AGENT, CONTENT_TYPE}, HeaderMap, Method},
     middleware::Next, response::{IntoResponse, Response}, body::Bytes,
 };
 use serde::Deserialize;
@@ -707,7 +707,6 @@ pub struct ProbeScanReq { pub path: String, pub interval_ms: Option<u64> }
 
 
 #[derive(Deserialize)]
-pub struct ProbeScanReq { pub path: String, pub interval_ms: Option<u64> }
 
 pub async fn probe_scan(Json(req): Json<ProbeScanReq>) -> impl IntoResponse {
     let root = PathBuf::from(&req.path);
@@ -921,7 +920,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let size: i64 = row.get(17).unwrap_or(0);
             let mtime: i64 = row.get(18).unwrap_or(0);
             let series: String = row.get(19).unwrap_or_default();
-            let label: String = row.get(20).unwrap_or_default();
+            let _label: String = row.get(20).unwrap_or_default();
             let tagline: String = row.get(22).unwrap_or_default();
             let tags: String = row.get(23).unwrap_or_default();
             let num: String = row.get(25).unwrap_or_default();
