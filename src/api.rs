@@ -506,7 +506,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
     let item_opt = conn.query_row("SELECT id, title, type, year, plot, poster_path, file_path, studios, parts, runtime, actors FROM items WHERE id = ?1", [id], |row| {
         let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
         let studios_str: String = row.get::<_, String>(7).unwrap_or_default();
-        let studios: Vec<Value> = studios_str.split(" / ").filter(|s| !s.trim().is_empty()).map(|s| json!({ "Name": s, "Id": format!("studio_{}", s) })).collect();
+        let studios: Vec<Value> = studios_str.split(" / ").filter(|s| !s.trim().is_empty()).map(|s| { let mut h = Sha256::new(); h.update(s.as_bytes()); let hash = h.finalize(); let id = (i64::from_be_bytes([hash[0], hash[1], hash[2], hash[3], hash[4], hash[5], hash[6], hash[7]])).abs() % 1_000_000_000 + 1; json!({ "Name": s, "Id": id }) }).collect();
         let parts_json: String = row.get::<_, String>(8).unwrap_or_default();
         let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
         let runtime: i32 = row.get(9).unwrap_or(0);
