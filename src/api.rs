@@ -721,8 +721,9 @@ fn extract_extension_from_url(url: &str) -> String {
 }
 
 
+
 pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> Response {
-    let (parts_json_opt, runtime, size) = {
+    let (parts_json_opt, runtime, _size) = {
         let conn = pool.lock().unwrap();
         let mut stmt = conn.prepare("SELECT parts, runtime, size FROM items WHERE id = ?1").unwrap();
         stmt.query_row([item_id], |row| Ok((
@@ -757,21 +758,9 @@ pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, Axum
             "DefaultSubtitleStreamIndex": -1,
             "IsRemote": true,
             "RunTimeTicks": run_time_ticks,
-            "Size": size,
-            "Bitrate": 8000000,
-            "MediaStreams": [
-                {
-                    "Type": "Video", "Index": 0, "Codec": "h264", "DisplayTitle": "1080p H264",
-                    "Width": 1920, "Height": 1080, "BitRate": 8000000, "RealFrameRate": 24.0,
-                    "Profile": "High", "Level": 41, "VideoRange": "SDR", "ColorSpace": "bt709",
-                    "IsDefault": true, "IsForced": false, "IsExternal": false
-                },
-                {
-                    "Type": "Audio", "Index": 1, "Codec": "aac", "DisplayTitle": "AAC 2.0",
-                    "Channels": 2, "BitRate": 192000, "SampleRate": 48000, "ChannelLayout": "stereo",
-                    "IsDefault": true, "IsForced": false, "IsExternal": false
-                }
-            ],
+            "Size": 0,
+            "Bitrate": 0,
+            "MediaStreams": [],
             "Name": "Default",
             "Protocol": "Http",
             "SupportsDirectPlay": true,
