@@ -41,17 +41,14 @@ async fn main() {
         .route("/Items", get(api::emby_items))
         .route("/Items/Latest", get(api::emby_items_latest))
         
-        // 详情：带 user_id 和不带 user_id 的分别路由
         .route("/Items/{item_id}", get(api::emby_item_detail))
         .route("/Users/{user_id}/Items/{item_id}", get(api::emby_item_detail_with_user))
         
-        // 图片：带 user_id、不带 user_id、带 index 的分开路由
         .route("/Items/{item_id}/Images/{image_type}", get(api::emby_item_image))
         .route("/Items/{item_id}/Images/{image_type}/{index}", get(api::emby_item_image_with_index))
         .route("/Users/{user_id}/Items/{item_id}/Images/{image_type}", get(api::emby_item_image_with_user))
         .route("/Users/{user_id}/Images/{image_type}", get(api::emby_item_image))
 
-        // 播放：单参数、带后缀、带 source_id 的全部分开路由
         .route("/Items/{item_id}/PlaybackInfo", get(api::emby_playback_info).post(api::emby_playback_info))
         .route("/Videos/{item_id}/stream", get(api::emby_stream))
         .route("/Videos/{item_id}/stream.{ext}", get(api::emby_stream_with_ext))

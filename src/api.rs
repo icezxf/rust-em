@@ -422,13 +422,42 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_items_latest() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_items_resume() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_items_next_up() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-
 #[derive(Deserialize, Default)]
 #[serde(default)]
-pub struct EmbyItemsQuery { #[serde(rename = "ParentId")] parent_id: Option<String> }
+pub struct EmbyItemsQuery {
+    #[serde(rename = "ParentId")] parent_id: Option<String>,
+    #[serde(rename = "StartIndex")] start_index: Option<i64>,
+    #[serde(rename = "Limit")] limit: Option<i64>,
+}
+
+pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path FROM items WHERE 1=1".to_string();
+    if let Some(pid) = &query.parent_id {
+        if pid.starts_with("lib_") {
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
+                sql.push_str(&format!(" AND library_id = {}", lib_id));
+            }
+        }
+    }
+    sql.push_str(" ORDER BY id DESC LIMIT 16");
+    let mut stmt = conn.prepare(&sql).unwrap();
+    let items: Vec<Value> = stmt.query_map([], |row| {
+        let id: i64 = row.get(0).unwrap_or_default();
+        let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
+        Ok(json!({
+            "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(),
+            "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
+            "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
+            "Overview": row.get::<_, String>(4).unwrap_or_default(),
+            "ImageTags": if has_poster { json!({"Primary": "tag"}) } else { json!({}) },
+        }))
+    }).unwrap().filter_map(Result::ok).collect();
+    Json(items).into_response()
+}
+
+pub async fn emby_items_resume() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
+pub async fn emby_items_next_up() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 
 pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
 async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -> Response {
@@ -437,7 +466,15 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
     if let Some(pid) = &query.parent_id {
         if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
     }
-    sql.push_str(" ORDER BY id DESC LIMIT 100");
+    sql.push_str(" ORDER BY id DESC");
+    if let Some(limit) = query.limit {
+        sql.push_str(&format!(" LIMIT {}", limit));
+    } else {
+        sql.push_str(" LIMIT 100");
+    }
+    if let Some(start) = query.start_index {
+        sql.push_str(&format!(" OFFSET {}", start));
+    }
     let mut stmt = conn.prepare(&sql).unwrap();
     let items: Vec<Value> = stmt.query_map([], |row| {
         let id: i64 = row.get(0).unwrap_or_default();
@@ -464,12 +501,22 @@ pub async fn emby_item_detail_with_user(State(pool): State<Arc<Mutex<Connection>
 async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -> Response {
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let conn = pool.lock().unwrap();
-    let item_opt = conn.query_row("SELECT id, title, type, year, plot, poster_path, file_path, studios, parts FROM items WHERE id = ?1", [id], |row| {
+    let item_opt = conn.query_row("SELECT id, title, type, year, plot, poster_path, file_path, studios, parts, runtime, actors FROM items WHERE id = ?1", [id], |row| {
         let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
         let studios_str: String = row.get::<_, String>(7).unwrap_or_default();
         let studios: Vec<Value> = studios_str.split(" / ").filter(|s| !s.trim().is_empty()).map(|s| json!({ "Name": s, "Id": format!("studio_{}", s) })).collect();
         let parts_json: String = row.get::<_, String>(8).unwrap_or_default();
         let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
+        let runtime: i32 = row.get(9).unwrap_or(0);
+        let actors_json: String = row.get(10).unwrap_or_else(|_| "[]".to_string());
+        let actors: Vec<Value> = serde_json::from_str(&actors_json).unwrap_or_default();
+        let people: Vec<Value> = actors.into_iter().map(|a| {
+            json!({
+                "Name": a["name"].as_str().unwrap_or_default(),
+                "Role": a["role"].as_str().unwrap_or_default(),
+                "Type": "Actor"
+            })
+        }).collect();
         let media_sources: Vec<Value> = parts.iter().enumerate().map(|(i, path)| {
             json!({ "Id": format!("{}_cd{}", id, i), "Path": path, "Name": if parts.len() > 1 { format!("CD{}", i + 1) } else { "Default".to_string() }, "Protocol": "Http", "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsTranscoding": false, "DirectStreamUrl": format!("/Videos/{}/stream?MediaSourceId={}_cd{}", id, id, i) })
         }).collect();
@@ -480,6 +527,8 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             "Overview": row.get::<_, String>(4).unwrap_or_default(), "ImageTags": if has_poster { json!({"Primary": "tag"}) } else { json!({}) },
             "Path": row.get::<_, String>(6).unwrap_or_default(), "Studios": studios,
             "MediaSources": media_sources,
+            "RunTimeTicks": (runtime as i64) * 60 * 10_000_000,
+            "People": people,
             "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
         }))
     }).ok();
