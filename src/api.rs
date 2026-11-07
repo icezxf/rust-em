@@ -295,7 +295,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         stills.sort();
         let stills_json = serde_json::to_string(&stills).unwrap_or_default();
         {
-        let mediainfo_json_path = crate::probe::get_mediainfo_json_path(&path);
+        let mediainfo_json_path = crate::probe::get_mediainfo_json_path(first_path);
         let (probe_size, probe_runtime_ticks, media_streams_json_str) = if mediainfo_json_path.exists() {
             if let Some(src) = crate::probe::load_cached_source(&mediainfo_json_path) {
                 let s = src.get("Size").and_then(|v| v.as_i64()).unwrap_or(0);
