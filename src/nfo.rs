@@ -26,26 +26,30 @@ pub fn read_nfo(path: &std::path::Path) -> Option<NfoMovie> {
     let mut buf = Vec::new();
     let mut current_actor: Option<NfoActor> = None;
     let mut current_tag = String::new();
+    let mut in_set = false;
+
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => {
                 current_tag = String::from_utf8_lossy(e.name().as_ref()).to_lowercase();
                 if current_tag == "actor" { current_actor = Some(NfoActor::default()); }
+                if current_tag == "set" { in_set = true; }
             }
             Ok(Event::Text(e)) => {
                 if let Ok(decoded) = e.unescape() {
                     let text = decoded.trim().to_string();
-                    if !text.is_empty() { process_text(&text, &current_tag, &mut movie, &mut current_actor); }
+                    if !text.is_empty() { process_text(&text, &current_tag, &mut movie, &mut current_actor, in_set); }
                 }
             }
             Ok(Event::CData(e)) => {
                 if let Ok(decoded) = e.decode() {
                     let text = decoded.trim().to_string();
-                    if !text.is_empty() { process_text(&text, &current_tag, &mut movie, &mut current_actor); }
+                    if !text.is_empty() { process_text(&text, &current_tag, &mut movie, &mut current_actor, in_set); }
                 }
             }
             Ok(Event::End(e)) => {
                 let tag = String::from_utf8_lossy(e.name().as_ref()).to_lowercase();
+                if tag == "set" { in_set = false; }
                 if tag == "actor" {
                     if let Some(actor) = current_actor.take() { if actor.name.is_some() { movie.actors.push(actor); } }
                 }
@@ -60,7 +64,7 @@ pub fn read_nfo(path: &std::path::Path) -> Option<NfoMovie> {
     Some(movie)
 }
 
-fn process_text(text: &str, tag: &str, movie: &mut NfoMovie, current_actor: &mut Option<NfoActor>) {
+fn process_text(text: &str, tag: &str, movie: &mut NfoMovie, current_actor: &mut Option<NfoActor>, in_set: bool) {
     match tag {
         "title" => movie.title = Some(text.to_string()),
         "originaltitle" => movie.original_title = Some(text.to_string()),
@@ -76,7 +80,6 @@ fn process_text(text: &str, tag: &str, movie: &mut NfoMovie, current_actor: &mut
         "tagline" => movie.tagline = Some(text.to_string()),
         "series" => movie.series = Some(text.to_string()),
         "label" => movie.label = Some(text.to_string()),
-        "set" => movie.set = Some(text.to_string()),
         "poster" | "cover" => movie.poster = Some(text.to_string()),
         "fanart" => movie.fanart = Some(text.to_string()),
         "trailer" => movie.trailer = Some(text.to_string()),
@@ -89,7 +92,13 @@ fn process_text(text: &str, tag: &str, movie: &mut NfoMovie, current_actor: &mut
         "language" => movie.languages.push(text.to_string()),
         "tmdbid" => movie.unique_ids.push(("tmdb".to_string(), text.to_string())),
         "imdbid" => movie.unique_ids.push(("imdb".to_string(), text.to_string())),
-        "name" => { if let Some(a) = current_actor.as_mut() { a.name = Some(text.to_string()); } }
+        "name" => {
+            if in_set {
+                movie.set = Some(text.to_string());
+            } else if let Some(a) = current_actor.as_mut() {
+                a.name = Some(text.to_string());
+            }
+        }
         "role" => { if let Some(a) = current_actor.as_mut() { a.role = Some(text.to_string()); } }
         "thumb" => {
             if let Some(a) = current_actor.as_mut() { a.thumb = Some(text.to_string()); }
