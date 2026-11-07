@@ -723,7 +723,15 @@ fn extract_extension_from_url(url: &str) -> String {
 
 
 
-pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> Response {
+pub async fn emby_playback_info(
+    State(pool): State<Arc<Mutex<Connection>>>,
+    AxumPath(item_id): AxumPath<i64>,
+    headers: HeaderMap,
+) -> Response {
+    let scheme = headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()).unwrap_or("http");
+    let host = headers.get("x-forwarded-host").or_else(|| headers.get("host")).and_then(|v| v.to_str().ok()).unwrap_or("localhost:8096");
+    let base_url = format!("{}://{}", scheme, host);
+
     let (parts_json_opt, runtime) = {
         let conn = pool.lock().unwrap();
         let mut stmt = conn.prepare("SELECT parts, runtime FROM items WHERE id = ?1").unwrap();
@@ -749,40 +757,54 @@ pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, Axum
     let estimated_size = if run_time_ticks > 0 { (run_time_ticks / 10_000_000) * 8_000_000 / 8 } else { 0 };
     let media_sources: Vec<Value> = parts.iter().enumerate().map(|(i, _path)| {
         let ext = &exts[i];
+        let stream_url = format!("{}/Videos/{}/original.{}?MediaSourceId={}_cd{}&PlaySessionId={}", base_url, item_id, ext, item_id, i, play_session_id);
         json!({
             "Id": format!("{}_cd{}", item_id, i),
             "PlaySessionId": play_session_id.clone(),
-            "Path": format!("/Videos/{}/original.{}?MediaSourceId={}_cd{}", item_id, ext, item_id, i),
-            "DirectStreamUrl": format!("/Videos/{}/original.{}?MediaSourceId={}_cd{}", item_id, ext, item_id, i),
+            "Path": stream_url.clone(),
+            "DirectStreamUrl": stream_url,
+            "Protocol": "Http",
             "Container": ext,
-            "DefaultAudioStreamIndex": 1,
-            "DefaultSubtitleStreamIndex": -1,
+            "Name": "Default",
+            "Type": "Default",
+            "VideoType": "VideoFile",
             "IsRemote": true,
             "RunTimeTicks": run_time_ticks,
             "Size": estimated_size,
             "Bitrate": 8000000,
-            "MediaStreams": [
-                {
-                    "Type": "Video", "Index": 0, "Codec": "h264", "DisplayTitle": "1080p H264",
-                    "Width": 1920, "Height": 1080, "BitRate": 8000000, "RealFrameRate": 24.0,
-                    "Profile": "High", "Level": 41, "VideoRange": "SDR", "ColorSpace": "bt709",
-                    "IsInterlaced": false, "IsAnamorphic": false,
-                    "IsDefault": true, "IsForced": false, "IsExternal": false
-                },
-                {
-                    "Type": "Audio", "Index": 1, "Codec": "aac", "DisplayTitle": "AAC 2.0",
-                    "Channels": 2, "BitRate": 192000, "SampleRate": 48000, "ChannelLayout": "stereo",
-                    "IsDefault": true, "IsForced": false, "IsExternal": false
-                }
-            ],
-            "Name": "Default",
-            "Protocol": "Http",
+            "DefaultAudioStreamIndex": 1,
+            "DefaultSubtitleStreamIndex": -1,
             "SupportsDirectPlay": true,
             "SupportsDirectStream": true,
             "SupportsProbing": true,
             "SupportsTranscoding": false,
-            "Type": "Default",
-            "VideoType": "VideoFile"
+            "SupportsExternalStream": false,
+            "IsInfiniteStream": false,
+            "RequiresOpening": false,
+            "RequiresClosing": false,
+            "RequiresLooping": false,
+            "ReadAtNativeFramerate": false,
+            "IgnoreDts": false,
+            "IgnoreIndex": false,
+            "GenPtsInput": false,
+            "MediaStreams": [
+                {
+                    "Type": "Video", "Index": 0, "Codec": "h264", "CodecTag": "avc1",
+                    "DisplayTitle": "1080p H264 SDR", "Width": 1920, "Height": 1080,
+                    "BitRate": 8000000, "BitDepth": 8, "RealFrameRate": 24.0, "AverageFrameRate": 24.0,
+                    "Profile": "high", "Level": 41, "VideoRange": "SDR", "VideoRangeType": "SDR",
+                    "ColorSpace": "bt709", "ColorTransfer": "bt709", "ColorPrimaries": "bt709",
+                    "PixelFormat": "yuv420p", "AspectRatio": "16:9", "RefFrames": 4, "IsAVC": true,
+                    "IsInterlaced": false, "IsAnamorphic": false,
+                    "IsDefault": true, "IsForced": false, "IsExternal": false
+                },
+                {
+                    "Type": "Audio", "Index": 1, "Codec": "aac", "CodecTag": "mp4a",
+                    "DisplayTitle": "AAC 2.0", "Channels": 2, "ChannelLayout": "stereo",
+                    "BitRate": 192000, "SampleRate": 48000, "BitDepth": 16, "Profile": "LC",
+                    "IsDefault": true, "IsForced": false, "IsExternal": false
+                }
+            ]
         })
     }).collect();
     Json(json!({ "MediaSources": media_sources, "PlaySessionId": play_session_id })).into_response()
