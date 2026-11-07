@@ -765,6 +765,10 @@ pub async fn emby_playback_info(
 #[derive(Deserialize)]
 pub struct ProbeScanReq { pub path: String, pub interval_ms: Option<u64> }
 
+
+#[derive(Deserialize)]
+pub struct ProbeScanReq { pub path: String, pub interval_ms: Option<u64> }
+
 pub async fn probe_scan(Json(req): Json<ProbeScanReq>) -> impl IntoResponse {
     let root = PathBuf::from(&req.path);
     if !root.is_dir() { return (StatusCode::BAD_REQUEST, Json(json!({"error":"路径不存在"}))).into_response(); }
@@ -780,7 +784,13 @@ pub async fn probe_scan(Json(req): Json<ProbeScanReq>) -> impl IntoResponse {
                 if p.is_dir() { stack.push(p); continue; }
                 if p.extension().and_then(|e| e.to_str()).map_or(false, |e| e.eq_ignore_ascii_case("strm")) {
                     let json_path = crate::probe::get_mediainfo_json_path(&p);
-                    if json_path.exists() { skip += 1; continue; }
+                    if json_path.exists() {
+                        if let Some(src) = crate::probe::load_cached_source(&json_path) {
+                            if src.get("MediaStreams").and_then(|m| m.as_array()).map(|a| !a.is_empty()).unwrap_or(false) {
+                                skip += 1; continue;
+                            }
+                        }
+                    }
                     match crate::probe::probe_strm(&p, limiter.clone(), &client).await {
                         Ok(_) => { ok += 1; println!("✅ [PROBE] {}", p.display()); }
                         Err(e) => { fail += 1; println!("❌ [PROBE] {}: {}", p.display(), e); }
