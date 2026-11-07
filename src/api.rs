@@ -572,29 +572,6 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
     StatusCode::NOT_FOUND.into_response()
 }
 
-pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> Response {
-    let parts_json_opt = {
-        let conn = pool.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT parts FROM items WHERE id = ?1").unwrap();
-        stmt.query_row([item_id], |row| row.get::<_, String>(0)).ok()
-    };
-    let parts: Vec<String> = parts_json_opt.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default();
-    let play_session_id = uuid::Uuid::new_v4().to_string();
-    let media_sources: Vec<Value> = parts.iter().enumerate().map(|(i, path)| {
-        json!({
-            "Id": format!("{}_cd{}", item_id, i),
-            "PlaySessionId": play_session_id.clone(),
-            "Path": format!("/Videos/{}/original.strm?MediaSourceId={}_cd{}", item_id, item_id, i),
-            "Name": if parts.len() > 1 { format!("CD{}", i + 1) } else { "Default".to_string() },
-            "Protocol": "Http", "Type": "Default", "VideoType": "VideoFile", "RunTimeTicks": 0, "Size": 0, "DefaultAudioStreamIndex": 1, "DefaultSubtitleStreamIndex": -1,
-            "SupportsDirectPlay": true,
-            "SupportsDirectStream": true,
-            "SupportsTranscoding": false, "SupportsProbing": true, "IsRemote": true, "Container": "strm", "MediaStreams": [{"Type":"Video", "Index":0, "Codec":"h264", "DisplayTitle":"1080p H264", "Width":1920, "Height":1080, "IsDefault": true, "IsForced": false, "IsExternal": false}, {"Type":"Audio", "Index":1, "Codec":"aac", "DisplayTitle":"AAC 2.0", "Channels":2, "IsDefault": true, "IsForced": false, "IsExternal": false}],
-            "DirectStreamUrl": format!("/Videos/{}/original.strm?MediaSourceId={}_cd{}", item_id, item_id, i)
-        })
-    }).collect();
-    Json(json!({ "MediaSources": media_sources, "PlaySessionId": play_session_id })).into_response()
-}
 
 pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap) -> Response {
     emby_stream_inner(pool, item_id, query, headers).await
@@ -730,4 +707,61 @@ pub async fn emby_subtitle_stream() -> impl IntoResponse {
 
 pub async fn emby_sessions() -> impl IntoResponse {
     Json(json!([]))
+}
+
+fn extract_extension_from_url(url: &str) -> String {
+    let path_part = url.split('?').next().unwrap_or(url);
+    if let Some(idx) = path_part.rfind('.') {
+        let ext = &path_part[idx+1..];
+        if !ext.is_empty() && ext.len() <= 5 && ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return ext.to_lowercase();
+        }
+    }
+    "mp4".to_string()
+}
+
+pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> Response {
+    let parts_json_opt = {
+        let conn = pool.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT parts FROM items WHERE id = ?1").unwrap();
+        stmt.query_row([item_id], |row| row.get::<_, String>(0)).ok()
+    };
+    let parts: Vec<String> = parts_json_opt.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default();
+    let mut exts: Vec<String> = Vec::new();
+    for path in &parts {
+        let ext = match tokio::fs::read_to_string(path).await {
+            Ok(content) => {
+                let url = content.lines().map(str::trim).find(|s| !s.is_empty()).unwrap_or("");
+                extract_extension_from_url(url)
+            }
+            Err(_) => "mp4".to_string(),
+        };
+        exts.push(ext);
+    }
+    let play_session_id = uuid::Uuid::new_v4().to_string();
+    let media_sources: Vec<Value> = parts.iter().enumerate().map(|(i, _path)| {
+        let ext = &exts[i];
+        json!({
+            "Id": format!("{}_cd{}", item_id, i),
+            "PlaySessionId": play_session_id.clone(),
+            "Path": format!("/Videos/{}/original.{}?MediaSourceId={}_cd{}", item_id, ext, item_id, i),
+            "DirectStreamUrl": format!("/Videos/{}/original.{}?MediaSourceId={}_cd{}", item_id, ext, item_id, i),
+            "Container": ext,
+            "DefaultAudioStreamIndex": 1,
+            "DefaultSubtitleStreamIndex": -1,
+            "IsRemote": true,
+            "MediaStreams": [{"Type":"Video", "Index":0, "Codec":"h264", "DisplayTitle":"1080p H264", "Width":1920, "Height":1080, "IsDefault": true, "IsForced": false, "IsExternal": false}, {"Type":"Audio", "Index":1, "Codec":"aac", "DisplayTitle":"AAC 2.0", "Channels":2, "IsDefault": true, "IsForced": false, "IsExternal": false}],
+            "Name": "Default",
+            "Protocol": "Http",
+            "RunTimeTicks": 0,
+            "Size": 0,
+            "SupportsDirectPlay": true,
+            "SupportsDirectStream": true,
+            "SupportsProbing": true,
+            "SupportsTranscoding": false,
+            "Type": "Default",
+            "VideoType": "VideoFile"
+        })
+    }).collect();
+    Json(json!({ "MediaSources": media_sources, "PlaySessionId": play_session_id })).into_response()
 }
