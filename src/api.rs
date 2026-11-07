@@ -619,6 +619,8 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
         let cache_lock = cache.lock().unwrap(); 
         if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) { 
             if Instant::now() < *expire_at { 
+                println!("📦 [STREAM-CACHE] item={} real_url={}", item_id, cached_url);
+                println!("📦 [STREAM-CACHE] item={} real_url={}", item_id, cached_url);
                 return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); 
             } 
         } 
@@ -646,6 +648,8 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
     }
     
     { let mut cache_lock = cache.lock().unwrap(); cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(300))); }
+    println!("🚀 [STREAM-302] item={} real_url={}", item_id, final_url);
+    println!("🚀 [STREAM-302] item={} real_url={}", item_id, final_url);
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
 }
 
