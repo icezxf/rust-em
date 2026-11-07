@@ -23,71 +23,80 @@ pub async fn logger_middleware(req: Request, next: Next) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
     let path = uri.path();
-    if path.ends_with(".css") || path.ends_with(".js") || path.ends_with(".png") || path.ends_with(".jpg") { return next.run(req).await; }
+    if path.ends_with(".css") || path.ends_with(".js") || path.ends_with(".png") || path.ends_with(".jpg") {
+        return next.run(req).await;
+    }
     let ua = req.headers().get("User-Agent").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     let query = uri.query().unwrap_or("");
     println!("📥 [REQ] {} {}?{} | UA: {}", method, path, query, ua);
     let res = next.run(req).await;
     let status = res.status();
-    if status.is_success() || status.is_redirection() { println!("📤 [RES] {} {} | 状态: {}", method, path, status); }
-    else { println!("❌ [RES] {} {} | 状态: {} (异常)", method, path, status); }
-    res
-}
-
-// ======= 凭据规范化 =======
-fn normalize_credentials(req: Request, next: Next) -> impl std::future::Future<Output = Response> {
-    async move {
-        let mut req = req;
-        let mut token: Option<String> = None;
-        if let Some(val) = req.headers().get("X-Emby-Token").and_then(|v| v.to_str().ok()) { if !val.is_empty() { token = Some(val.to_string()); } }
-        if token.is_none() { if let Some(val) = req.headers().get("Authorization").and_then(|v| v.to_str().ok()) {
-            if let Some(t) = val.strip_prefix("Bearer ") { token = Some(t.trim().to_string()); }
-            else if let Some(idx) = val.find("Token=\"") { let rest = &val[idx + 7..]; if let Some(end_idx) = rest.find('"') { token = Some(rest[..end_idx].to_string()); } }
-        } }
-        
-        let mut remaining_query = Vec::new();
-        if let Some(query_str) = req.uri().query() {
-            for part in query_str.split('&') {
-                if let Some((name, value)) = part.split_once('=') {
-                    let k_lower = name.to_lowercase();
-                    if k_lower == "api_key" || k_lower == "apikey" || k_lower == "x-emby-token" || k_lower == "x-mediabrowser-token" {
-                        if token.is_none() && !value.is_empty() { token = Some(value.to_string()); }
-                        continue;
-                    }
-                }
-                remaining_query.push(part);
-            }
-        }
-        let query = remaining_query.join("&");
-        let path_and_query = if query.is_empty() { req.uri().path().to_owned() } else { format!("{}?{}", req.uri().path(), query) };
-        if let Ok(new_uri) = path_and_query.parse() { *req.uri_mut() = new_uri; }
-        
-        if let Some(t) = token { if let Ok(val) = HeaderValue::from_str(&t) { req.headers_mut().insert(NORMALIZED_CREDENTIAL_HEADER, val); } }
-        next.run(req).await
+    if status.is_success() || status.is_redirection() { 
+        println!("📤 [RES] {} {} | 状态: {}", method, path, status); 
+    } else { 
+        println!("❌ [RES] {} {} | 状态: {} (异常)", method, path, status); 
     }
+    res
 }
 
 // ======= 鉴权中间件 =======
 pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
-    // 登录接口必须放行，否则永远拿不到 Token
-    if req.uri().path() == "/api/login" {
-        return Ok(next.run(req).await);
-    }
-
     if req.method() == Method::OPTIONS { return Ok(next.run(req).await); }
     let path = req.uri().path();
+    
+    // 1. 放行公开接口和静态资源
     if !path.starts_with("/api") && !path.starts_with("/emby") && !path.starts_with("/Items") && !path.starts_with("/Users") && !path.starts_with("/Videos") && !path.starts_with("/System") && !path.starts_with("/Auth") && !path.starts_with("/auth") && !path.starts_with("/Sessions") && !path.starts_with("/DisplayPreferences") {
         return Ok(next.run(req).await);
     }
-    if path.contains("/Images/") || path.ends_with("/Ping") || path.ends_with("/Info/Public") || path.ends_with("/Users/Public") || path.ends_with("/AuthenticateByName") {
+    if path.contains("/Images/") || path.ends_with("/Ping") || path.ends_with("/Info/Public") || path.ends_with("/Users/Public") || path.ends_with("/AuthenticateByName") || path == "/api/login" {
         return Ok(next.run(req).await);
     }
     
-    if let Some(val) = req.headers().get(NORMALIZED_CREDENTIAL_HEADER) {
-        if let Ok(token) = val.to_str() {
-            if let Some(tokens) = TOKENS.get() { if tokens.lock().unwrap().contains(&token.to_string()) { return Ok(next.run(req).await); } }
+    // 2. 万能提取 Token
+    let mut token_opt = None;
+    // 从前端 Authorization: Bearer xxx 提取
+    if let Some(val) = req.headers().get("Authorization").and_then(|v| v.to_str().ok()) {
+        if let Some(t) = val.strip_prefix("Bearer ") {
+            token_opt = Some(t.trim().to_string());
         }
     }
+    // 从 Emby 客户端 X-Emby-Token 提取
+    if token_opt.is_none() {
+        if let Some(val) = req.headers().get("X-Emby-Token").and_then(|v| v.to_str().ok()) {
+            token_opt = Some(val.to_string());
+        }
+    }
+    // 从规范化后的 Header 提取
+    if token_opt.is_none() {
+        if let Some(val) = req.headers().get(NORMALIZED_CREDENTIAL_HEADER) {
+            if let Ok(t) = val.to_str() { token_opt = Some(t.to_string()); }
+        }
+    }
+    // 从 Query 参数提取 (前端图片请求带 ?token=xxx)
+    if token_opt.is_none() {
+        if let Some(query) = req.uri().query() {
+            for pair in query.split('&') {
+                if let Some((k, v)) = pair.split_once('=') {
+                    let k_lower = k.to_lowercase();
+                    if k_lower == "token" || k_lower == "api_key" || k_lower == "apikey" || k_lower == "x-emby-token" {
+                        token_opt = Some(v.to_string());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. 验证 Token
+    if let Some(token) = token_opt {
+        if let Some(tokens) = TOKENS.get() {
+            if tokens.lock().unwrap().contains(&token) {
+                return Ok(next.run(req).await);
+            }
+        }
+    }
+    
+    // 4. 拒绝访问
     Err(StatusCode::UNAUTHORIZED)
 }
 
@@ -426,9 +435,9 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_items_latest(State(_pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(_query): Query<EmbyItemsQuery>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_items_resume(State(_pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(_query): Query<EmbyItemsQuery>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_items_next_up(State(_pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(_query): Query<EmbyItemsQuery>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
+pub async fn emby_items_latest() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
+pub async fn emby_items_resume() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
+pub async fn emby_items_next_up() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
