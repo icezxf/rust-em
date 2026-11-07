@@ -487,7 +487,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
             "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
             "Overview": row.get::<_, String>(4).unwrap_or_default(), "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) }, "BackdropImageTags": [], "DateCreated": "2024-01-01T00:00:00.0000000Z", "SortName": row.get::<_, String>(1).unwrap_or_default(),
             "Path": row.get::<_, String>(6).unwrap_or_default(),
-            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
+            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "Type": "Default", "VideoType": "VideoFile", "RunTimeTicks": 0, "Size": 0, "DefaultAudioStreamIndex": 1, "DefaultSubtitleStreamIndex": -1, "SupportsDirectPlay": true }],
             "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
         }))
     }).unwrap().filter_map(Result::ok).collect();
@@ -521,7 +521,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
         }).collect();
     let play_session_id = uuid::Uuid::new_v4().to_string();
         let media_sources: Vec<Value> = parts.iter().enumerate().map(|(i, path)| {
-            json!({ "Id": format!("{}_cd{}", id, i), "Path": path, "Name": if parts.len() > 1 { format!("CD{}", i + 1) } else { "Default".to_string() }, "Protocol": "Http", "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsTranscoding": false, "SupportsProbing": true, "IsRemote": true, "Container": "strm", "MediaStreams": [{"Type":"Video", "Index":0, "Codec":"h264", "DisplayTitle":"1080p H264", "Width":1920, "Height":1080, "IsDefault": true, "IsForced": false, "IsExternal": false}, {"Type":"Audio", "Index":1, "Codec":"aac", "DisplayTitle":"AAC 2.0", "Channels":2, "IsDefault": true, "IsForced": false, "IsExternal": false}], "DirectStreamUrl": format!("/Videos/{}/original.strm?MediaSourceId={}_cd{}", id, id, i) })
+            json!({ "Id": format!("{}_cd{}", id, i), "Path": path, "Name": if parts.len() > 1 { format!("CD{}", i + 1) } else { "Default".to_string() }, "Protocol": "Http", "Type": "Default", "VideoType": "VideoFile", "RunTimeTicks": 0, "Size": 0, "DefaultAudioStreamIndex": 1, "DefaultSubtitleStreamIndex": -1, "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsTranscoding": false, "SupportsProbing": true, "IsRemote": true, "Container": "mp4", "MediaStreams": [{"Type":"Video", "Index":0, "Codec":"h264", "DisplayTitle":"1080p H264", "Width":1920, "Height":1080, "IsDefault": true, "IsForced": false, "IsExternal": false}, {"Type":"Audio", "Index":1, "Codec":"aac", "DisplayTitle":"AAC 2.0", "Channels":2, "IsDefault": true, "IsForced": false, "IsExternal": false}], "DirectStreamUrl": format!("/Videos/{}/original.strm?MediaSourceId={}_cd{}", id, id, i) })
         }).collect();
         Ok(json!({
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
@@ -586,10 +586,10 @@ pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, Axum
             "PlaySessionId": play_session_id.clone(),
             "Path": format!("/Videos/{}/original.strm?MediaSourceId={}_cd{}", item_id, item_id, i),
             "Name": if parts.len() > 1 { format!("CD{}", i + 1) } else { "Default".to_string() },
-            "Protocol": "Http",
+            "Protocol": "Http", "Type": "Default", "VideoType": "VideoFile", "RunTimeTicks": 0, "Size": 0, "DefaultAudioStreamIndex": 1, "DefaultSubtitleStreamIndex": -1,
             "SupportsDirectPlay": true,
             "SupportsDirectStream": true,
-            "SupportsTranscoding": false, "SupportsProbing": true, "IsRemote": true, "Container": "strm", "MediaStreams": [{"Type":"Video", "Index":0, "Codec":"h264", "DisplayTitle":"1080p H264", "Width":1920, "Height":1080, "IsDefault": true, "IsForced": false, "IsExternal": false}, {"Type":"Audio", "Index":1, "Codec":"aac", "DisplayTitle":"AAC 2.0", "Channels":2, "IsDefault": true, "IsForced": false, "IsExternal": false}],
+            "SupportsTranscoding": false, "SupportsProbing": true, "IsRemote": true, "Container": "mp4", "MediaStreams": [{"Type":"Video", "Index":0, "Codec":"h264", "DisplayTitle":"1080p H264", "Width":1920, "Height":1080, "IsDefault": true, "IsForced": false, "IsExternal": false}, {"Type":"Audio", "Index":1, "Codec":"aac", "DisplayTitle":"AAC 2.0", "Channels":2, "IsDefault": true, "IsForced": false, "IsExternal": false}],
             "DirectStreamUrl": format!("/Videos/{}/original.strm?MediaSourceId={}_cd{}", item_id, item_id, i)
         })
     }).collect();
