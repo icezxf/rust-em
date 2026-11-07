@@ -952,7 +952,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 "Container": "mp4",
                 "Path": row.get::<_, String>(6).unwrap_or_default(),
                 "Studios": studios, "People": people,
-                "SeriesName": if series.is_empty() { Value::Null } else { json!(series) },
+                "SeriesName": if !series.is_empty() { json!(series) } else if !set_name.is_empty() { json!(set_name) } else { Value::Null },
                 "OfficialRating": mpaa,
                 "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(),
                 "PreferredMetadataLanguage": language,
