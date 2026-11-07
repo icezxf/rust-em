@@ -520,7 +520,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             })
         }).collect();
         let media_sources: Vec<Value> = parts.iter().enumerate().map(|(i, path)| {
-            json!({ "Id": format!("{}_cd{}", id, i), "Path": path, "Name": if parts.len() > 1 { format!("CD{}", i + 1) } else { "Default".to_string() }, "Protocol": "Http", "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsTranscoding": false, "Container": "mkv", "MediaStreams": [{"Type":"Video", "Index":0, "Codec":"h264", "DisplayTitle":"1080p H264", "Width":1920, "Height":1080, "IsDefault": true, "IsForced": false, "IsExternal": false}, {"Type":"Audio", "Index":1, "Codec":"aac", "DisplayTitle":"AAC 2.0", "Channels":2, "IsDefault": true, "IsForced": false, "IsExternal": false}], "DirectStreamUrl": format!("/Videos/{}/original.strm?MediaSourceId={}_cd{}", id, id, i) })
+            json!({ "Id": format!("{}_cd{}", id, i), "Path": path, "Name": if parts.len() > 1 { format!("CD{}", i + 1) } else { "Default".to_string() }, "Protocol": "Http", "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsTranscoding": false, "SupportsProbing": true, "IsRemote": true, "Container": "strm", "MediaStreams": [{"Type":"Video", "Index":0, "Codec":"h264", "DisplayTitle":"1080p H264", "Width":1920, "Height":1080, "IsDefault": true, "IsForced": false, "IsExternal": false}, {"Type":"Audio", "Index":1, "Codec":"aac", "DisplayTitle":"AAC 2.0", "Channels":2, "IsDefault": true, "IsForced": false, "IsExternal": false}], "DirectStreamUrl": format!("/Videos/{}/original.strm?MediaSourceId={}_cd{}", id, id, i) })
         }).collect();
         Ok(json!({
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
@@ -581,12 +581,12 @@ pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, Axum
     let media_sources: Vec<Value> = parts.iter().enumerate().map(|(i, path)| {
         json!({
             "Id": format!("{}_cd{}", item_id, i),
-            "Path": path,
+            "Path": format!("/Videos/{}/original.strm?MediaSourceId={}_cd{}", item_id, item_id, i),
             "Name": if parts.len() > 1 { format!("CD{}", i + 1) } else { "Default".to_string() },
             "Protocol": "Http",
             "SupportsDirectPlay": true,
             "SupportsDirectStream": true,
-            "SupportsTranscoding": false, "Container": "mkv", "MediaStreams": [{"Type":"Video", "Index":0, "Codec":"h264", "DisplayTitle":"1080p H264", "Width":1920, "Height":1080, "IsDefault": true, "IsForced": false, "IsExternal": false}, {"Type":"Audio", "Index":1, "Codec":"aac", "DisplayTitle":"AAC 2.0", "Channels":2, "IsDefault": true, "IsForced": false, "IsExternal": false}],
+            "SupportsTranscoding": false, "SupportsProbing": true, "IsRemote": true, "Container": "strm", "MediaStreams": [{"Type":"Video", "Index":0, "Codec":"h264", "DisplayTitle":"1080p H264", "Width":1920, "Height":1080, "IsDefault": true, "IsForced": false, "IsExternal": false}, {"Type":"Audio", "Index":1, "Codec":"aac", "DisplayTitle":"AAC 2.0", "Channels":2, "IsDefault": true, "IsForced": false, "IsExternal": false}],
             "DirectStreamUrl": format!("/Videos/{}/original.strm?MediaSourceId={}_cd{}", item_id, item_id, i)
         })
     }).collect();
