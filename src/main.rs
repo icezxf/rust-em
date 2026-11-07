@@ -11,6 +11,7 @@ use tower_http::cors::{Any, CorsLayer};
 mod api;
 mod db;
 mod nfo;
+mod probe;
 
 #[tokio::main]
 async fn main() {
@@ -96,6 +97,7 @@ async fn main() {
         .route("/api/browse", get(api::browse_dir))
         .route("/api/images/{id}/{type}", get(api::get_image))
         .route("/api/user/update", post(api::update_user));
+        .route("/api/probe/scan", post(api::probe_scan))
 
     let app = Router::new()
         .merge(web_routes)

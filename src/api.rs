@@ -761,3 +761,34 @@ pub async fn emby_playback_info(
     }).collect();
     Json(json!({ "MediaSources": media_sources, "PlaySessionId": play_session_id })).into_response()
 }
+
+#[derive(Deserialize)]
+pub struct ProbeScanReq { pub path: String, pub interval_ms: Option<u64> }
+
+pub async fn probe_scan(Json(req): Json<ProbeScanReq>) -> impl IntoResponse {
+    let root = PathBuf::from(&req.path);
+    if !root.is_dir() { return (StatusCode::BAD_REQUEST, Json(json!({"error":"路径不存在"}))).into_response(); }
+    let limiter = crate::probe::ProbeLimiter::new(req.interval_ms.unwrap_or(1000));
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(40)).build().unwrap();
+    tokio::spawn(async move {
+        let mut ok = 0u32; let mut skip = 0u32; let mut fail = 0u32;
+        let mut stack = vec![root];
+        while let Some(dir) = stack.pop() {
+            let mut rd = match tokio::fs::read_dir(&dir).await { Ok(r) => r, Err(_) => continue };
+            while let Ok(Some(entry)) = rd.next_entry().await {
+                let p = entry.path();
+                if p.is_dir() { stack.push(p); continue; }
+                if p.extension().and_then(|e| e.to_str()).map_or(false, |e| e.eq_ignore_ascii_case("strm")) {
+                    let json_path = crate::probe::get_mediainfo_json_path(&p);
+                    if json_path.exists() { skip += 1; continue; }
+                    match crate::probe::probe_strm(&p, limiter.clone(), &client).await {
+                        Ok(_) => { ok += 1; println!("✅ [PROBE] {}", p.display()); }
+                        Err(e) => { fail += 1; println!("❌ [PROBE] {}: {}", p.display(), e); }
+                    }
+                }
+            }
+        }
+        println!("🏁 [PROBE] 完成 ok={} skip={} fail={}", ok, skip, fail);
+    });
+    (StatusCode::OK, Json(json!({"status":"started"}))).into_response()
+}
