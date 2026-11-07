@@ -51,12 +51,23 @@ async fn main() {
         .route("/Users/{user_id}/Images/{image_type}", get(api::emby_item_image))
 
         .route("/Items/{item_id}/PlaybackInfo", get(api::emby_playback_info).post(api::emby_playback_info))
+        
+        // --- 兼容大写的 Videos ---
         .route("/Videos/{item_id}/stream", get(api::emby_stream))
         .route("/Videos/{item_id}/stream.{ext}", get(api::emby_stream_with_ext))
         .route("/Videos/{item_id}/original", get(api::emby_stream))
         .route("/Videos/{item_id}/original.{ext}", get(api::emby_stream_with_ext))
         .route("/Videos/{item_id}/{source_id}/stream", get(api::emby_stream_with_source))
         .route("/Videos/{item_id}/{source_id}/stream.{ext}", get(api::emby_stream_with_source_ext))
+        
+        // --- 【核心修复】：兼容 Yamby 文档要求的小写 videos 路由 ---
+        .route("/videos/{item_id}/stream", get(api::emby_stream))
+        .route("/videos/{item_id}/stream.{ext}", get(api::emby_stream_with_ext))
+        .route("/videos/{item_id}/original", get(api::emby_stream))
+        .route("/videos/{item_id}/original.{ext}", get(api::emby_stream_with_ext))
+        .route("/videos/{item_id}/{source_id}/stream", get(api::emby_stream_with_source))
+        .route("/videos/{item_id}/{source_id}/stream.{ext}", get(api::emby_stream_with_source_ext))
+
         .route("/Items/{item_id}/Download", get(api::emby_download))
         
         .route("/Sessions/Playing", post(api::emby_playing))
