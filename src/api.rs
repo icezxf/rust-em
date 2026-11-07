@@ -519,6 +519,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 "Type": "Actor"
             })
         }).collect();
+    let play_session_id = uuid::Uuid::new_v4().to_string();
         let media_sources: Vec<Value> = parts.iter().enumerate().map(|(i, path)| {
             json!({ "Id": format!("{}_cd{}", id, i), "Path": path, "Name": if parts.len() > 1 { format!("CD{}", i + 1) } else { "Default".to_string() }, "Protocol": "Http", "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsTranscoding": false, "SupportsProbing": true, "IsRemote": true, "Container": "strm", "MediaStreams": [{"Type":"Video", "Index":0, "Codec":"h264", "DisplayTitle":"1080p H264", "Width":1920, "Height":1080, "IsDefault": true, "IsForced": false, "IsExternal": false}, {"Type":"Audio", "Index":1, "Codec":"aac", "DisplayTitle":"AAC 2.0", "Channels":2, "IsDefault": true, "IsForced": false, "IsExternal": false}], "DirectStreamUrl": format!("/Videos/{}/original.strm?MediaSourceId={}_cd{}", id, id, i) })
         }).collect();
@@ -578,9 +579,11 @@ pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, Axum
         stmt.query_row([item_id], |row| row.get::<_, String>(0)).ok()
     };
     let parts: Vec<String> = parts_json_opt.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default();
+    let play_session_id = uuid::Uuid::new_v4().to_string();
     let media_sources: Vec<Value> = parts.iter().enumerate().map(|(i, path)| {
         json!({
             "Id": format!("{}_cd{}", item_id, i),
+            "PlaySessionId": play_session_id.clone(),
             "Path": format!("/Videos/{}/original.strm?MediaSourceId={}_cd{}", item_id, item_id, i),
             "Name": if parts.len() > 1 { format!("CD{}", i + 1) } else { "Default".to_string() },
             "Protocol": "Http",
@@ -590,7 +593,7 @@ pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, Axum
             "DirectStreamUrl": format!("/Videos/{}/original.strm?MediaSourceId={}_cd{}", item_id, item_id, i)
         })
     }).collect();
-    Json(json!({ "MediaSources": media_sources })).into_response()
+    Json(json!({ "MediaSources": media_sources, "PlaySessionId": play_session_id })).into_response()
 }
 
 pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap) -> Response {
