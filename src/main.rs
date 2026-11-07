@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 use axum::{
     routing::{get, post, any},
     Router,
@@ -69,7 +70,10 @@ async fn main() {
         .route("/videos/{item_id}/{source_id}/stream.{ext}", get(api::emby_stream_with_source_ext))
 
         .route("/Items/{item_id}/Download", get(api::emby_download))
+        .route("/Items/{item_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream))
+        .route("/Videos/{item_id}/{source_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream))
         
+        .route("/Sessions", get(api::emby_sessions))
         .route("/Sessions/Playing", post(api::emby_playing))
         .route("/Sessions/Playing/Progress", post(api::emby_playing_progress))
         .route("/Sessions/Playing/Stopped", post(api::emby_playing_stopped))
