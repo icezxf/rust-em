@@ -706,9 +706,6 @@ pub async fn emby_playback_info(
 pub struct ProbeScanReq { pub path: String, pub interval_ms: Option<u64> }
 
 
-#[derive(Deserialize)]
-
-pub struct ProbeScanReq { pub path: String, pub interval_ms: Option<u64> }
 
 pub async fn probe_scan(Json(req): Json<ProbeScanReq>) -> impl IntoResponse {
     let root = PathBuf::from(&req.path);
