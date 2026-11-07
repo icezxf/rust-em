@@ -605,6 +605,7 @@ pub async fn emby_stream_with_source_ext(State(pool): State<Arc<Mutex<Connection
 }
 async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: HashMap<String, String>, headers: HeaderMap) -> Response {
     let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("unknown");
+    println!("🎬 [STREAM] item={} ua={}", item_id, ua);
     let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     
     let part_idx = if let Some(p) = query.get("part") { p.parse::<usize>().unwrap_or(0) }
