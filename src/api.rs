@@ -781,7 +781,7 @@ pub async fn emby_playback_info(
     let estimated_size = if run_time_ticks > 0 { (run_time_ticks / 10_000_000) * 8_000_000 / 8 } else { 0 };
     let media_sources: Vec<Value> = parts.iter().enumerate().map(|(i, _path)| {
         let ext = &exts[i];
-        let stream_url = format!("{}/Videos/{}/original.{}?MediaSourceId={}_cd{}&PlaySessionId={}&api_key={}", base_url, item_id, ext, item_id, i, play_session_id, token);
+        let stream_url = format!("/Videos/{}/original.{}?MediaSourceId={}_cd{}let stream_url = format!("{}/Videos/{}/original.{}?MediaSourceId={}_cd{}&PlaySessionId={}&api_key={}", base_url, item_id, ext, item_id, i, play_session_id, token);PlaySessionId={}&api_key={}", item_id, ext, item_id, i, play_session_id, token);
         json!({
             "Id": format!("{}_cd{}", item_id, i), "PlaySessionId": play_session_id.clone(),
             "Path": stream_url.clone(), "DirectStreamUrl": stream_url,
