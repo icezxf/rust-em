@@ -17,11 +17,11 @@ async fn main() {
     db::init_db(&conn);
     let pool = Arc::new(Mutex::new(conn));
 
-    // 跨域配置
+    // 移除 credentials 限制，避免 CORS 通配符冲突导致的 Panic
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
-        .allow_headers(Any)
+        .allow_headers(Any);
 
     // Emby 兼容路由 (全面使用 Axum 0.8 的 {param} 语法)
     let emby_routes = Router::new()
