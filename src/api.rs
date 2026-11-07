@@ -18,7 +18,6 @@ static STRM_CACHE: OnceLock<Mutex<HashMap<String, (String, Instant)>>> = OnceLoc
 const MAX_STRM_SIZE: u64 = 16 * 1024;
 const NORMALIZED_CREDENTIAL_HEADER: &str = "x-lux-internal-emby-credential";
 
-// ======= 日志拦截 =======
 pub async fn logger_middleware(req: Request, next: Next) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
@@ -39,12 +38,10 @@ pub async fn logger_middleware(req: Request, next: Next) -> Response {
     res
 }
 
-// ======= 鉴权中间件 =======
 pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     if req.method() == Method::OPTIONS { return Ok(next.run(req).await); }
     let path = req.uri().path();
     
-    // 1. 放行公开接口和静态资源
     if !path.starts_with("/api") && !path.starts_with("/emby") && !path.starts_with("/Items") && !path.starts_with("/Users") && !path.starts_with("/Videos") && !path.starts_with("/System") && !path.starts_with("/Auth") && !path.starts_with("/auth") && !path.starts_with("/Sessions") && !path.starts_with("/DisplayPreferences") {
         return Ok(next.run(req).await);
     }
@@ -52,27 +49,22 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
         return Ok(next.run(req).await);
     }
     
-    // 2. 万能提取 Token
     let mut token_opt = None;
-    // 从前端 Authorization: Bearer xxx 提取
     if let Some(val) = req.headers().get("Authorization").and_then(|v| v.to_str().ok()) {
         if let Some(t) = val.strip_prefix("Bearer ") {
             token_opt = Some(t.trim().to_string());
         }
     }
-    // 从 Emby 客户端 X-Emby-Token 提取
     if token_opt.is_none() {
         if let Some(val) = req.headers().get("X-Emby-Token").and_then(|v| v.to_str().ok()) {
             token_opt = Some(val.to_string());
         }
     }
-    // 从规范化后的 Header 提取
     if token_opt.is_none() {
         if let Some(val) = req.headers().get(NORMALIZED_CREDENTIAL_HEADER) {
             if let Ok(t) = val.to_str() { token_opt = Some(t.to_string()); }
         }
     }
-    // 从 Query 参数提取 (前端图片请求带 ?token=xxx)
     if token_opt.is_none() {
         if let Some(query) = req.uri().query() {
             for pair in query.split('&') {
@@ -87,7 +79,6 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
         }
     }
 
-    // 3. 验证 Token
     if let Some(token) = token_opt {
         if let Some(tokens) = TOKENS.get() {
             if tokens.lock().unwrap().contains(&token) {
@@ -96,11 +87,9 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
         }
     }
     
-    // 4. 拒绝访问
     Err(StatusCode::UNAUTHORIZED)
 }
 
-// ======= Web API =======
 #[derive(Deserialize)]
 pub struct LoginReq { username: String, password: String }
 
@@ -177,7 +166,6 @@ pub async fn rescan_library(State(pool): State<Arc<Mutex<Connection>>>, AxumPath
     Json(json!({"status": "scanning"}))
 }
 
-// ======= 扫描与解析 =======
 fn get_image_type(stem: &str) -> Option<&'static str> {
     let lower = stem.to_lowercase();
     let base = if let Some((b, suffix)) = lower.rsplit_once('-') { if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) { b } else { &lower } } else { &lower };
@@ -310,7 +298,6 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
     println!("✅ 扫描完成。共处理 {} 个媒体项。", count);
 }
 
-// ======= Web 接口 =======
 #[derive(Deserialize)]
 pub struct ItemQuery { library_id: Option<i64>, lib_type: Option<String> }
 
@@ -469,6 +456,12 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
 }
 
 pub async fn emby_item_detail(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<String>) -> Response {
+    emby_item_detail_inner(pool, item_id).await
+}
+pub async fn emby_item_detail_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>) -> Response {
+    emby_item_detail_inner(pool, item_id).await
+}
+async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -> Response {
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let conn = pool.lock().unwrap();
     let item_opt = conn.query_row("SELECT id, title, type, year, plot, poster_path, file_path, studios, parts FROM items WHERE id = ?1", [id], |row| {
@@ -494,6 +487,15 @@ pub async fn emby_item_detail(State(pool): State<Arc<Mutex<Connection>>>, AxumPa
 }
 
 pub async fn emby_item_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type)): AxumPath<(String, String)>) -> Response {
+    emby_item_image_inner(pool, item_id, image_type).await
+}
+pub async fn emby_item_image_with_index(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type, _index)): AxumPath<(String, String, String)>) -> Response {
+    emby_item_image_inner(pool, item_id, image_type).await
+}
+pub async fn emby_item_image_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id, image_type)): AxumPath<(String, String, String)>) -> Response {
+    emby_item_image_inner(pool, item_id, image_type).await
+}
+async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String) -> Response {
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let path_opt = {
         let conn = pool.lock().unwrap();
@@ -541,6 +543,18 @@ pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, Axum
 }
 
 pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap) -> Response {
+    emby_stream_inner(pool, item_id, query, headers).await
+}
+pub async fn emby_stream_with_ext(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, _ext)): AxumPath<(i64, String)>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap) -> Response {
+    emby_stream_inner(pool, item_id, query, headers).await
+}
+pub async fn emby_stream_with_source(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, _source_id)): AxumPath<(i64, String)>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap) -> Response {
+    emby_stream_inner(pool, item_id, query, headers).await
+}
+pub async fn emby_stream_with_source_ext(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, _source_id, _ext)): AxumPath<(i64, String, String)>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap) -> Response {
+    emby_stream_inner(pool, item_id, query, headers).await
+}
+async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: HashMap<String, String>, headers: HeaderMap) -> Response {
     let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     
