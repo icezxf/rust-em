@@ -760,7 +760,7 @@ pub async fn emby_playback_info(State(pool): State<Arc<Mutex<Connection>>>, Axum
             "RunTimeTicks": run_time_ticks,
             "Size": 0,
             "Bitrate": 0,
-            "MediaStreams": [],
+            "MediaStreams": [{"Type":"Video","Index":0,"Codec":"h264","IsDefault":true,"IsForced":false,"IsExternal":false},{"Type":"Audio","Index":1,"Codec":"aac","Channels":2,"IsDefault":true,"IsForced":false,"IsExternal":false}],
             "Name": "Default",
             "Protocol": "Http",
             "SupportsDirectPlay": true,
