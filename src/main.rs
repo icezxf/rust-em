@@ -96,8 +96,8 @@ async fn main() {
         .route("/api/items", get(api::get_items))
         .route("/api/browse", get(api::browse_dir))
         .route("/api/images/{id}/{type}", get(api::get_image))
-        .route("/api/user/update", post(api::update_user));
-        .route("/api/probe/scan", post(api::probe_scan))
+        .route("/api/user/update", post(api::update_user))
+        .route("/api/probe/scan", post(api::probe_scan));
 
     let app = Router::new()
         .merge(web_routes)
