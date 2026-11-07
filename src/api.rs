@@ -69,6 +69,11 @@ fn normalize_credentials(req: Request, next: Next) -> impl std::future::Future<O
 
 // ======= 鉴权中间件 =======
 pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
+    // 登录接口必须放行，否则永远拿不到 Token
+    if req.uri().path() == "/api/login" {
+        return Ok(next.run(req).await);
+    }
+
     if req.method() == Method::OPTIONS { return Ok(next.run(req).await); }
     let path = req.uri().path();
     if !path.starts_with("/api") && !path.starts_with("/emby") && !path.starts_with("/Items") && !path.starts_with("/Users") && !path.starts_with("/Videos") && !path.starts_with("/System") && !path.starts_with("/Auth") && !path.starts_with("/auth") && !path.starts_with("/Sessions") && !path.starts_with("/DisplayPreferences") {
