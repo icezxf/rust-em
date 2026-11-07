@@ -769,7 +769,7 @@ pub async fn probe_scan(Json(req): Json<ProbeScanReq>) -> impl IntoResponse {
     let root = PathBuf::from(&req.path);
     if !root.is_dir() { return (StatusCode::BAD_REQUEST, Json(json!({"error":"路径不存在"}))).into_response(); }
     let limiter = crate::probe::ProbeLimiter::new(req.interval_ms.unwrap_or(1000));
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(40)).build().unwrap();
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(40)).redirect(reqwest::redirect::Policy::none()).build().unwrap();
     tokio::spawn(async move {
         let mut ok = 0u32; let mut skip = 0u32; let mut fail = 0u32;
         let mut stack = vec![root];
