@@ -6,6 +6,7 @@ use std::time::Duration;
 use tempfile::NamedTempFile;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
+use mediainfo::{MediaInfo, StreamKind, InfoKind};
 
 pub struct ProbeLimiter {
     last: Mutex<Instant>,
@@ -63,60 +64,109 @@ fn infer_container(content_type: &str, url: &str) -> String {
     "mov,mp4,m4a,3gp,3g2,mj2".into()
 }
 
-fn try_parse_mediainfo(path: &Path) -> Option<Value> {
-    let mut mi = mediainfo::MediaInfo::new();
+fn parse_mediainfo(path: &Path) -> Result<Value, String> {
+    let mut mi = MediaInfo::new();
     if !mi.open(path.to_str().unwrap_or_default()) {
-        return None; // 打不开，直接返回 None
+        return Err("mediainfo 无法打开文件".to_string());
     }
 
     let mut streams = Vec::new();
-    
-    let video_count = mi.count_get(mediainfo::StreamKind::Video, None);
+    let mut global_index = 0;
+    let mut default_audio = -1;
+    let mut default_sub = -1;
+
+    // 1. 视频流
+    let video_count = mi.count_get(StreamKind::Video, None);
     for i in 0..video_count {
-        let get_str = |k| mi.get(mediainfo::StreamKind::Video, i, k, mediainfo::InfoKind::Text);
+        let get_str = |k| mi.get(StreamKind::Video, i, k, InfoKind::Text);
         let get_i = |k| get_str(k).parse::<i64>().unwrap_or(0);
+        let codec = get_str("Format").to_lowercase();
+        let profile = get_str("Format_Profile");
+        let width = get_i("Width");
+        let height = get_i("Height");
+        let pixel_format = get_str("ColorSpace");
+        
+        let p = if width >= 2160 { "2160p" } else if width >= 1080 { "1080p" } else { "720p" };
+        let display_title = format!("{} {}", p, codec.to_uppercase());
+
         streams.push(json!({
-            "Type": "VIDEO", "Index": i as i64,
-            "Codec": get_str("Format").to_lowercase(),
-            "Profile": get_str("Format_Profile"),
-            "Level": get_i("Format_Level"),
-            "Width": get_i("Width"), "Height": get_i("Height"),
-            "BitRate": get_str("BitRate"), "BitDepth": get_str("BitDepth"),
-            "AverageFrameRate": get_str("FrameRate"), "RealFrameRate": get_str("FrameRate"),
-            "PixelFormat": get_str("ColorSpace"),
-            "IsDefault": get_i("Default") == 1, "IsForced": get_i("Forced") == 1, "IsExternal": false,
-            "Language": get_str("Language"),
+            "Type": "Video", "Index": global_index, "Codec": codec,
+            "Profile": profile, "Level": get_i("Format_Level"),
+            "Width": width, "Height": height, "PixelFormat": pixel_format,
+            "BitRate": get_i("BitRate"), "AverageFrameRate": get_str("FrameRate"), "RealFrameRate": get_str("FrameRate"),
+            "DisplayTitle": display_title, "Title": display_title,
+            "AspectRatio": "16:9", "IsAnamorphic": false, "IsDefault": true, "IsForced": false, "IsExternal": false, "Language": get_str("Language"),
+            "Protocol": "File", "SupportsExternalStream": false, "AttachmentSize": 0
         }));
+        global_index += 1;
     }
 
-    let audio_count = mi.count_get(mediainfo::StreamKind::Audio, None);
+    // 2. 音频流
+    let audio_count = mi.count_get(StreamKind::Audio, None);
     for i in 0..audio_count {
-        let get_str = |k| mi.get(mediainfo::StreamKind::Audio, i, k, mediainfo::InfoKind::Text);
+        let get_str = |k| mi.get(StreamKind::Audio, i, k, InfoKind::Text);
         let get_i = |k| get_str(k).parse::<i64>().unwrap_or(0);
+        
+        let codec = get_str("Format").to_uppercase();
+        let ch = get_i("Channels");
+        let layout = get_str("ChannelLayout");
+        let lang_code = get_str("Language").to_lowercase();
+        let lang_str = if lang_code.starts_with("zh") || lang_code == "chi" { "Chinese" } else if lang_code.starts_with("en") || lang_code == "eng" { "English" } else { "Unknown" };
+        let lang_iso = if lang_code.starts_with("zh") || lang_code == "chi" { "chi" } else if lang_code.starts_with("en") || lang_code == "eng" { "eng" } else { "und" };
+        let title_name = get_str("Title");
+        
+        let mut display_title = format!("{} {} {}", lang_str, codec, layout);
+        if !title_name.is_empty() { display_title = format!("{} {}", display_title, title_name); }
+
+        let is_default = get_i("Default") == 1 || (default_audio == -1 && i == 0);
+        if is_default && default_audio == -1 { default_audio = global_index; }
+
         streams.push(json!({
-            "Type": "AUDIO", "Index": (video_count + i) as i64,
-            "Codec": get_str("Format").to_lowercase(),
-            "Profile": get_str("Format_Profile"),
-            "Channels": get_i("Channels"), "ChannelLayout": get_str("ChannelLayout"),
-            "BitRate": get_str("BitRate"), "SampleRate": get_str("SamplingRate"), "BitDepth": get_str("BitDepth"),
-            "IsDefault": get_i("Default") == 1, "IsForced": get_i("Forced") == 1, "IsExternal": false,
-            "Language": get_str("Language"),
+            "Type": "Audio", "Index": global_index, "Codec": codec.to_lowercase(),
+            "Channels": ch, "ChannelLayout": layout, "BitRate": get_i("BitRate"), "SampleRate": get_i("SamplingRate"),
+            "DisplayTitle": display_title, "Title": display_title, "DisplayLanguage": lang_str,
+            "Language": lang_iso, "IsDefault": is_default, "IsForced": false, "IsExternal": false,
+            "Protocol": "File", "SupportsExternalStream": false, "AttachmentSize": 0, "IsAnamorphic": false
         }));
+        global_index += 1;
     }
 
-    let text_count = mi.count_get(mediainfo::StreamKind::Text, None);
+    // 3. 字幕流
+    let text_count = mi.count_get(StreamKind::Text, None);
     for i in 0..text_count {
-        let get_str = |k| mi.get(mediainfo::StreamKind::Text, i, k, mediainfo::InfoKind::Text);
+        let get_str = |k| mi.get(StreamKind::Text, i, k, InfoKind::Text);
         let get_i = |k| get_str(k).parse::<i64>().unwrap_or(0);
+        
+        let codec = get_str("Format").to_uppercase();
+        let lang_code = get_str("Language").to_lowercase();
+        let lang_str = if lang_code.starts_with("zh") || lang_code == "chi" { "Chinese" } else if lang_code.starts_with("en") || lang_code == "eng" { "English" } else { "Unknown" };
+        let lang_iso = if lang_code.starts_with("zh") || lang_code == "chi" { "chi" } else if lang_code.starts_with("en") || lang_code == "eng" { "eng" } else { "und" };
+        let title_name = get_str("Title");
+        
+        let display_title = if title_name.is_empty() { format!("{} ({})", lang_str, codec) } else { format!("{} ({}) {}", lang_str, codec, title_name) };
+
+        let is_default = get_i("Default") == 1;
+        if is_default && default_sub == -1 { default_sub = global_index; }
+
         streams.push(json!({
-            "Type": "SUBTITLE", "Index": (video_count + audio_count + i) as i64,
-            "Codec": get_str("Format").to_lowercase(),
-            "IsDefault": get_i("Default") == 1, "IsForced": get_i("Forced") == 1, "IsExternal": false,
-            "Language": get_str("Language"),
+            "Type": "Subtitle", "Index": global_index, "Codec": codec.to_lowercase(),
+            "DisplayTitle": display_title, "Title": display_title, "DisplayLanguage": lang_str,
+            "Language": lang_iso, "IsDefault": is_default, "IsForced": get_i("Forced") == 1, "IsExternal": false, "IsExternalUrl": false,
+            "Protocol": "File", "SupportsExternalStream": false, "AttachmentSize": 0, "IsAnamorphic": false,
+            "DeliveryMethod": "Embed", "SubtitleLocationType": "InternalStream"
         }));
+        global_index += 1;
     }
 
-    Some(json!(streams))
+    if default_sub == -1 && text_count > 0 {
+        default_sub = video_count + audio_count; // 选第一条字幕
+    }
+
+    Ok(json!({
+        "MediaStreams": streams,
+        "DefaultAudioStreamIndex": default_audio,
+        "DefaultSubtitleStreamIndex": default_sub
+    }))
 }
 
 pub async fn probe_strm(
@@ -140,13 +190,11 @@ pub async fn probe_strm(
         .ok_or_else(|| "strm为空".to_string())?.to_string();
     if !url.starts_with("http") { return Err("strm不是http链接".to_string()); }
 
-    // 1. 解析 qmediasync，处理 HTML 返回或 302
     limiter.acquire().await;
     let direct_url = {
         let resp = client.get(&url)
             .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             .send().await.map_err(|e| format!("请求解析器失败: {}", e))?;
-        
         if resp.status().is_redirection() {
             resp.headers().get(reqwest::header::LOCATION)
                 .and_then(|v| v.to_str().ok()).map(|s| s.to_string())
@@ -158,15 +206,10 @@ pub async fn probe_strm(
                 if let Some(end) = rest.find('\"') {
                     rest[..end].replace("&amp;", "&")
                 } else { return Err("HTML中未找到完整的href".into()); }
-            } else if text.starts_with("http") {
-                text.trim().to_string() // 直接返回了 URL 文本
-            } else {
-                return Err("无法解析直链地址".into());
-            }
+            } else if text.starts_with("http") { text.trim().to_string() } else { return Err("无法解析直链地址".into()); }
         }
     };
 
-    // 2. HEAD 拿真实大小和类型
     limiter.acquire().await;
     let (size, content_type) = {
         let resp = client.head(&direct_url)
@@ -179,13 +222,10 @@ pub async fn probe_strm(
         (len, ct)
     };
 
-    if size < 1024 {
-        return Err(format!("获取的文件大小异常: {} 字节", size));
-    }
+    if size < 1024 { return Err(format!("获取的文件大小异常: {} 字节", size)); }
 
     let container = infer_container(&content_type, &direct_url);
     
-    // 3. 尝试 Range 前 4MB 并用 mediainfo 解析
     limiter.acquire().await;
     let header_bytes = {
         let resp = client.get(&direct_url)
@@ -196,62 +236,36 @@ pub async fn probe_strm(
     };
 
     let mut media_streams = Value::Null;
+    let mut default_audio_index = -1;
+    let mut default_sub_index = -1;
+
     if header_bytes.len() > 1024 {
         if let Ok(mut temp_file) = NamedTempFile::new() {
             if temp_file.write_all(&header_bytes).is_ok() {
                 let temp_path = temp_file.path().to_owned();
-                if let Ok(Some(streams)) = tokio::task::spawn_blocking(move || try_parse_mediainfo(&temp_path)).await {
-                    media_streams = streams;
+                if let Ok(Ok(parsed)) = tokio::task::spawn_blocking(move || parse_mediainfo(&temp_path)).await {
+                    if let Some(ms) = parsed.get("MediaStreams") { media_streams = ms.clone(); }
+                    if let Some(da) = parsed.get("DefaultAudioStreamIndex") { default_audio_index = da.as_i64().unwrap_or(-1); }
+                    if let Some(ds) = parsed.get("DefaultSubtitleStreamIndex") { default_sub_index = ds.as_i64().unwrap_or(-1); }
                 }
             }
         }
     }
 
-    // 4. 如果解析失败，降级为生成完美合规的假数据（防止 Yamby 崩溃）
-    if media_streams.is_null() {
-        let is_mp4 = container.contains("mp4");
-        let video_codec = if is_mp4 { "h264" } else { "hevc" };
-        let video_profile = if is_mp4 { "Main" } else { "Main 10" };
-        let est_bitrate = size / 7200;
+    // 如果解析失败，用兜底完美数据
+    if media_streams.is_null() || media_streams.as_array().map_or(true, |a| a.is_empty()) {
         media_streams = json!([
-            {
-                "AverageFrameRate": "2997/100", "BitDepth": "8", "BitRate": est_bitrate.to_string(),
-                "Codec": video_codec, "Height": 1080, "Index": 0, "IsDefault": true,
-                "IsForced": false, "IsExternal": false, "Language": "und", "Level": 41,
-                "PixelFormat": "yuv420p", "Profile": video_profile, "RealFrameRate": "2997/100",
-                "Type": "VIDEO", "Width": 1920
-            },
-            {
-                "AverageFrameRate": "0/0", "BitDepth": "16", "BitRate": "192000",
-                "ChannelLayout": "stereo", "Channels": 2, "Codec": "aac", "Index": 1,
-                "IsDefault": true, "IsForced": false, "IsExternal": false, "Language": "und",
-                "Profile": "LC", "RealFrameRate": "0/0", "SampleRate": "48000", "Type": "AUDIO"
-            }
+            { "Type": "Video", "Index": 0, "Codec": "h264", "Profile": "Main", "Level": 41, "Width": 1920, "Height": 1080, "BitDepth": 8, "DisplayTitle": "1080p H264", "Title": "1080p H264", "AspectRatio": "16:9", "IsAnamorphic": false, "IsDefault": true, "IsForced": false, "IsExternal": false, "Language": "und" },
+            { "Type": "Audio", "Index": 1, "Codec": "aac", "Channels": 2, "ChannelLayout": "stereo", "BitRate": 192000, "SampleRate": 48000, "DisplayTitle": "AAC stereo", "Title": "AAC stereo", "IsDefault": true, "IsForced": false, "IsExternal": false, "Language": "und" }
         ]);
+        default_audio_index = 1;
     }
 
     let media_source = json!({
-        "AddApiKeyToDirectStreamUrl": false,
-        "Bitrate": 0,
-        "Container": container,
-        "Formats": [],
-        "HasMixedProtocols": false,
-        "IsInfiniteStream": false,
-        "IsRemote": true,
-        "MediaStreams": media_streams,
-        "Protocol": "Http",
-        "ReadAtNativeFramerate": false,
-        "RequiredHttpHeaders": {},
-        "RequiresClosing": false,
-        "RequiresLooping": false,
-        "RequiresOpening": false,
-        "RunTimeTicks": 0,
-        "Size": size,
-        "SupportsDirectPlay": true,
-        "SupportsDirectStream": true,
-        "SupportsProbing": true,
-        "SupportsTranscoding": true,
-        "Type": "Default"
+        "AddApiKeyToDirectStreamUrl": false, "Bitrate": 0, "Container": container, "Formats": [], "HasMixedProtocols": false, "IsInfiniteStream": false, "IsRemote": true,
+        "MediaStreams": media_streams, "Protocol": "Http", "ReadAtNativeFramerate": false, "RequiredHttpHeaders": {}, "RequiresClosing": false, "RequiresLooping": false, "RequiresOpening": false, "RunTimeTicks": 0, "Size": size,
+        "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsProbing": true, "SupportsTranscoding": true, "Type": "Default",
+        "DefaultAudioStreamIndex": default_audio_index, "DefaultSubtitleStreamIndex": default_sub_index
     });
 
     let result = json!([{ "Chapters": [], "MediaSourceInfo": media_source }]);
