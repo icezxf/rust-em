@@ -81,6 +81,8 @@ async fn main() {
         .route("/Items/{item_id}/ThumbnailSet", get(api::emby_thumbnail_set))
         .route("/api/danmu/{item_id}", get(api::emby_danmu))
         .route("/Items/{item_id}/ThumbnailSet", get(api::emby_thumbnail_set))
+        .route("/api/danmu/{item_id}", get(api::emby_danmu))
+        .route("/Items/{item_id}/ThumbnailSet", get(api::emby_thumbnail_set))
         .route("/Library/VirtualFolders", get(api::emby_virtual_folders))
         .route("/Items/Counts", get(api::emby_item_counts))
         .route("/Search/Hints", get(api::emby_search_hints))

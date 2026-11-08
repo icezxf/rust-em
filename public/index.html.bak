@@ -605,6 +605,36 @@
             const sizeVal = Number(item.size) || 0;
             if (sizeVal > 0) { sizeEl.innerText = `${(sizeVal / (1024 * 1024 * 1024)).toFixed(2)} GB`; } else { sizeEl.innerText = '未知'; }
 
+            const mediaStreamsBox = document.getElementById('detail-media-streams');
+            if (item.media_streams && item.media_streams.length > 0) {
+                let html = '';
+                item.media_streams.forEach(s => {
+                    if (s.Type === 'VIDEO' || s.Type === 'Video') {
+                        const title = s.DisplayTitle || `${s.Height}p ${s.Codec.toUpperCase()}`;
+                        html += `<div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
+                            <div class="text-xs text-blue-400 font-bold mb-1 uppercase tracking-wider">视频流 VIDEO</div>
+                            <div class="text-sm text-gray-200 mb-0.5 font-medium">${title}</div>
+                            <div class="text-xs text-gray-500">${s.Codec.toUpperCase()} ${s.Profile || ''} ${s.Width}x${s.Height}</div>
+                        </div>`;
+                    } else if (s.Type === 'AUDIO' || s.Type === 'Audio') {
+                        const title = s.DisplayTitle || `${s.Codec.toUpperCase()} ${s.Channels}ch`;
+                        html += `<div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
+                            <div class="text-xs text-green-400 font-bold mb-1 uppercase tracking-wider">音频流 AUDIO</div>
+                            <div class="text-sm text-gray-200 mb-0.5 font-medium">${title}</div>
+                            <div class="text-xs text-gray-500">${s.Codec.toUpperCase()} ${s.Language || 'und'}</div>
+                        </div>`;
+                    } else if (s.Type === 'SUBTITLE' || s.Type === 'Subtitle') {
+                        html += `<div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
+                            <div class="text-xs text-yellow-400 font-bold mb-1 uppercase tracking-wider">字幕流 SUBTITLE</div>
+                            <div class="text-sm text-gray-200 mb-0.5 font-medium">${s.Codec.toUpperCase()}</div>
+                            <div class="text-xs text-gray-500">${s.Language || 'und'}</div>
+                        </div>`;
+                    }
+                });
+                mediaStreamsBox.innerHTML = html || `<div class="col-span-full text-sm text-gray-500 py-2">未找到有效流信息</div>`;
+            } else {
+                mediaStreamsBox.innerHTML = `<div class="col-span-full text-sm text-gray-500 py-2">暂无探测信息，请执行媒体探测。</div>`;
+            }
             document.getElementById('detail-strm-path').innerText = item.file_path || '暂无路径';
             let strmContent = item.strm_content || '暂无内容';
             try { strmContent = decodeURIComponent(strmContent); } catch(e) {}

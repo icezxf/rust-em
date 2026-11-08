@@ -1189,3 +1189,11 @@ pub async fn emby_thumbnail_set(AxumPath(item_id): AxumPath<i64>) -> impl IntoRe
 pub async fn emby_danmu() -> impl IntoResponse {
     Json(json!([]))
 }
+
+pub async fn emby_thumbnail_set(AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
+    Json(json!({ "Id": item_id.to_string(), "ThumbnailSet": {} }))
+}
+
+pub async fn emby_danmu() -> impl IntoResponse {
+    Json(json!([]))
+}
