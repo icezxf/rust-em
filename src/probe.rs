@@ -1,11 +1,14 @@
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
-/// 全局节流器：串行 + 固定间隔，默认 1000ms，115 风控安全
+use mediainfo::{MediaInfo, StreamKind, InfoKind};
+
 pub struct ProbeLimiter {
     last: Mutex<Instant>,
     interval: Duration,
@@ -30,7 +33,6 @@ pub fn get_mediainfo_json_path(strm_path: &Path) -> PathBuf {
     strm_path.parent().unwrap_or(Path::new(".")).join(format!("{}-mediainfo.json", stem))
 }
 
-/// 读 JSON，返回第一项 MediaSourceInfo（兼容其他程序的数组格式和旧版单对象格式）
 pub fn load_cached_source(json_path: &Path) -> Option<Value> {
     let content = std::fs::read_to_string(json_path).ok()?;
     let v: Value = serde_json::from_str(&content).ok()?;
@@ -63,13 +65,85 @@ fn infer_container(content_type: &str, url: &str) -> String {
     "mov,mp4,m4a,3gp,3g2,mj2".into()
 }
 
+fn parse_mediainfo_to_streams(path: &Path, runtime_ticks_fallback: i64, size: u64) -> Result<Value, String> {
+    let mut mi = MediaInfo::new();
+    if !mi.open(path.to_str().unwrap_or_default()) {
+        return Err("mediainfo 无法打开文件".to_string());
+    }
+
+    let mut streams = Vec::new();
+    let video_count = mi.count_get(StreamKind::Video);
+    for i in 0..video_count {
+        let get_str = |k| mi.get(StreamKind::Video, i, k, InfoKind::Text);
+        let get_int = |k| mi.get_i(StreamKind::Video, i, k, InfoKind::Integer);
+        let get_float = |k| mi.get_f(StreamKind::Video, i, k, InfoKind::Float);
+        streams.push(json!({
+            "Type": "VIDEO",
+            "Index": i as i64,
+            "Codec": get_str("Format").to_lowercase(),
+            "Profile": get_str("Format_Profile"),
+            "Level": get_int("Format_Level"),
+            "Width": get_int("Width"),
+            "Height": get_int("Height"),
+            "BitRate": get_str("BitRate"),
+            "BitDepth": get_str("BitDepth"),
+            "AverageFrameRate": get_str("FrameRate"),
+            "RealFrameRate": get_str("FrameRate"),
+            "PixelFormat": get_str("ColorSpace"),
+            "IsDefault": get_int("Default") == 1,
+            "IsForced": get_int("Forced") == 1,
+            "IsExternal": false,
+            "Language": get_str("Language"),
+            "DisplayTitle": format!("{}p {}", get_int("Height"), get_str("Format")),
+        }));
+    }
+
+    let audio_count = mi.count_get(StreamKind::Audio);
+    for i in 0..audio_count {
+        let get_str = |k| mi.get(StreamKind::Audio, i, k, InfoKind::Text);
+        let get_int = |k| mi.get_i(StreamKind::Audio, i, k, InfoKind::Integer);
+        streams.push(json!({
+            "Type": "AUDIO",
+            "Index": (video_count + i) as i64,
+            "Codec": get_str("Format").to_lowercase(),
+            "Profile": get_str("Format_Profile"),
+            "Channels": get_int("Channels"),
+            "ChannelLayout": get_str("ChannelLayout"),
+            "BitRate": get_str("BitRate"),
+            "SampleRate": get_str("SamplingRate"),
+            "BitDepth": get_str("BitDepth"),
+            "IsDefault": get_int("Default") == 1,
+            "IsForced": get_int("Forced") == 1,
+            "IsExternal": false,
+            "Language": get_str("Language"),
+            "DisplayTitle": format!("{} {} {}", get_str("Format"), get_int("Channels"), get_str("ChannelLayout")),
+        }));
+    }
+
+    let subtitle_count = mi.count_get(StreamKind::Text);
+    for i in 0..subtitle_count {
+        let get_str = |k| mi.get(StreamKind::Text, i, k, InfoKind::Text);
+        let get_int = |k| mi.get_i(StreamKind::Text, i, k, InfoKind::Integer);
+        streams.push(json!({
+            "Type": "SUBTITLE",
+            "Index": (video_count + audio_count + i) as i64,
+            "Codec": get_str("Format").to_lowercase(),
+            "IsDefault": get_int("Default") == 1,
+            "IsForced": get_int("Forced") == 1,
+            "IsExternal": false,
+            "Language": get_str("Language"),
+        }));
+    }
+
+    Ok(json!(streams))
+}
+
 pub async fn probe_strm(
     strm_path: &Path,
     limiter: Arc<ProbeLimiter>,
     client: &reqwest::Client,
 ) -> Result<Value, String> {
     let json_path = get_mediainfo_json_path(strm_path);
-    // 缓存命中且含 MediaStreams 才跳过
     if json_path.exists() {
         if let Some(src) = load_cached_source(&json_path) {
             if src.get("MediaStreams").and_then(|m| m.as_array()).map(|a| !a.is_empty()).unwrap_or(false) {
@@ -85,7 +159,6 @@ pub async fn probe_strm(
         .ok_or_else(|| "strm为空".to_string())?.to_string();
     if !url.starts_with("http") { return Err("strm不是http链接".to_string()); }
 
-    // 解析直链（client 已禁用 redirect，手动取 Location）
     limiter.acquire().await;
     let direct_url = {
         let resp = client.get(&url)
@@ -98,7 +171,6 @@ pub async fn probe_strm(
         } else { url.clone() }
     };
 
-    // HEAD 拿 size / content-type
     limiter.acquire().await;
     let (size, content_type) = {
         let resp = client.head(&direct_url)
@@ -111,26 +183,33 @@ pub async fn probe_strm(
         (len, ct)
     };
 
-    // Range 读头部 2MB（留给 mediainfo 解析）
     limiter.acquire().await;
-    let _header_bytes = {
+    let header_bytes = {
         let resp = client.get(&direct_url)
-            .header(reqwest::header::RANGE, "bytes=0-2097151")
+            .header(reqwest::header::RANGE, "bytes=0-4194303")
             .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             .send().await.map_err(|e| format!("Range失败: {}", e))?;
         resp.bytes().await.map_err(|e| format!("读body失败: {}", e))?.to_vec()
     };
 
     let container = infer_container(&content_type, &direct_url);
-    // Emby 原生 MediaSourceInfo 结构，Path/DirectStreamUrl 留空由 PlaybackInfo 动态补
+    let mut temp_file = tempfile::NamedTempFile::new().map_err(|e| format!("创建临时文件失败: {}", e))?;
+    temp_file.write_all(&header_bytes).await.map_err(|e| format!("写入临时文件失败: {}", e))?;
+    let temp_path = temp_file.path().to_owned();
+
+    let streams = tokio::task::spawn_blocking(move || parse_mediainfo_to_streams(&temp_path, 0, size))
+        .await
+        .map_err(|e| format!("解析任务panic: {}", e))??;
+
     let media_source = json!({
+        "AddApiKeyToDirectStreamUrl": false,
         "Bitrate": 0,
         "Container": container,
         "Formats": [],
         "HasMixedProtocols": false,
         "IsInfiniteStream": false,
         "IsRemote": true,
-        "MediaStreams": [],
+        "MediaStreams": streams,
         "Protocol": "Http",
         "ReadAtNativeFramerate": false,
         "RequiredHttpHeaders": {},
@@ -146,8 +225,8 @@ pub async fn probe_strm(
         "Type": "Default"
     });
 
-    let arr = json!([{ "Chapters": [], "MediaSourceInfo": media_source }]);
-    if let Ok(s) = serde_json::to_string_pretty(&arr) {
+    let result = json!([{ "Chapters": [], "MediaSourceInfo": media_source }]);
+    if let Ok(s) = serde_json::to_string_pretty(&result) {
         let _ = tokio::fs::write(&json_path, s).await;
     }
     Ok(media_source)
