@@ -605,14 +605,14 @@
                         const title = s.DisplayTitle || `${s.Height}p ${s.Codec.toUpperCase()}`;
                         html += `<div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
                             <div class="text-xs text-blue-400 font-bold mb-1 uppercase tracking-wider">视频流 VIDEO</div>
-                            <div class="text-sm text-gray-200 mb-0.5 font-medium">${title}</div>
-                            <div class="text-xs text-gray-500">${s.Codec.toUpperCase()} ${s.Profile || ''} ${s.Width}x${s.Height}</div>
+                            <div class="text-sm text-gray-200 mb-0.5 font-medium">${title} ${s.BitDepth == 10 ? '<span class="text-[10px] bg-yellow-500/20 text-yellow-300 px-1 rounded border border-yellow-500/30 ml-1">10bit</span>' : ''}</div>
+                            <div class="text-xs text-gray-500">${s.Codec.toUpperCase()} ${s.Profile || ''} ${s.Width}x${s.Height} ${s.BitDepth ? s.BitDepth + 'bit' : ''} ${s.VideoRange <div class="text-xs text-gray-500">${s.Codec.toUpperCase()} ${s.Profile || ''} ${s.Width}x${s.Height}</div><div class="text-xs text-gray-500">${s.Codec.toUpperCase()} ${s.Profile || ''} ${s.Width}x${s.Height}</div> s.VideoRange !== 'SDR' ? s.VideoRange : ''}</div>
                         </div>`;
                     } else if (s.Type === 'AUDIO' || s.Type === 'Audio') {
                         const title = s.DisplayTitle || `${s.Codec.toUpperCase()} ${s.Channels}ch`;
                         html += `<div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
                             <div class="text-xs text-green-400 font-bold mb-1 uppercase tracking-wider">音频流 AUDIO</div>
-                            <div class="text-sm text-gray-200 mb-0.5 font-medium">${title}</div>
+                            <div class="text-sm text-gray-200 mb-0.5 font-medium">${title} ${s.BitDepth == 10 ? '<span class="text-[10px] bg-yellow-500/20 text-yellow-300 px-1 rounded border border-yellow-500/30 ml-1">10bit</span>' : ''}</div>
                             <div class="text-xs text-gray-500">${s.Codec.toUpperCase()} ${s.Language || 'und'}</div>
                         </div>`;
                     } else if (s.Type === 'SUBTITLE' || s.Type === 'Subtitle') {
