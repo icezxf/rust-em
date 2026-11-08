@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -65,73 +64,68 @@ fn infer_container(content_type: &str, url: &str) -> String {
     "mov,mp4,m4a,3gp,3g2,mj2".into()
 }
 
-fn parse_mediainfo_to_streams(path: &Path, runtime_ticks_fallback: i64, size: u64) -> Result<Value, String> {
+fn parse_mediainfo(path: &Path) -> Result<Value, String> {
     let mut mi = MediaInfo::new();
     if !mi.open(path.to_str().unwrap_or_default()) {
         return Err("mediainfo 无法打开文件".to_string());
     }
 
     let mut streams = Vec::new();
+    
+    // 视频流
     let video_count = mi.count_get(StreamKind::Video);
     for i in 0..video_count {
-        let get_str = |k| mi.get(StreamKind::Video, i, k, InfoKind::Text);
-        let get_int = |k| mi.get_i(StreamKind::Video, i, k, InfoKind::Integer);
-        let get_float = |k| mi.get_f(StreamKind::Video, i, k, InfoKind::Float);
         streams.push(json!({
             "Type": "VIDEO",
             "Index": i as i64,
-            "Codec": get_str("Format").to_lowercase(),
-            "Profile": get_str("Format_Profile"),
-            "Level": get_int("Format_Level"),
-            "Width": get_int("Width"),
-            "Height": get_int("Height"),
-            "BitRate": get_str("BitRate"),
-            "BitDepth": get_str("BitDepth"),
-            "AverageFrameRate": get_str("FrameRate"),
-            "RealFrameRate": get_str("FrameRate"),
-            "PixelFormat": get_str("ColorSpace"),
-            "IsDefault": get_int("Default") == 1,
-            "IsForced": get_int("Forced") == 1,
+            "Codec": mi.get(StreamKind::Video, i, "Format", InfoKind::Text).to_lowercase(),
+            "Profile": mi.get(StreamKind::Video, i, "Format_Profile", InfoKind::Text),
+            "Level": mi.get(StreamKind::Video, i, "Format_Level", InfoKind::Integer),
+            "Width": mi.get(StreamKind::Video, i, "Width", InfoKind::Integer),
+            "Height": mi.get(StreamKind::Video, i, "Height", InfoKind::Integer),
+            "BitRate": mi.get(StreamKind::Video, i, "BitRate", InfoKind::Text),
+            "BitDepth": mi.get(StreamKind::Video, i, "BitDepth", InfoKind::Text),
+            "AverageFrameRate": mi.get(StreamKind::Video, i, "FrameRate", InfoKind::Text),
+            "RealFrameRate": mi.get(StreamKind::Video, i, "FrameRate", InfoKind::Text),
+            "PixelFormat": mi.get(StreamKind::Video, i, "ColorSpace", InfoKind::Text),
+            "IsDefault": mi.get(StreamKind::Video, i, "Default", InfoKind::Integer) == 1,
+            "IsForced": mi.get(StreamKind::Video, i, "Forced", InfoKind::Integer) == 1,
             "IsExternal": false,
-            "Language": get_str("Language"),
-            "DisplayTitle": format!("{}p {}", get_int("Height"), get_str("Format")),
+            "Language": mi.get(StreamKind::Video, i, "Language", InfoKind::Text),
         }));
     }
 
+    // 音频流
     let audio_count = mi.count_get(StreamKind::Audio);
     for i in 0..audio_count {
-        let get_str = |k| mi.get(StreamKind::Audio, i, k, InfoKind::Text);
-        let get_int = |k| mi.get_i(StreamKind::Audio, i, k, InfoKind::Integer);
         streams.push(json!({
             "Type": "AUDIO",
             "Index": (video_count + i) as i64,
-            "Codec": get_str("Format").to_lowercase(),
-            "Profile": get_str("Format_Profile"),
-            "Channels": get_int("Channels"),
-            "ChannelLayout": get_str("ChannelLayout"),
-            "BitRate": get_str("BitRate"),
-            "SampleRate": get_str("SamplingRate"),
-            "BitDepth": get_str("BitDepth"),
-            "IsDefault": get_int("Default") == 1,
-            "IsForced": get_int("Forced") == 1,
+            "Codec": mi.get(StreamKind::Audio, i, "Format", InfoKind::Text).to_lowercase(),
+            "Profile": mi.get(StreamKind::Audio, i, "Format_Profile", InfoKind::Text),
+            "Channels": mi.get(StreamKind::Audio, i, "Channels", InfoKind::Integer),
+            "ChannelLayout": mi.get(StreamKind::Audio, i, "ChannelLayout", InfoKind::Text),
+            "BitRate": mi.get(StreamKind::Audio, i, "BitRate", InfoKind::Text),
+            "SampleRate": mi.get(StreamKind::Audio, i, "SamplingRate", InfoKind::Text),
+            "BitDepth": mi.get(StreamKind::Audio, i, "BitDepth", InfoKind::Text),
+            "IsDefault": mi.get(StreamKind::Audio, i, "Default", InfoKind::Integer) == 1,
+            "IsForced": mi.get(StreamKind::Audio, i, "Forced", InfoKind::Integer) == 1,
             "IsExternal": false,
-            "Language": get_str("Language"),
-            "DisplayTitle": format!("{} {} {}", get_str("Format"), get_int("Channels"), get_str("ChannelLayout")),
+            "Language": mi.get(StreamKind::Audio, i, "Language", InfoKind::Text),
         }));
     }
 
-    let subtitle_count = mi.count_get(StreamKind::Text);
-    for i in 0..subtitle_count {
-        let get_str = |k| mi.get(StreamKind::Text, i, k, InfoKind::Text);
-        let get_int = |k| mi.get_i(StreamKind::Text, i, k, InfoKind::Integer);
+    // 字幕流
+    let text_count = mi.count_get(StreamKind::Text);
+    for i in 0..text_count {
         streams.push(json!({
             "Type": "SUBTITLE",
             "Index": (video_count + audio_count + i) as i64,
-            "Codec": get_str("Format").to_lowercase(),
-            "IsDefault": get_int("Default") == 1,
-            "IsForced": get_int("Forced") == 1,
+            "Codec": mi.get(StreamKind::Text, i, "Format", InfoKind::Text).to_lowercase(),
+            "IsDefault": mi.get(StreamKind::Text, i, "Default", InfoKind::Integer) == 1,
+            "IsForced": mi.get(StreamKind::Text, i, "Forced", InfoKind::Integer) == 1,
             "IsExternal": false,
-            "Language": get_str("Language"),
+            "Language": mi.get(StreamKind::Text, i, "Language", InfoKind::Text),
         }));
     }
 
@@ -197,7 +191,7 @@ pub async fn probe_strm(
     temp_file.write_all(&header_bytes).await.map_err(|e| format!("写入临时文件失败: {}", e))?;
     let temp_path = temp_file.path().to_owned();
 
-    let streams = tokio::task::spawn_blocking(move || parse_mediainfo_to_streams(&temp_path, 0, size))
+    let streams = tokio::task::spawn_blocking(move || parse_mediainfo(&temp_path))
         .await
         .map_err(|e| format!("解析任务panic: {}", e))??;
 
