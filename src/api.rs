@@ -324,7 +324,7 @@ pub struct ItemQuery { library_id: Option<i64>, lib_type: Option<String> }
 
 pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<ItemQuery>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut sql = "SELECT id, title, num, type, year, plot, poster_path, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, size, series, label, set_name, file_path, strm_content, stills, parts , media_streams , media_streams FROM items WHERE 1=1".to_string();
+    let mut sql = "SELECT id, title, num, type, year, plot, poster_path, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, size, series, label, set_name, file_path, strm_content, stills, parts, media_streams FROM items WHERE 1=1".to_string();
     if let Some(lid) = query.library_id { sql.push_str(&format!(" AND library_id = {}", lid)); }
     if let Some(lt) = query.lib_type { sql.push_str(&format!(" AND type = '{}'", lt)); }
     sql.push_str(" ORDER BY title ASC");
@@ -336,6 +336,8 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
         let stills: Value = serde_json::from_str(&stills_json).unwrap_or(json!([]));
         let parts_json: String = row.get(26).unwrap_or_else(|_| "[]".to_string());
         let parts: Value = serde_json::from_str(&parts_json).unwrap_or(json!([]));
+        let media_streams_json: String = row.get(27).unwrap_or_else(|_| "[]".to_string());
+        let media_streams: Value = serde_json::from_str(&media_streams_json).unwrap_or(json!([]));
         Ok(json!({
             "id": row.get::<_, i64>(0).unwrap_or_default(), "title": row.get::<_, String>(1).unwrap_or_default(),
             "num": row.get::<_, String>(2).unwrap_or_default(), "type": row.get::<_, String>(3).unwrap_or_default(),
@@ -349,7 +351,7 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
             "imdb_id": row.get::<_, String>(18).unwrap_or_default(), "size": row.get::<_, i64>(19).unwrap_or(0),
             "series": row.get::<_, String>(20).unwrap_or_default(), "label": row.get::<_, String>(21).unwrap_or_default(),
             "set_name": row.get::<_, String>(22).unwrap_or_default(), "file_path": row.get::<_, String>(23).unwrap_or_default(),
-            "strm_content": row.get::<_, String>(24).unwrap_or_default(), "stills": stills, "parts": parts, "media_streams": serde_json::from_str::<Value>("parts": partsrow.get::<_, String>(27).unwrap_or_else(|_| "[]".to_string())).unwrap_or(json!([])), "media_streams": serde_json::from_str::<Value>(&row.get::<_, String>(27).unwrap_or_else(|_| "[]".to_string())).unwrap_or(json!([]))
+            "strm_content": row.get::<_, String>(24).unwrap_or_default(), "stills": stills, "parts": parts, "media_streams": media_streams
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "items": items })).into_response()
