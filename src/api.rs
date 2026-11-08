@@ -907,6 +907,7 @@ pub async fn emby_playback_info(
 
     let mut parsed_streams: Value = serde_json::from_str(&media_streams_json).unwrap_or(json!([]));
     sanitize_media_streams(&mut parsed_streams);
+    sanitize_media_streams(&mut parsed_streams);
     let final_streams = if parsed_streams.as_array().map_or(true, |a| a.is_empty()) {
         json!([
             {"Type": "Video", "Index": 0, "Codec": "h264", "DisplayTitle": "1080p H264", "Width": 1920, "Height": 1080, "BitRate": 8000000, "BitDepth": 8, "RealFrameRate": 24.0, "AverageFrameRate": 24.0, "Profile": "high", "Level": 41, "IsDefault": true, "IsForced": false, "IsExternal": false},
@@ -989,91 +990,6 @@ pub async fn emby_danmu() -> impl IntoResponse {
 
 
 
-fn sanitize_media_streams(streams: &mut Value) {
-    if let Some(arr) = streams.as_array_mut() {
-        for stream in arr {
-            if let Some(obj) = stream.as_object_mut() {
-                // 1. 统一 Type 大小写
-                if let Some(Value::String(t)) = obj.get_mut("Type") {
-                    *t = if t.eq_ignore_ascii_case("video") { "Video".to_string() }
-                         else if t.eq_ignore_ascii_case("audio") { "Audio".to_string() }
-                         else if t.eq_ignore_ascii_case("subtitle") { "Subtitle".to_string() }
-                         else { t.clone() };
-                }
-
-                // 2. 强制补齐 Yamby 强依赖的布尔字段
-                for k in &["IsDefault", "IsForced", "IsExternal"] {
-                    let b = match obj.get(*k) {
-                        Some(Value::Bool(b)) => *b,
-                        Some(Value::String(s)) => s.to_lowercase() == "true",
-                        _ => false,
-                    };
-                    obj.insert(k.to_string(), json!(b));
-                }
-
-                // 3. 清理数字字段 (防止带有分数的字符串导致崩溃)
-                for k in &["BitRate", "BitDepth", "Width", "Height", "Level", "Channels", "SampleRate", "Index"] {
-                    if let Some(v) = obj.get_mut(*k) {
-                        let i = match v {
-                            Value::String(s) => s.trim().parse::<i64>().unwrap_or(0),
-                            Value::Number(n) => n.as_i64().unwrap_or(0),
-                            _ => 0,
-                        };
-                        *v = json!(i);
-                    }
-                }
-
-                // 4. 精准补齐视频的 BitDepth 和 HDR
-                let typ = obj.get("Type").and_then(|v| v.as_str()).unwrap_or("");
-                if typ == "Video" {
-                    // 如果没 BitDepth 字段，默认补 8
-                    if !obj.contains_key("BitDepth") {
-                        // 检查是否能从 PixelFormat 猜出 10bit
-                        let is_10bit = obj.get("PixelFormat").and_then(|v| v.as_str()).map_or(false, |s| s.contains("10"));
-                        obj.insert("BitDepth".into(), json!(if is_10bit { 10 } else { 8 }));
-                    }
-                    
-                    let depth = obj.get("BitDepth").and_then(|v| v.as_i64()).unwrap_or(8);
-                    let width = obj.get("Width").and_then(|v| v.as_i64()).unwrap_or(1920);
-                    let codec = obj.get("Codec").and_then(|v| v.as_str()).unwrap_or("h264");
-                    let p = if width >= 2160 { "2160p" } else if width >= 1080 { "1080p" } else { "720p" };
-                    
-                    // 补全 DisplayTitle 并带上 8bit
-                    let mut title = format!("{} {} {}bit", p, codec.to_uppercase(), depth);
-                    if let Some(vr) = obj.get("VideoRange").and_then(|v| v.as_str()) {
-                        if vr != "SDR" && !vr.is_empty() { title = format!("{} {}", title, vr); }
-                    }
-                    obj.insert("DisplayTitle".into(), json!(title));
-                    obj.insert("Title".into(), json!(title));
-                    
-                    // 补齐 Lux 里有的其它边缘字段
-                    if !obj.contains_key("AspectRatio") { obj.insert("AspectRatio".into(), json!("16:9")); }
-                    if !obj.contains_key("IsAnamorphic") { obj.insert("IsAnamorphic".into(), json!(false)); }
-                    if !obj.contains_key("Protocol") { obj.insert("Protocol".into(), json!("File")); }
-
-                } else if typ == "Audio" {
-                    if !obj.contains_key("DisplayTitle") {
-                        let codec = obj.get("Codec").and_then(|v| v.as_str()).unwrap_or("aac");
-                        let ch = obj.get("Channels").and_then(|v| v.as_i64()).unwrap_or(2);
-                        let layout = obj.get("ChannelLayout").and_then(|v| v.as_str()).unwrap_or("stereo");
-                        let title = format!("{} {} {}ch", codec.to_uppercase(), layout, ch);
-                        obj.insert("DisplayTitle".into(), json!(title));
-                        obj.insert("Title".into(), json!(title));
-                    }
-                    if !obj.contains_key("IsAnamorphic") { obj.insert("IsAnamorphic".into(), json!(false)); }
-                    if !obj.contains_key("Protocol") { obj.insert("Protocol".into(), json!("File")); }
-
-                } else if typ == "Subtitle" {
-                    if !obj.contains_key("IsExternalUrl") { obj.insert("IsExternalUrl".into(), json!(false)); }
-                    if !obj.contains_key("DeliveryMethod") { obj.insert("DeliveryMethod".into(), json!("Embed")); }
-                    if !obj.contains_key("SubtitleLocationType") { obj.insert("SubtitleLocationType".into(), json!("InternalStream")); }
-                    if !obj.contains_key("IsAnamorphic") { obj.insert("IsAnamorphic".into(), json!(false)); }
-                    if !obj.contains_key("Protocol") { obj.insert("Protocol".into(), json!("File")); }
-                }
-            }
-        }
-    }
-}
 
 async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
@@ -1268,4 +1184,59 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
         }
     ).ok();
     if let Some(item) = item_opt { Json(item).into_response() } else { StatusCode::NOT_FOUND.into_response() }
+}
+
+fn sanitize_media_streams(streams: &mut Value) {
+    if let Some(arr) = streams.as_array_mut() {
+        for stream in arr {
+            if let Some(obj) = stream.as_object_mut() {
+                // 1. 清理帧率 (强转 Float)
+                for k in &["AverageFrameRate", "RealFrameRate"] {
+                    if let Some(v) = obj.get_mut(*k) {
+                        let f = match v {
+                            Value::String(s) => {
+                                let s = s.trim();
+                                if s.is_empty() || s == "0/0" { 0.0 }
+                                else if let Some((num, den)) = s.split_once('/') {
+                                    let n = num.parse::<f64>().unwrap_or(0.0);
+                                    let d = den.parse::<f64>().unwrap_or(1.0);
+                                    if d > 0.0 { n / d } else { 0.0 }
+                                } else { s.parse::<f64>().unwrap_or(0.0) }
+                            }
+                            Value::Number(n) => n.as_f64().unwrap_or(0.0),
+                            _ => 0.0,
+                        };
+                        *v = json!(f);
+                    }
+                }
+                // 2. 清理所有整数 (强转 Int)
+                for k in &["BitRate", "BitDepth", "Width", "Height", "Level", "Channels", "SampleRate", "Index"] {
+                    if let Some(v) = obj.get_mut(*k) {
+                        let i = match v {
+                            Value::String(s) => s.trim().parse::<i64>().unwrap_or(0),
+                            Value::Number(n) => n.as_i64().unwrap_or(0),
+                            _ => 0,
+                        };
+                        *v = json!(i);
+                    }
+                }
+                // 3. 统一 Type
+                if let Some(Value::String(t)) = obj.get_mut("Type") {
+                    *t = if t.eq_ignore_ascii_case("video") { "Video".to_string() }
+                         else if t.eq_ignore_ascii_case("audio") { "Audio".to_string() }
+                         else if t.eq_ignore_ascii_case("subtitle") { "Subtitle".to_string() }
+                         else { t.clone() };
+                }
+                // 4. 布尔字段强转
+                for k in &["IsDefault", "IsForced", "IsExternal"] {
+                    let b = match obj.get(*k) {
+                        Some(Value::Bool(b)) => *b,
+                        Some(Value::String(s)) => s.to_lowercase() == "true",
+                        _ => false,
+                    };
+                    obj.insert(k.to_string(), json!(b));
+                }
+            }
+        }
+    }
 }

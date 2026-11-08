@@ -493,13 +493,14 @@ pub async fn emby_item_detail_with_user(State(pool): State<Arc<Mutex<Connection>
 }
 
 pub async fn emby_item_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type)): AxumPath<(String, String)>) -> Response {
-    emby_item_image_inner(pool, item_id, image_type).await
+    emby_item_image_inner(pool, item_id, image_type, 0).await
 }
-pub async fn emby_item_image_with_index(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type, _index)): AxumPath<(String, String, String)>) -> Response {
-    emby_item_image_inner(pool, item_id, image_type).await
+pub async fn emby_item_image_with_index(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type, index)): AxumPath<(String, String, String)>) -> Response {
+    let idx = index.parse::<usize>().unwrap_or(0);
+    emby_item_image_inner(pool, item_id, image_type, idx).await
 }
 pub async fn emby_item_image_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id, image_type)): AxumPath<(String, String, String)>) -> Response {
-    emby_item_image_inner(pool, item_id, image_type).await
+    emby_item_image_inner(pool, item_id, image_type, 0).await
 }
 
 
@@ -1159,7 +1160,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let sort_title: String = row.get(29).unwrap_or_default();
             let country: String = row.get(30).unwrap_or_default();
             let language: String = row.get(31).unwrap_or_default();
-            let writers_str: String = row.get(32).unwrap_or_default();
+            let _writers_str: String = row.get(32).unwrap_or_default();
             let media_streams_json: String = row.get(34).unwrap_or_default();
             let date_created: i64 = row.get(35).unwrap_or(0);
             let aspect_ratio: f64 = row.get(36).unwrap_or(0.0);

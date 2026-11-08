@@ -93,7 +93,7 @@ fn parse_mediainfo(path: &Path) -> Result<Value, String> {
             "Type": "Video", "Index": global_index, "Codec": codec,
             "Profile": profile, "Level": get_i("Format_Level"),
             "Width": width, "Height": height, "PixelFormat": pixel_format,
-            "BitRate": get_i("BitRate"), "AverageFrameRate": get_str("FrameRate"), "RealFrameRate": get_str("FrameRate"),
+            "BitRate": get_i("BitRate"), "AverageFrameRate": { let s = get_str("FrameRate"); if let Some((n, d)) = s.split_once(x27/x27) { n.parse::<f64>().unwrap_or(0.0) / d.parse::<f64>().unwrap_or(1.0) } else { s.parse::<f64>().unwrap_or(0.0) } }, "RealFrameRate": { let s = get_str("FrameRate"); if let Some((n, d)) = s.split_once(x27/x27) { n.parse::<f64>().unwrap_or(0.0) / d.parse::<f64>().unwrap_or(1.0) } else { s.parse::<f64>().unwrap_or(0.0) } },
             "DisplayTitle": display_title, "Title": display_title,
             "AspectRatio": "16:9", "IsAnamorphic": false, "IsDefault": true, "IsForced": false, "IsExternal": false, "Language": get_str("Language"),
             "Protocol": "File", "SupportsExternalStream": false, "AttachmentSize": 0

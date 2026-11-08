@@ -72,8 +72,8 @@ fn parse_mediainfo(path: &Path) -> Result<Value, String> {
 
     let mut streams = Vec::new();
     let mut global_index = 0;
-    let mut default_audio = -1;
-    let mut default_sub = -1;
+    let mut default_audio: i64 = -1;
+    let mut default_sub: i64 = -1;
 
     // 1. 视频流
     let video_count = mi.count_get(StreamKind::Video, None);
@@ -119,7 +119,7 @@ fn parse_mediainfo(path: &Path) -> Result<Value, String> {
         if !title_name.is_empty() { display_title = format!("{} {}", display_title, title_name); }
 
         let is_default = get_i("Default") == 1 || (default_audio == -1 && i == 0);
-        if is_default && default_audio == -1 { default_audio = global_index; }
+        if is_default && default_audio == -1 { default_audio = global_index as i64; }
 
         streams.push(json!({
             "Type": "Audio", "Index": global_index, "Codec": codec.to_lowercase(),
@@ -146,7 +146,7 @@ fn parse_mediainfo(path: &Path) -> Result<Value, String> {
         let display_title = if title_name.is_empty() { format!("{} ({})", lang_str, codec) } else { format!("{} ({}) {}", lang_str, codec, title_name) };
 
         let is_default = get_i("Default") == 1;
-        if is_default && default_sub == -1 { default_sub = global_index; }
+        if is_default && default_sub == -1 { default_sub = global_index as i64; }
 
         streams.push(json!({
             "Type": "Subtitle", "Index": global_index, "Codec": codec.to_lowercase(),
@@ -159,7 +159,7 @@ fn parse_mediainfo(path: &Path) -> Result<Value, String> {
     }
 
     if default_sub == -1 && text_count > 0 {
-        default_sub = video_count + audio_count; // 选第一条字幕
+        default_sub = (video_count + audio_count) as i64; // 选第一条字幕
     }
 
     Ok(json!({
