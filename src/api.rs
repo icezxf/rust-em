@@ -975,53 +975,6 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
     if let Some(item) = item_opt { Json(item).into_response() } else { StatusCode::NOT_FOUND.into_response() }
 }
 
-fn sanitize_media_streams(streams: &mut Value) {
-    if let Some(arr) = streams.as_array_mut() {
-        for stream in arr {
-            if let Some(obj) = stream.as_object_mut() {
-                // 清理帧率 (可能为 "a/b" 形式的字符串)
-                for k in &["AverageFrameRate", "RealFrameRate"] {
-                    if let Some(v) = obj.get_mut(*k) {
-                        let f = match v {
-                            Value::String(s) => {
-                                let s = s.trim();
-                                if s.is_empty() || s == "0/0" { 0.0 }
-                                else if let Some((num, den)) = s.split_once('/') {
-                                    let n = num.parse::<f64>().unwrap_or(0.0);
-                                    let d = den.parse::<f64>().unwrap_or(1.0);
-                                    if d > 0.0 { n / d } else { 0.0 }
-                                } else {
-                                    s.parse::<f64>().unwrap_or(0.0)
-                                }
-                            }
-                            Value::Number(n) => n.as_f64().unwrap_or(0.0),
-                            _ => 0.0,
-                        };
-                        *v = json!(f);
-                    }
-                }
-                // 清理整数字段
-                for k in &["BitRate", "BitDepth", "Width", "Height", "Level", "Channels", "SampleRate", "Index"] {
-                    if let Some(v) = obj.get_mut(*k) {
-                        let i = match v {
-                            Value::String(s) => s.trim().parse::<i64>().unwrap_or(0),
-                            Value::Number(n) => n.as_i64().unwrap_or(0),
-                            _ => 0,
-                        };
-                        *v = json!(i);
-                    }
-                }
-                // 统一 Type 大小写
-                if let Some(Value::String(t)) = obj.get_mut("Type") {
-                    *t = if t.eq_ignore_ascii_case("video") { "Video".to_string() }
-                         else if t.eq_ignore_ascii_case("audio") { "Audio".to_string() }
-                         else if t.eq_ignore_ascii_case("subtitle") { "Subtitle".to_string() }
-                         else { t.clone() };
-                }
-            }
-        }
-    }
-}
 
 pub async fn emby_playback_info(
     State(pool): State<Arc<Mutex<Connection>>>,
@@ -1088,4 +1041,61 @@ pub async fn emby_playback_info(
         })
     }).collect();
     Json(json!({ "MediaSources": media_sources, "PlaySessionId": play_session_id })).into_response()
+}
+
+fn sanitize_media_streams(streams: &mut Value) {
+    if let Some(arr) = streams.as_array_mut() {
+        for stream in arr {
+            if let Some(obj) = stream.as_object_mut() {
+                // 1. 清理帧率 (可能为 "a/b" 形式的字符串)
+                for k in &["AverageFrameRate", "RealFrameRate"] {
+                    if let Some(v) = obj.get_mut(*k) {
+                        let f = match v {
+                            Value::String(s) => {
+                                let s = s.trim();
+                                if s.is_empty() || s == "0/0" { 0.0 }
+                                else if let Some((num, den)) = s.split_once('/') {
+                                    let n = num.parse::<f64>().unwrap_or(0.0);
+                                    let d = den.parse::<f64>().unwrap_or(1.0);
+                                    if d > 0.0 { n / d } else { 0.0 }
+                                } else {
+                                    s.parse::<f64>().unwrap_or(0.0)
+                                }
+                            }
+                            Value::Number(n) => n.as_f64().unwrap_or(0.0),
+                            _ => 0.0,
+                        };
+                        *v = json!(f);
+                    }
+                }
+                // 2. 清理整数字段
+                for k in &["BitRate", "BitDepth", "Width", "Height", "Level", "Channels", "SampleRate", "Index"] {
+                    if let Some(v) = obj.get_mut(*k) {
+                        let i = match v {
+                            Value::String(s) => s.trim().parse::<i64>().unwrap_or(0),
+                            Value::Number(n) => n.as_i64().unwrap_or(0),
+                            _ => 0,
+                        };
+                        *v = json!(i);
+                    }
+                }
+                // 3. 统一 Type 大小写
+                if let Some(Value::String(t)) = obj.get_mut("Type") {
+                    *t = if t.eq_ignore_ascii_case("video") { "Video".to_string() }
+                         else if t.eq_ignore_ascii_case("audio") { "Audio".to_string() }
+                         else if t.eq_ignore_ascii_case("subtitle") { "Subtitle".to_string() }
+                         else { t.clone() };
+                }
+                // 4. 强制补齐布尔字段 (Yamby 强依赖)
+                for k in &["IsDefault", "IsForced", "IsExternal"] {
+                    let b = match obj.get(*k) {
+                        Some(Value::Bool(b)) => *b,
+                        Some(Value::String(s)) => s.to_lowercase() == "true",
+                        _ => false, // 缺失时默认 false
+                    };
+                    obj.insert(k.to_string(), json!(b));
+                }
+            }
+        }
+    }
 }
