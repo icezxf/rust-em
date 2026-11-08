@@ -1114,6 +1114,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
             let actors: Vec<Value> = serde_json::from_str(&actors_json).unwrap_or_default();
             let mut media_streams: Value = serde_json::from_str(&media_streams_json).unwrap_or(json!([]));
+            sanitize_media_streams(&mut media_streams);
             let real_path = strm_content.lines().map(str::trim).find(|s| !s.is_empty()).unwrap_or("").to_string();
 
             // 补充 DisplayTitle, AspectRatio, IsInterlaced
