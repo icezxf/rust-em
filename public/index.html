@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <title>Rust-Em</title>
+
         async function loadSettings() {
             const data = await api("/api/settings");
             if (data && data.prefetch_playback === "true") {
@@ -17,7 +18,6 @@
             const checked = document.getElementById("prefetch-toggle").checked;
             await api("/api/settings", "POST", { prefetch_playback: checked });
         }
-
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@1,300&display=swap" rel="stylesheet">
     <style>
@@ -821,6 +821,7 @@
             if (res && res.status === 'success') { alert('账号修改成功！请使用新账号重新登录。'); logout(); }
             else if (res && res.error) { alert(res.error); }
         }
+
         async function loadSettings() {
             const data = await api("/api/settings");
             if (data && data.prefetch_playback === "true") {
@@ -833,7 +834,6 @@
             const checked = document.getElementById("prefetch-toggle").checked;
             await api("/api/settings", "POST", { prefetch_playback: checked });
         }
-
     </script>
 </body>
 </html>
