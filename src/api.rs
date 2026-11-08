@@ -681,7 +681,9 @@ pub async fn probe_scan(Json(req): Json<ProbeScanReq>) -> impl IntoResponse {
                     if json_path.exists() {
                         if let Some(src) = crate::probe::load_cached_source(&json_path) {
                             if src.get("MediaStreams").and_then(|m| m.as_array()).map(|a| !a.is_empty()).unwrap_or(false) {
-                                skip += 1; continue;
+                                skip += 1;
+                                println!("⏭️ [PROBE-SKIP] {}", p.display());
+                                continue;
                             }
                         }
                     }
