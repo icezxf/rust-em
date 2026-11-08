@@ -727,9 +727,6 @@ pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(i
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_thumbnail_set(AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
-    Json(json!({ "Id": item_id.to_string(), "ThumbnailSet": {} }))
-}
 
 pub async fn emby_virtual_folders(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
@@ -1184,13 +1181,9 @@ pub async fn update_settings(State(pool): State<Arc<Mutex<Connection>>>, Json(re
     Json(json!({"status": "success"}))
 }
 
-pub async fn emby_thumbnail_set(AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
-    Json(json!({ "Id": item_id.to_string(), "ThumbnailSet": {} }))
-}
 
-pub async fn emby_danmu() -> impl IntoResponse {
-    Json(json!([]))
-}
+
+
 
 pub async fn emby_thumbnail_set(AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
     Json(json!({ "Id": item_id.to_string(), "ThumbnailSet": {} }))
