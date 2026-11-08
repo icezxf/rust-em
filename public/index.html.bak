@@ -5,6 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <title>Rust-Em</title>
+        async function loadSettings() {
+            const data = await api("/api/settings");
+            if (data && data.prefetch_playback === "true") {
+                document.getElementById("prefetch-toggle").checked = true;
+            } else {
+                document.getElementById("prefetch-toggle").checked = false;
+            }
+        }
+        async function togglePrefetch() {
+            const checked = document.getElementById("prefetch-toggle").checked;
+            await api("/api/settings", "POST", { prefetch_playback: checked });
+        }
+
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@1,300&display=swap" rel="stylesheet">
     <style>
@@ -110,7 +123,20 @@
                         </div>
                     </div>
                     <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
-                        <h3 class="text-lg font-bold mb-4 text-yellow-400 border-b border-gray-800 pb-2">修改管理员账号</h3>
+                    <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
+                        <h3 class="text-lg font-bold mb-4 text-green-400 border-b border-gray-800 pb-2">播放体验设置</h3>
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <div class="font-bold text-gray-200">开启起播预热缓存</div>
+                                <div class="text-xs text-gray-500 mt-1">开启后，打开详情页会提前获取直链，点击播放瞬间开始</div>
+                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="prefetch-toggle" class="sr-only peer" onchange="togglePrefetch()">
+                                <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                            </label>
+                        </div>
+                    </div>
+<div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
                         <input id="old-pwd" type="password" placeholder="当前密码" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none focus:border-yellow-500 text-white">
                         <input id="new-user" type="text" placeholder="新用户名" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none focus:border-yellow-500 text-white">
                         <input id="new-pwd" type="password" placeholder="新密码" class="p-3 mb-4 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none focus:border-yellow-500 text-white">
@@ -366,6 +392,7 @@
                 topBar.classList.add('hidden');
                 document.getElementById('tab-settings').classList.remove('hidden');
                 renderSettingsLibraries();
+                loadSettings();
             }
             
             if (window.innerWidth < 768) {
@@ -645,6 +672,7 @@
             if (!confirm(`⚠️ 确定要删除媒体库【${name}】吗？`)) return;
             await api(`/api/libraries/${id}`, 'DELETE');
             await fetchLibraries(); renderSettingsLibraries();
+                loadSettings();
         }
 
         async function rescanLibrary(id) {
@@ -750,7 +778,8 @@
             if (res.error) return alert(res.error);
             alert('媒体库已保存，后台开始扫描。大目录可能需要一些时间，请稍后刷新。');
             selectedPaths = []; renderSelectedPaths(); document.getElementById('lib-name').value = '';
-            await fetchLibraries(); renderSettingsLibraries(); switchTab('library');
+            await fetchLibraries(); renderSettingsLibraries();
+                loadSettings(); switchTab('library');
         }
 
         async function updateUser() {
@@ -762,6 +791,19 @@
             if (res && res.status === 'success') { alert('账号修改成功！请使用新账号重新登录。'); logout(); }
             else if (res && res.error) { alert(res.error); }
         }
+        async function loadSettings() {
+            const data = await api("/api/settings");
+            if (data && data.prefetch_playback === "true") {
+                document.getElementById("prefetch-toggle").checked = true;
+            } else {
+                document.getElementById("prefetch-toggle").checked = false;
+            }
+        }
+        async function togglePrefetch() {
+            const checked = document.getElementById("prefetch-toggle").checked;
+            await api("/api/settings", "POST", { prefetch_playback: checked });
+        }
+
     </script>
 </body>
 </html>

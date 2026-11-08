@@ -19,6 +19,7 @@ async fn main() {
     let conn = rusqlite::Connection::open("data/data.db").unwrap();
     db::init_db(&conn);
     db::ensure_extra_columns(&conn);
+    db::init_settings_table(&conn);
     let pool = Arc::new(Mutex::new(conn));
 
     let cors = CorsLayer::new()
@@ -106,6 +107,7 @@ async fn main() {
         .route("/api/browse", get(api::browse_dir))
         .route("/api/images/{id}/{type}", get(api::get_image))
         .route("/api/user/update", post(api::update_user))
+        .route("/api/settings", get(api::get_settings).post(api::update_settings))
         .route("/api/probe/scan", post(api::probe_scan));
 
     let app = Router::new()

@@ -349,7 +349,7 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
             "imdb_id": row.get::<_, String>(18).unwrap_or_default(), "size": row.get::<_, i64>(19).unwrap_or(0),
             "series": row.get::<_, String>(20).unwrap_or_default(), "label": row.get::<_, String>(21).unwrap_or_default(),
             "set_name": row.get::<_, String>(22).unwrap_or_default(), "file_path": row.get::<_, String>(23).unwrap_or_default(),
-            "strm_content": row.get::<_, String>(24).unwrap_or_default(), "stills": stills, "parts": parts
+            "strm_content": row.get::<_, String>(24).unwrap_or_default(), "stills": stills, "parts": parts, "media_streams": serde_json::from_str::<Value>(&row.get::<_, String>(27).unwrap_or_else(|_| "[]".to_string())).unwrap_or(json!([]))
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "items": items })).into_response()
@@ -1180,4 +1180,12 @@ pub async fn update_settings(State(pool): State<Arc<Mutex<Connection>>>, Json(re
     let val = if req.prefetch_playback { "true" } else { "false" };
     let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('prefetch_playback', ?1)", [val]);
     Json(json!({"status": "success"}))
+}
+
+pub async fn emby_thumbnail_set(AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
+    Json(json!({ "Id": item_id.to_string(), "ThumbnailSet": {} }))
+}
+
+pub async fn emby_danmu() -> impl IntoResponse {
+    Json(json!([]))
 }
