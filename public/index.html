@@ -510,6 +510,10 @@
             const item = cachedItems.find(i => i.id === itemId);
             if (!item) return;
             currentPlayingItemId = item.id;
+            // 静默触发后端预热，加速网页端起播
+            fetch(`/emby/Items/${item.id}/PlaybackInfo?IsPlayback=false`, {
+                method: "POST", headers: { "X-Emby-Token": token }
+            }).catch(() => {});
 
             if (window.innerWidth >= 768) {
                 const sidebar = document.getElementById('desktop-sidebar');

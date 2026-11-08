@@ -349,7 +349,7 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
             "imdb_id": row.get::<_, String>(18).unwrap_or_default(), "size": row.get::<_, i64>(19).unwrap_or(0),
             "series": row.get::<_, String>(20).unwrap_or_default(), "label": row.get::<_, String>(21).unwrap_or_default(),
             "set_name": row.get::<_, String>(22).unwrap_or_default(), "file_path": row.get::<_, String>(23).unwrap_or_default(),
-            "strm_content": row.get::<_, String>(24).unwrap_or_default(), "stills": stills, "parts": parts, "media_streams": serde_json::from_str::<Value>(&row.get::<_, String>(27).unwrap_or_else(|_| "[]".to_string())).unwrap_or(json!([]))
+            "strm_content": row.get::<_, String>(24).unwrap_or_default(), "stills": stills, "parts": parts, "media_streams": serde_json::from_str::<Value>("parts": partsrow.get::<_, String>(27).unwrap_or_else(|_| "[]".to_string())).unwrap_or(json!([])), "media_streams": serde_json::from_str::<Value>(&row.get::<_, String>(27).unwrap_or_else(|_| "[]".to_string())).unwrap_or(json!([]))
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "items": items })).into_response()

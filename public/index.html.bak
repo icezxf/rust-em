@@ -5,19 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <title>Rust-Em</title>
-        async function loadSettings() {
-            const data = await api("/api/settings");
-            if (data && data.prefetch_playback === "true") {
-                document.getElementById("prefetch-toggle").checked = true;
-            } else {
-                document.getElementById("prefetch-toggle").checked = false;
-            }
-        }
-        async function togglePrefetch() {
-            const checked = document.getElementById("prefetch-toggle").checked;
-            await api("/api/settings", "POST", { prefetch_playback: checked });
-        }
-
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@1,300&display=swap" rel="stylesheet">
     <style>
@@ -104,6 +91,7 @@
             <div id="tab-settings" class="hidden flex-1 overflow-y-auto p-4 pt-16 md:px-8 md:py-8 md:pl-20 pb-20">
                 <div class="max-w-3xl mx-auto">
                     <h2 class="text-2xl font-bold mb-6">系统设置</h2>
+                    
                     <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
                         <h3 class="text-lg font-bold mb-4 text-blue-400 border-b border-gray-800 pb-2">媒体库管理</h3>
                         <div id="settings-lib-list" class="flex flex-col gap-3 mb-6"></div>
@@ -122,7 +110,18 @@
                             <button onclick="addLibrary()" class="w-full bg-blue-600 hover:bg-blue-500 px-4 py-3 rounded-lg font-bold mt-2 transition text-white shadow-lg shadow-blue-500/20">保存并扫描</button>
                         </div>
                     </div>
+
                     <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
+                        <h3 class="text-lg font-bold mb-4 text-purple-400 border-b border-gray-800 pb-2">媒体信息探测 (Probe)</h3>
+                        <p class="text-sm text-gray-400 mb-4">探测指定目录下 .strm 的真实媒体参数（分辨率、编码等），生成合规的 JSON 缓存文件供客户端使用。探测有严格防风控限速（约 1 个/秒）。</p>
+                        
+                        <div class="flex gap-3 mb-4">
+                            <input id="probe-dir-path" placeholder="未选择目录" class="flex-1 p-3 bg-[#0f1115] border border-gray-700 rounded-lg outline-none text-white focus:border-purple-500 transition" readonly>
+                            <button onclick="openProbePathPicker()" class="bg-gray-800 hover:bg-gray-700 px-6 py-3 rounded-lg font-bold text-white transition border border-gray-700">浏览</button>
+                        </div>
+                        <button onclick="startProbe()" class="w-full bg-purple-600 hover:bg-purple-500 px-4 py-3 rounded-lg font-bold transition text-white shadow-lg shadow-purple-500/20">开始探测</button>
+                    </div>
+
                     <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
                         <h3 class="text-lg font-bold mb-4 text-green-400 border-b border-gray-800 pb-2">播放体验设置</h3>
                         <div class="flex items-center justify-between">
@@ -136,7 +135,9 @@
                             </label>
                         </div>
                     </div>
-<div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
+
+                    <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
+                        <h3 class="text-lg font-bold mb-4 text-yellow-400 border-b border-gray-800 pb-2">修改管理员账号</h3>
                         <input id="old-pwd" type="password" placeholder="当前密码" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none focus:border-yellow-500 text-white">
                         <input id="new-user" type="text" placeholder="新用户名" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none focus:border-yellow-500 text-white">
                         <input id="new-pwd" type="password" placeholder="新密码" class="p-3 mb-4 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none focus:border-yellow-500 text-white">
@@ -218,22 +219,8 @@
                                 <span>文件大小: <span id="detail-file-size" class="text-gray-200 font-medium">计算中...</span></span>
                                 <span>容器格式: <span class="text-gray-200 font-medium">STRM</span></span>
                             </div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-                                <div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
-                                    <div class="text-xs text-blue-400 font-bold mb-1 uppercase tracking-wider">视频流 VIDEO</div>
-                                    <div class="text-sm text-gray-300 mb-0.5">等待媒体探测</div>
-                                    <div class="text-xs text-gray-500">探测后显示码率、帧率</div>
-                                </div>
-                                <div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
-                                    <div class="text-xs text-green-400 font-bold mb-1 uppercase tracking-wider">音频流 AUDIO</div>
-                                    <div class="text-sm text-gray-300 mb-0.5">等待媒体探测</div>
-                                    <div class="text-xs text-gray-500">探测后显示声道、采样率</div>
-                                </div>
-                                <div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
-                                    <div class="text-xs text-yellow-400 font-bold mb-1 uppercase tracking-wider">字幕流 SUBTITLE</div>
-                                    <div class="text-sm text-gray-300 mb-0.5">等待媒体探测</div>
-                                    <div class="text-xs text-gray-500">探测后显示语言、格式</div>
-                                </div>
+                            <div id="detail-media-streams" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                                <div class="col-span-full text-sm text-gray-500 py-2">暂无探测信息，请执行媒体探测。</div>
                             </div>
                             <div class="border-t border-gray-800/80 pt-3 flex flex-col gap-3">
                                 <div>
@@ -295,6 +282,7 @@
         let currentType = 'all';
         let cachedItems = [];
         let currentPlayingItemId = null;
+        let isProbeSelecting = false; // 区分是选媒体库路径还是Probe路径
 
         const defaultPosterSvg = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzFhMWQyNCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjNGI1NTYzIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg==';
 
@@ -635,6 +623,7 @@
             } else {
                 mediaStreamsBox.innerHTML = `<div class="col-span-full text-sm text-gray-500 py-2">暂无探测信息，请执行媒体探测。</div>`;
             }
+            
             document.getElementById('detail-strm-path').innerText = item.file_path || '暂无路径';
             let strmContent = item.strm_content || '暂无内容';
             try { strmContent = decodeURIComponent(strmContent); } catch(e) {}
@@ -702,7 +691,6 @@
             if (!confirm(`⚠️ 确定要删除媒体库【${name}】吗？`)) return;
             await api(`/api/libraries/${id}`, 'DELETE');
             await fetchLibraries(); renderSettingsLibraries();
-                loadSettings();
         }
 
         async function rescanLibrary(id) {
@@ -716,8 +704,22 @@
             }, 1000);
         }
 
-        async function openPathPicker() { document.getElementById('path-modal').classList.remove('hidden'); await browseDir(currentPath); }
+        // --- 路径选择与探测逻辑 ---
+        async function openPathPicker() { isProbeSelecting = false; document.getElementById('path-modal').classList.remove('hidden'); await browseDir(currentPath); }
+        async function openProbePathPicker() { isProbeSelecting = true; document.getElementById('path-modal').classList.remove('hidden'); await browseDir(currentPath); }
         function closePathPicker() { document.getElementById('path-modal').classList.add('hidden'); }
+
+        async function startProbe() {
+            const path = document.getElementById('probe-dir-path').value;
+            if (!path) return alert('请先选择要探测的目录');
+            const btn = event.target;
+            const text = btn.innerText;
+            btn.innerText = "任务已下发..."; btn.disabled = true; btn.classList.add("opacity-50");
+            const res = await api("/api/probe/scan", "POST", { path: path, interval_ms: 1000 });
+            if (res.status === "started") { alert("探测任务已在后台启动，请留意容器终端日志。"); }
+            else { alert("启动失败"); }
+            btn.innerText = text; btn.disabled = false; btn.classList.remove("opacity-50");
+        }
 
         async function browseDir(path) {
             const list = document.getElementById('dir-list');
@@ -783,7 +785,11 @@
         }
 
         function selectCurrentPath() {
-            if (!selectedPaths.includes(currentPath)) { selectedPaths.push(currentPath); renderSelectedPaths(); }
+            if (isProbeSelecting) {
+                document.getElementById('probe-dir-path').value = currentPath;
+            } else {
+                if (!selectedPaths.includes(currentPath)) { selectedPaths.push(currentPath); renderSelectedPaths(); }
+            }
             closePathPicker();
         }
 
@@ -808,8 +814,7 @@
             if (res.error) return alert(res.error);
             alert('媒体库已保存，后台开始扫描。大目录可能需要一些时间，请稍后刷新。');
             selectedPaths = []; renderSelectedPaths(); document.getElementById('lib-name').value = '';
-            await fetchLibraries(); renderSettingsLibraries();
-                loadSettings(); switchTab('library');
+            await fetchLibraries(); renderSettingsLibraries(); switchTab('library');
         }
 
         async function updateUser() {
@@ -821,6 +826,7 @@
             if (res && res.status === 'success') { alert('账号修改成功！请使用新账号重新登录。'); logout(); }
             else if (res && res.error) { alert(res.error); }
         }
+
         async function loadSettings() {
             const data = await api("/api/settings");
             if (data && data.prefetch_playback === "true") {
@@ -829,11 +835,11 @@
                 document.getElementById("prefetch-toggle").checked = false;
             }
         }
+        
         async function togglePrefetch() {
             const checked = document.getElementById("prefetch-toggle").checked;
             await api("/api/settings", "POST", { prefetch_playback: checked });
         }
-
     </script>
 </body>
 </html>
