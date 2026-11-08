@@ -1030,12 +1030,17 @@ pub async fn emby_playback_info(
             let pool_clone = pool.clone();
             let ua_clone = ua.clone();
             tokio::spawn(async move {
-                let strm_path = {
+                let (strm_path, item_name) = {
                     let conn = pool_clone.lock().unwrap();
-                    let mut stmt = conn.prepare("SELECT parts FROM items WHERE id = ?1").unwrap();
-                    stmt.query_row([item_id], |r| r.get::<_, String>(0)).ok()
-                        .and_then(|j| serde_json::from_str::<Vec<String>>(&j).ok())
-                        .and_then(|a| a.get(part_idx).cloned())
+                    let mut stmt = conn.prepare("SELECT parts, num, title FROM items WHERE id = ?1").unwrap();
+                    stmt.query_row([item_id], |r| {
+                        let parts_json: String = r.get(0).unwrap_or_default();
+                        let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
+                        let num: String = r.get(1).unwrap_or_default();
+                        let title: String = r.get(2).unwrap_or_default();
+                        let name = if !num.is_empty() { num } else { title };
+                        Ok((parts.get(part_idx).cloned(), name))
+                    }).unwrap_or((None, String::new()))
                 };
                 if let Some(path) = strm_path {
                     if let Ok(content) = tokio::fs::read_to_string(&path).await {
@@ -1046,7 +1051,7 @@ pub async fn emby_playback_info(
                                 let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
                                 let mut lock = cache.lock().unwrap();
                                 lock.insert(cache_key, (final_url, Instant::now() + Duration::from_secs(300)));
-                                println!("🔥 [PREFETCH] item={} 预热成功", item_id);
+                                println!("🔥 [PREFETCH] {} ({}) 预热成功", item_name, item_id);
                             }
                         }
                     }
