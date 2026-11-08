@@ -501,30 +501,6 @@ pub async fn emby_item_image_with_index(State(pool): State<Arc<Mutex<Connection>
 pub async fn emby_item_image_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id, image_type)): AxumPath<(String, String, String)>) -> Response {
     emby_item_image_inner(pool, item_id, image_type).await
 }
-async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String) -> Response {
-    let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
-    let path_opt = {
-        let conn = pool.lock().unwrap();
-        let query = match image_type.to_lowercase().as_str() {
-            "primary" | "poster" | "thumb" => "SELECT poster_path FROM items WHERE id = ?1",
-            "backdrop" | "fanart" => "SELECT fanart_path FROM items WHERE id = ?1",
-            "logo" => "SELECT logo_path FROM items WHERE id = ?1", "banner" => "SELECT banner_path FROM items WHERE id = ?1",
-            _ => "SELECT poster_path FROM items WHERE id = ?1",
-        };
-        let mut stmt = conn.prepare(query).unwrap();
-        stmt.query_row([id], |row| row.get::<_, String>(0)).ok()
-    };
-    if let Some(path_str) = path_opt {
-        if !path_str.is_empty() {
-            if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
-            if let Ok(bytes) = tokio::fs::read(&path_str).await {
-                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
-                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
-            }
-        }
-    }
-    StatusCode::NOT_FOUND.into_response()
-}
 
 
 pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap) -> Response {
@@ -1054,6 +1030,11 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let thumb_path: String = row.get(40).unwrap_or_default();
             let banner_path: String = row.get(41).unwrap_or_default();
             let strm_content: String = row.get(42).unwrap_or_default();
+            let stills_json: String = row.get(43).unwrap_or_default();
+            let stills_vec: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
+            let mut backdrop_tags = Vec::new();
+            if !fanart_path.is_empty() { backdrop_tags.push(json!(format!("backdrop_{}_0", id))); }
+            for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i + 1))); }
 
             let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
             let actors: Vec<Value> = serde_json::from_str(&actors_json).unwrap_or_default();
@@ -1122,7 +1103,6 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             if !thumb_path.is_empty() { image_tags.insert("Thumb".to_string(), json!(format!("thumb_{}", id))); }
             if !banner_path.is_empty() { image_tags.insert("Banner".to_string(), json!(format!("banner_{}", id))); }
 
-            let backdrop_tags: Vec<Value> = if !fanart_path.is_empty() { vec![json!(format!("backdrop_{}", id))] } else { vec![] };
             let date_created_ts = if date_created > 0 { date_created } else { mtime };
             let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
             let est_bitrate = if size > 0 && run_time_ticks > 0 { (size * 8) / (run_time_ticks / 10_000_000) } else { 0 };
@@ -1261,4 +1241,49 @@ fn sanitize_media_streams(streams: &mut Value) {
             }
         }
     }
+}
+async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
+    let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
+    
+    let path_opt = {
+        let conn = pool.lock().unwrap();
+        
+        if image_type.to_lowercase() == "backdrop" || image_type.to_lowercase() == "fanart" {
+            // 处理多张艺术图/剧照
+            let mut stmt = conn.prepare("SELECT fanart_path, stills FROM items WHERE id = ?1").unwrap();
+            stmt.query_row([id], |row| Ok((
+                row.get::<_, String>(0).unwrap_or_default(),
+                row.get::<_, String>(1).unwrap_or_default()
+            ))).map(|(fanart, stills_json)| {
+                let mut paths = Vec::new();
+                if !fanart.is_empty() { paths.push(fanart); }
+                let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
+                paths.extend(stills);
+                
+                // 根据 index 取出对应的图片
+                paths.get(index).cloned()
+            }).unwrap_or(None)
+        } else {
+            // 处理海报、缩略图等单张图片
+            let query = match image_type.to_lowercase().as_str() {
+                "primary" | "poster" | "thumb" => "SELECT poster_path FROM items WHERE id = ?1",
+                "logo" => "SELECT logo_path FROM items WHERE id = ?1", 
+                "banner" => "SELECT banner_path FROM items WHERE id = ?1",
+                _ => "SELECT poster_path FROM items WHERE id = ?1",
+            };
+            let mut stmt = conn.prepare(query).unwrap();
+            stmt.query_row([id], |row| row.get::<_, String>(0)).ok()
+        }
+    };
+
+    if let Some(path_str) = path_opt {
+        if !path_str.is_empty() {
+            if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
+            if let Ok(bytes) = tokio::fs::read(&path_str).await {
+                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
+                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
+            }
+        }
+    }
+    StatusCode::NOT_FOUND.into_response()
 }
