@@ -681,7 +681,9 @@ pub async fn probe_scan(Json(req): Json<ProbeScanReq>) -> impl IntoResponse {
                     if json_path.exists() {
                         if let Some(src) = crate::probe::load_cached_source(&json_path) {
                             if src.get("MediaStreams").and_then(|m| m.as_array()).map(|a| !a.is_empty()).unwrap_or(false) {
-                                skip += 1; continue;
+                                skip += 1;
+                                println!("⏭️ [PROBE-SKIP] {}", p.display());
+                                continue;
                             }
                         }
                     }
@@ -725,9 +727,6 @@ pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(i
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_thumbnail_set(AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
-    Json(json!({ "Id": item_id.to_string(), "ThumbnailSet": {} }))
-}
 
 pub async fn emby_virtual_folders(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
@@ -1181,6 +1180,10 @@ pub async fn update_settings(State(pool): State<Arc<Mutex<Connection>>>, Json(re
     let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('prefetch_playback', ?1)", [val]);
     Json(json!({"status": "success"}))
 }
+
+
+
+
 
 pub async fn emby_thumbnail_set(AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
     Json(json!({ "Id": item_id.to_string(), "ThumbnailSet": {} }))
