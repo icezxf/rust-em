@@ -660,59 +660,6 @@ fn build_user_json(id: &str, name: &str) -> Value {
         }
     })
 }
-pub async fn emby_playback_info(
-    State(pool): State<Arc<Mutex<Connection>>>,
-    AxumPath(item_id): AxumPath<i64>,
-    Query(query): Query<HashMap<String, String>>,
-    headers: HeaderMap,
-) -> Response {
-    let token = query.get("api_key").or_else(|| query.get("token")).or_else(|| query.get("X-Emby-Token"))
-        .cloned()
-        .or_else(|| headers.get("X-Emby-Token").and_then(|v| v.to_str().ok()).map(|s| s.to_string()))
-        .or_else(|| headers.get("Authorization").and_then(|v| v.to_str().ok()).and_then(|v| {
-            if let Some(t) = v.strip_prefix("Bearer ") { Some(t.trim().to_string()) }
-            else if let Some(idx) = v.find("Token=\"") { let rest = &v[idx+7..]; rest.find('"').map(|e| rest[..e].to_string()) }
-            else { None }
-        }))
-        .unwrap_or_default();
-    let (parts_json_opt, runtime) = {
-        let conn = pool.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT parts, runtime FROM items WHERE id = ?1").unwrap();
-        stmt.query_row([item_id], |row| Ok((row.get::<_, String>(0).ok(), row.get::<_, i32>(1).unwrap_or(0)))).unwrap_or((None, 0))
-    };
-    let parts: Vec<String> = parts_json_opt.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default();
-    let mut exts: Vec<String> = Vec::new();
-    for path in &parts {
-        let ext = match tokio::fs::read_to_string(path).await {
-            Ok(content) => { let url = content.lines().map(str::trim).find(|s| !s.is_empty()).unwrap_or(""); extract_extension_from_url(url) }
-            Err(_) => "mp4".to_string(),
-        };
-        exts.push(ext);
-    }
-    let play_session_id = uuid::Uuid::new_v4().to_string();
-    let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
-    let estimated_size = if run_time_ticks > 0 { (run_time_ticks / 10_000_000) * 8_000_000 / 8 } else { 0 };
-    let media_sources: Vec<Value> = parts.iter().enumerate().map(|(i, _path)| {
-        let ext = &exts[i];
-        let stream_url = format!("/Videos/{}/original.{}?MediaSourceId={}_cd{}&PlaySessionId={}&api_key={}", item_id, ext, item_id, i, play_session_id, token);
-        json!({
-            "Id": format!("{}_cd{}", item_id, i), "PlaySessionId": play_session_id.clone(),
-            "Path": stream_url.clone(), "DirectStreamUrl": stream_url,
-            "Protocol": "Http", "Container": ext, "Name": "Default", "Type": "Default", "VideoType": "VideoFile",
-            "IsRemote": true, "RunTimeTicks": run_time_ticks, "Size": estimated_size, "Bitrate": 8000000,
-            "DefaultAudioStreamIndex": 1, "DefaultSubtitleStreamIndex": -1,
-            "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsProbing": true, "SupportsTranscoding": false,
-            "SupportsExternalStream": false, "IsInfiniteStream": false,
-            "RequiresOpening": false, "RequiresClosing": false, "RequiresLooping": false,
-            "ReadAtNativeFramerate": false, "IgnoreDts": false, "IgnoreIndex": false, "GenPtsInput": false,
-            "MediaStreams": [
-                {"Type": "Video", "Index": 0, "Codec": "h264", "CodecTag": "avc1", "DisplayTitle": "1080p H264 SDR", "Width": 1920, "Height": 1080, "BitRate": 8000000, "BitDepth": 8, "RealFrameRate": 24.0, "AverageFrameRate": 24.0, "Profile": "high", "Level": 41, "VideoRange": "SDR", "VideoRangeType": "SDR", "ColorSpace": "bt709", "ColorTransfer": "bt709", "ColorPrimaries": "bt709", "PixelFormat": "yuv420p", "AspectRatio": "16:9", "RefFrames": 4, "IsAVC": true, "IsInterlaced": false, "IsAnamorphic": false, "IsDefault": true, "IsForced": false, "IsExternal": false},
-                {"Type": "Audio", "Index": 1, "Codec": "aac", "CodecTag": "mp4a", "DisplayTitle": "AAC 2.0", "Channels": 2, "ChannelLayout": "stereo", "BitRate": 192000, "SampleRate": 48000, "BitDepth": 16, "Profile": "LC", "IsDefault": true, "IsForced": false, "IsExternal": false}
-            ]
-        })
-    }).collect();
-    Json(json!({ "MediaSources": media_sources, "PlaySessionId": play_session_id })).into_response()
-}
 
 #[derive(Deserialize)]
 pub struct ProbeScanReq { pub path: String, pub interval_ms: Option<u64> }
@@ -940,7 +887,8 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
 
             let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
             let actors: Vec<Value> = serde_json::from_str(&actors_json).unwrap_or_default();
-            let media_streams: Value = serde_json::from_str(&media_streams_json).unwrap_or(json!([]));
+            let mut media_streams: Value = serde_json::from_str(&media_streams_json).unwrap_or(json!([]));
+            sanitize_media_streams(&mut media_streams);
 
             let studios: Vec<Value> = studios_str.split(" / ").filter(|s| !s.trim().is_empty()).map(|s| {
                 let mut h = Sha256::new(); h.update(s.as_bytes()); let hash = h.finalize();
@@ -1025,4 +973,129 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
         }
     ).ok();
     if let Some(item) = item_opt { Json(item).into_response() } else { StatusCode::NOT_FOUND.into_response() }
+}
+
+
+pub async fn emby_playback_info(
+    State(pool): State<Arc<Mutex<Connection>>>,
+    AxumPath(item_id): AxumPath<i64>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
+    let token = query.get("api_key").or_else(|| query.get("token")).or_else(|| query.get("X-Emby-Token"))
+        .cloned()
+        .or_else(|| headers.get("X-Emby-Token").and_then(|v| v.to_str().ok()).map(|s| s.to_string()))
+        .or_else(|| headers.get("Authorization").and_then(|v| v.to_str().ok()).and_then(|v| {
+            if let Some(t) = v.strip_prefix("Bearer ") { Some(t.trim().to_string()) }
+            else if let Some(idx) = v.find("Token=\"") { let rest = &v[idx+7..]; rest.find('"').map(|e| rest[..e].to_string()) }
+            else { None }
+        }))
+        .unwrap_or_default();
+    let (parts_json_opt, runtime, media_streams_json) = {
+        let conn = pool.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT parts, runtime, media_streams FROM items WHERE id = ?1").unwrap();
+        stmt.query_row([item_id], |row| Ok((
+            row.get::<_, String>(0).ok(),
+            row.get::<_, i32>(1).unwrap_or(0),
+            row.get::<_, String>(2).unwrap_or_else(|_| "[]".to_string()),
+        ))).unwrap_or((None, 0, "[]".to_string()))
+    };
+    let parts: Vec<String> = parts_json_opt.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default();
+    let mut exts: Vec<String> = Vec::new();
+    for path in &parts {
+        let ext = match tokio::fs::read_to_string(path).await {
+            Ok(content) => { let url = content.lines().map(str::trim).find(|s| !s.is_empty()).unwrap_or(""); extract_extension_from_url(url) }
+            Err(_) => "mp4".to_string(),
+        };
+        exts.push(ext);
+    }
+    let play_session_id = uuid::Uuid::new_v4().to_string();
+    let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
+    let estimated_size = if run_time_ticks > 0 { (run_time_ticks / 10_000_000) * 8_000_000 / 8 } else { 0 };
+
+    let mut parsed_streams: Value = serde_json::from_str(&media_streams_json).unwrap_or(json!([]));
+    sanitize_media_streams(&mut parsed_streams);
+    let final_streams = if parsed_streams.as_array().map_or(true, |a| a.is_empty()) {
+        json!([
+            {"Type": "Video", "Index": 0, "Codec": "h264", "DisplayTitle": "1080p H264", "Width": 1920, "Height": 1080, "BitRate": 8000000, "BitDepth": 8, "RealFrameRate": 24.0, "AverageFrameRate": 24.0, "Profile": "high", "Level": 41, "IsDefault": true, "IsForced": false, "IsExternal": false},
+            {"Type": "Audio", "Index": 1, "Codec": "aac", "DisplayTitle": "AAC 2.0", "Channels": 2, "BitRate": 192000, "SampleRate": 48000, "Profile": "LC", "IsDefault": true, "IsForced": false, "IsExternal": false}
+        ])
+    } else {
+        parsed_streams
+    };
+
+    let media_sources: Vec<Value> = parts.iter().enumerate().map(|(i, _path)| {
+        let ext = &exts[i];
+        let stream_url = format!("/Videos/{}/original.{}?MediaSourceId={}_cd{}&PlaySessionId={}&api_key={}", item_id, ext, item_id, i, play_session_id, token);
+        json!({
+            "Id": format!("{}_cd{}", item_id, i), "PlaySessionId": play_session_id.clone(),
+            "Path": stream_url.clone(), "DirectStreamUrl": stream_url,
+            "Protocol": "Http", "Container": ext, "Name": "Default", "Type": "Default", "VideoType": "VideoFile",
+            "IsRemote": true, "RunTimeTicks": run_time_ticks, "Size": estimated_size, "Bitrate": 8000000,
+            "DefaultAudioStreamIndex": 1, "DefaultSubtitleStreamIndex": -1,
+            "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsProbing": true, "SupportsTranscoding": false,
+            "SupportsExternalStream": false, "IsInfiniteStream": false,
+            "RequiresOpening": false, "RequiresClosing": false, "RequiresLooping": false,
+            "ReadAtNativeFramerate": false, "IgnoreDts": false, "IgnoreIndex": false, "GenPtsInput": false,
+            "MediaStreams": final_streams.clone()
+        })
+    }).collect();
+    Json(json!({ "MediaSources": media_sources, "PlaySessionId": play_session_id })).into_response()
+}
+
+fn sanitize_media_streams(streams: &mut Value) {
+    if let Some(arr) = streams.as_array_mut() {
+        for stream in arr {
+            if let Some(obj) = stream.as_object_mut() {
+                // 1. 清理帧率 (可能为 "a/b" 形式的字符串)
+                for k in &["AverageFrameRate", "RealFrameRate"] {
+                    if let Some(v) = obj.get_mut(*k) {
+                        let f = match v {
+                            Value::String(s) => {
+                                let s = s.trim();
+                                if s.is_empty() || s == "0/0" { 0.0 }
+                                else if let Some((num, den)) = s.split_once('/') {
+                                    let n = num.parse::<f64>().unwrap_or(0.0);
+                                    let d = den.parse::<f64>().unwrap_or(1.0);
+                                    if d > 0.0 { n / d } else { 0.0 }
+                                } else {
+                                    s.parse::<f64>().unwrap_or(0.0)
+                                }
+                            }
+                            Value::Number(n) => n.as_f64().unwrap_or(0.0),
+                            _ => 0.0,
+                        };
+                        *v = json!(f);
+                    }
+                }
+                // 2. 清理整数字段
+                for k in &["BitRate", "BitDepth", "Width", "Height", "Level", "Channels", "SampleRate", "Index"] {
+                    if let Some(v) = obj.get_mut(*k) {
+                        let i = match v {
+                            Value::String(s) => s.trim().parse::<i64>().unwrap_or(0),
+                            Value::Number(n) => n.as_i64().unwrap_or(0),
+                            _ => 0,
+                        };
+                        *v = json!(i);
+                    }
+                }
+                // 3. 统一 Type 大小写
+                if let Some(Value::String(t)) = obj.get_mut("Type") {
+                    *t = if t.eq_ignore_ascii_case("video") { "Video".to_string() }
+                         else if t.eq_ignore_ascii_case("audio") { "Audio".to_string() }
+                         else if t.eq_ignore_ascii_case("subtitle") { "Subtitle".to_string() }
+                         else { t.clone() };
+                }
+                // 4. 强制补齐布尔字段 (Yamby 强依赖)
+                for k in &["IsDefault", "IsForced", "IsExternal"] {
+                    let b = match obj.get(*k) {
+                        Some(Value::Bool(b)) => *b,
+                        Some(Value::String(s)) => s.to_lowercase() == "true",
+                        _ => false, // 缺失时默认 false
+                    };
+                    obj.insert(k.to_string(), json!(b));
+                }
+            }
+        }
+    }
 }

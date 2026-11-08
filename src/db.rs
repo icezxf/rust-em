@@ -38,3 +38,8 @@ pub fn ensure_extra_columns(conn: &rusqlite::Connection) {
     let _ = conn.execute("ALTER TABLE items ADD COLUMN primary_image_aspect_ratio REAL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE items ADD COLUMN original_language TEXT", []);
 }
+
+pub fn init_settings_table(conn: &rusqlite::Connection) {
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)", []);
+    let _ = conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('prefetch_playback', 'false')", []);
+}

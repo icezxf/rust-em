@@ -576,10 +576,7 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
     if !url.starts_with("http") { return StatusCode::NOT_FOUND.into_response(); }
 
     let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(15)).build().unwrap();
-    let mut final_url = url.to_string();
-    if let Ok(resp) = client.get(url).header(USER_AGENT, ua).send().await {
-        if resp.status().is_redirection() { if let Some(location) = resp.headers().get("location") { if let Ok(loc_str) = location.to_str() { final_url = loc_str.to_string(); } } }
-    }
+    let final_url = resolve_qmediasync_url(&client, url, ua).await.unwrap_or_else(|| url.to_string());
     
     { let mut cache_lock = cache.lock().unwrap(); cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(300))); }
     println!("🚀 [STREAM-302] item={} real_url={}", item_id, final_url);
@@ -1009,6 +1006,53 @@ pub async fn emby_playback_info(
         };
         exts.push(ext);
     }
+    // 提前预热
+    let prefetch = {
+        let conn = pool.lock().unwrap();
+        conn.query_row("SELECT value FROM settings WHERE key = 'prefetch_playback'", [], |r| r.get::<_, String>(0)).unwrap_or_else(|_| "false".to_string()) == "true"
+    };
+    if prefetch {
+        let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("unknown").to_string();
+        let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown").to_string();
+        let part_idx = if let Some(msid) = query.get("MediaSourceId") {
+            msid.split('_').last().and_then(|s| s.replace("cd", "").parse::<usize>().ok()).unwrap_or(0)
+        } else { 0 };
+
+        let cache_key = format!("{}|{}|{}|{}", item_id, part_idx, ip, ua);
+        let needs = {
+            let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+            let lock = cache.lock().unwrap();
+            !lock.contains_key(&cache_key) || lock.get(&cache_key).map(|(_, exp)| Instant::now() >= *exp).unwrap_or(true)
+        };
+
+        if needs {
+            let pool_clone = pool.clone();
+            let ua_clone = ua.clone();
+            tokio::spawn(async move {
+                let strm_path = {
+                    let conn = pool_clone.lock().unwrap();
+                    let mut stmt = conn.prepare("SELECT parts FROM items WHERE id = ?1").unwrap();
+                    stmt.query_row([item_id], |r| r.get::<_, String>(0)).ok()
+                        .and_then(|j| serde_json::from_str::<Vec<String>>(&j).ok())
+                        .and_then(|a| a.get(part_idx).cloned())
+                };
+                if let Some(path) = strm_path {
+                    if let Ok(content) = tokio::fs::read_to_string(&path).await {
+                        let url = content.lines().map(str::trim).find(|s| !s.is_empty()).unwrap_or("");
+                        if url.starts_with("http") {
+                            let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(15)).build().unwrap();
+                            if let Some(final_url) = resolve_qmediasync_url(&client, url, &ua_clone).await {
+                                let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+                                let mut lock = cache.lock().unwrap();
+                                lock.insert(cache_key, (final_url, Instant::now() + Duration::from_secs(300)));
+                                println!("🔥 [PREFETCH] item={} 预热成功", item_id);
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
     let play_session_id = uuid::Uuid::new_v4().to_string();
     let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
     let estimated_size = if run_time_ticks > 0 { (run_time_ticks / 10_000_000) * 8_000_000 / 8 } else { 0 };
@@ -1098,4 +1142,42 @@ fn sanitize_media_streams(streams: &mut Value) {
             }
         }
     }
+}
+
+async fn resolve_qmediasync_url(client: &reqwest::Client, url: &str, ua: &str) -> Option<String> {
+    let resp = client.get(url).header(USER_AGENT, ua).send().await.ok()?;
+    if resp.status().is_redirection() {
+        resp.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok()).map(|s| s.to_string())
+    } else {
+        let text = resp.text().await.unwrap_or_default();
+        if let Some(start) = text.find("href=\"") {
+            let rest = &text[start + 6..];
+            if let Some(end) = rest.find('\"') {
+                Some(rest[..end].replace("&amp;", "&"))
+            } else { None }
+        } else if text.starts_with("http") {
+            Some(text.trim().to_string())
+        } else { None }
+    }
+}
+
+pub async fn get_settings(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT key, value FROM settings").unwrap();
+    let mut settings = serde_json::Map::new();
+    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))).unwrap();
+    for r in rows.flatten() {
+        settings.insert(r.0, json!(r.1));
+    }
+    Json(json!(settings))
+}
+
+#[derive(Deserialize)]
+pub struct UpdateSettingsReq { pub prefetch_playback: bool }
+
+pub async fn update_settings(State(pool): State<Arc<Mutex<Connection>>>, Json(req): Json<UpdateSettingsReq>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let val = if req.prefetch_playback { "true" } else { "false" };
+    let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('prefetch_playback', ?1)", [val]);
+    Json(json!({"status": "success"}))
 }

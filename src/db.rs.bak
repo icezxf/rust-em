@@ -33,4 +33,8 @@ pub fn ensure_extra_columns(conn: &rusqlite::Connection) {
     let _ = conn.execute("ALTER TABLE items ADD COLUMN writers TEXT", []);
     let _ = conn.execute("ALTER TABLE items ADD COLUMN trailer TEXT", []);
     let _ = conn.execute("ALTER TABLE items ADD COLUMN releasedate TEXT", []);
+    let _ = conn.execute("ALTER TABLE items ADD COLUMN media_streams TEXT", []);
+    let _ = conn.execute("ALTER TABLE items ADD COLUMN date_created INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE items ADD COLUMN primary_image_aspect_ratio REAL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE items ADD COLUMN original_language TEXT", []);
 }
