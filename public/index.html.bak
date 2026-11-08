@@ -21,7 +21,6 @@
     </style>
 </head>
 <body class="bg-[#0f1115] text-gray-200 font-sans h-screen flex flex-col overflow-hidden">
-    <!-- 登录页 -->
     <div id="login-view" class="fixed inset-0 z-[100] flex items-center justify-center bg-[#0f1115] px-4">
         <div class="bg-[#1a1d24] p-8 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-800">
             <h2 class="text-2xl mb-8 text-center font-bold text-white tracking-wider">RUST-EM</h2>
@@ -31,16 +30,12 @@
         </div>
     </div>
 
-    <!-- 全局唯一的侧边栏控制按钮 (最上层) -->
     <button id="global-sidebar-btn" onclick="toggleSidebar()" class="fixed top-4 left-4 md:top-6 md:left-6 z-[90] text-gray-400 hover:text-white bg-[#16191f]/80 backdrop-blur-md p-2 rounded-lg transition border border-gray-700/50 hover:border-gray-500 shadow-xl">
         <svg id="sidebar-icon-close" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
         <svg id="sidebar-icon-open" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
     </button>
 
-    <!-- 主界面 -->
     <div id="main-view" class="hidden flex-1 flex flex-row h-full relative overflow-hidden">
-        
-        <!-- 左侧边栏 (窄版 w-48) -->
         <div id="desktop-sidebar" class="hidden md:flex h-full bg-[#16191f] flex-col border-r border-gray-800 z-[80] shrink-0 overflow-hidden sidebar-transition w-48 opacity-100 absolute md:relative">
             <div class="w-48 py-4 pt-16 flex flex-col h-full">
                 <div class="flex justify-between items-center mb-8 px-4">
@@ -71,10 +66,7 @@
 
         <div id="sidebar-overlay" onclick="toggleSidebar()" class="hidden fixed inset-0 bg-black/60 z-[75] md:hidden"></div>
 
-        <!-- 右侧内容区 -->
         <div class="flex-1 flex flex-col h-full overflow-hidden bg-[#0f1115] relative w-full min-w-0">
-            
-            <!-- 顶部栏 (仅在媒体库视图显示) -->
             <div id="top-bar" class="px-4 py-3 md:px-8 md:py-6 pl-16 md:pl-20 flex flex-col shadow-sm z-50 shrink-0 border-b border-gray-800/50 bg-[#0f1115]/80 backdrop-blur-md">
                 <div id="content-header" class="hidden flex gap-3">
                     <button onclick="setTypeFilter('all')" id="btn-type-all" class="px-5 py-1.5 rounded-full text-sm font-medium bg-blue-600 text-white transition shadow-lg shadow-blue-500/30">全部</button>
@@ -87,7 +79,6 @@
                 <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6"></div>
             </div>
 
-            <!-- 设置页 (无顶部空隙) -->
             <div id="tab-settings" class="hidden flex-1 overflow-y-auto p-4 pt-16 md:px-8 md:py-8 md:pl-20 pb-20">
                 <div class="max-w-3xl mx-auto">
                     <h2 class="text-2xl font-bold mb-6">系统设置</h2>
@@ -114,7 +105,6 @@
                     <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
                         <h3 class="text-lg font-bold mb-4 text-purple-400 border-b border-gray-800 pb-2">媒体信息探测 (Probe)</h3>
                         <p class="text-sm text-gray-400 mb-4">探测指定目录下 .strm 的真实媒体参数（分辨率、编码等），生成合规的 JSON 缓存文件供客户端使用。探测有严格防风控限速（约 1 个/秒）。</p>
-                        
                         <div class="flex gap-3 mb-4">
                             <input id="probe-dir-path" placeholder="未选择目录" class="flex-1 p-3 bg-[#0f1115] border border-gray-700 rounded-lg outline-none text-white focus:border-purple-500 transition" readonly>
                             <button onclick="openProbePathPicker()" class="bg-gray-800 hover:bg-gray-700 px-6 py-3 rounded-lg font-bold text-white transition border border-gray-700">浏览</button>
@@ -147,7 +137,6 @@
             </div>
         </div>
 
-        <!-- 沉浸式详情页 Modal -->
         <div id="detail-modal" class="hidden fixed top-0 bottom-0 right-0 left-0 z-[70] overflow-y-auto bg-[#0b0e14] modal-transition">
             <div id="detail-fanart" class="fixed top-0 bottom-0 right-0 left-0 bg-cover bg-top backdrop-blur-heavy modal-transition opacity-40"></div>
             
@@ -157,7 +146,6 @@
                 </button>
 
                 <div class="w-full max-w-5xl flex flex-col gap-3 md:gap-4 mt-4 md:mt-6 z-10">
-                    
                     <div class="flex flex-col md:flex-row gap-5 md:gap-6 items-start">
                         <div class="w-48 md:w-64 shrink-0 aspect-[2/3] bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border border-gray-600/30 sticky top-6 mb-2">
                             <img id="detail-poster" src="" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzM3NDE1MSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjOWNhM2FmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg=='">
@@ -167,7 +155,6 @@
                             <div class="flex items-center gap-3 mb-1">
                                 <h1 id="detail-title" class="text-2xl md:text-3xl font-black text-white tracking-tight drop-shadow-md">影片标题</h1>
                             </div>
-                            
                             <div class="flex flex-wrap items-center gap-2 mb-3 text-xs md:text-sm font-medium text-gray-400">
                                 <span id="detail-num" class="hidden border border-blue-500/50 bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-md font-mono font-bold"></span>
                                 <span id="detail-year" class="bg-gray-800/60 px-2 py-0.5 rounded-md text-gray-200">未知年份</span>
@@ -176,35 +163,20 @@
                                     <span id="detail-rating-val">暂无</span>
                                 </span>
                                 <span id="detail-runtime" class="bg-gray-800/60 px-2 py-0.5 rounded-md text-gray-200">未知</span>
-                                <span id="detail-mpaa" class="border border-gray-600 text-gray-300 px-1.5 py-0.5 rounded-md text-xs hidden"></span>
                             </div>
-
                             <div id="detail-genres" class="flex flex-wrap gap-1.5 mb-3 hidden">
                                 <div id="detail-genres-val" class="flex flex-wrap gap-1.5"></div>
                             </div>
-
                             <div id="detail-play-actions" class="flex flex-wrap gap-2 mb-4"></div>
-
                             <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base mb-4 whitespace-pre-wrap drop-shadow-md">暂无简介...</p>
-                            
                             <div class="flex flex-col gap-1 text-xs md:text-sm text-gray-300 pt-3 border-t border-gray-600/50">
-                                <div id="detail-series-box" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">系列:</span> <span id="detail-series" class="text-blue-400 font-medium drop-shadow-sm"></span></div>
-                                <div id="detail-label-box" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">厂牌:</span> <span id="detail-label" class="text-blue-400 font-medium drop-shadow-sm"></span></div>
                                 <div id="detail-studio-box" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">制作商:</span> <span id="detail-studios" class="text-gray-200 font-medium drop-shadow-sm"></span></div>
-                                <div id="detail-directors" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">导演:</span> <span class="text-gray-200 font-medium drop-shadow-sm" id="detail-directors-val"></span></div>
                                 <div id="detail-tags" class="hidden items-start mt-1">
                                     <span class="text-gray-400 shrink-0 w-12 inline-block mt-0.5 font-medium">标签:</span> 
                                     <div class="flex flex-wrap gap-1.5 flex-1" id="detail-tags-val"></div>
                                 </div>
                             </div>
                         </div>
-                    </div>
-
-                    <div id="detail-stills-section" class="w-full mt-2 hidden relative group">
-                        <h3 class="text-sm text-gray-500 font-bold mb-2 uppercase tracking-wider">剧照 STILLS</h3>
-                        <button onclick="scrollStills(-1)" class="absolute left-0 top-1/2 -translate-y-1/2 z-20 bg-black/60 hover:bg-black/90 text-white p-2 rounded-full backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity hidden md:block border border-gray-600/50 shadow-xl"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg></button>
-                        <div id="detail-stills-list" class="flex gap-4 overflow-x-auto pb-4 no-scrollbar snap-x-mandatory scroll-smooth"></div>
-                        <button onclick="scrollStills(1)" class="absolute right-0 top-1/2 -translate-y-1/2 z-20 bg-black/60 hover:bg-black/90 text-white p-2 rounded-full backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity hidden md:block border border-gray-600/50 shadow-xl"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>
                     </div>
 
                     <div class="w-full mt-2">
@@ -222,15 +194,9 @@
                             <div id="detail-media-streams" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
                                 <div class="col-span-full text-sm text-gray-500 py-2">暂无探测信息，请执行媒体探测。</div>
                             </div>
-                            <div class="border-t border-gray-800/80 pt-3 flex flex-col gap-3">
-                                <div>
-                                    <div class="text-xs text-gray-500 font-bold mb-1 uppercase tracking-wider">STRM 文件路径</div>
-                                    <div id="detail-strm-path" class="text-sm font-mono text-gray-400 bg-black/40 p-2 rounded-lg break-all select-all border border-gray-800/50">暂无路径</div>
-                                </div>
-                                <div>
-                                    <div class="text-xs text-gray-500 font-bold mb-1 uppercase tracking-wider">STRM 文件内容 (多片段已合并)</div>
-                                    <div id="detail-strm-content" class="text-sm font-mono text-gray-400 bg-black/40 p-2 rounded-lg break-all select-all whitespace-pre-wrap border border-gray-800/50">暂无内容</div>
-                                </div>
+                            <div class="border-t border-gray-800/80 pt-3">
+                                <div class="text-xs text-gray-500 font-bold mb-1 uppercase tracking-wider">STRM 文件路径</div>
+                                <div id="detail-strm-path" class="text-sm font-mono text-gray-400 bg-black/40 p-2 rounded-lg break-all select-all border border-gray-800/50">暂无路径</div>
                             </div>
                         </div>
                     </div>
@@ -238,7 +204,6 @@
             </div>
         </div>
 
-        <!-- 全屏视频播放器 -->
         <div id="video-player-modal" class="hidden fixed inset-0 z-[100] bg-black flex flex-col">
             <div class="flex justify-between items-center p-4 bg-gradient-to-b from-black/80 to-transparent absolute top-0 w-full z-10">
                 <h2 id="player-title" class="text-white text-lg font-bold drop-shadow-md">正在播放</h2>
@@ -247,17 +212,12 @@
                 </button>
             </div>
             <div class="flex-1 flex items-center justify-center relative">
-                <video id="main-video" class="w-full h-full max-h-screen outline-none" controls autoplay playsinline>
-                    您的浏览器不支持 HTML5 视频播放。
-                </video>
-                <div id="player-loading" class="absolute inset-0 flex items-center justify-center text-white text-lg bg-black/50 hidden">
-                    正在解析直链并加载...
-                </div>
+                <video id="main-video" class="w-full h-full max-h-screen outline-none" controls autoplay playsinline>您的浏览器不支持 HTML5 视频播放。</video>
+                <div id="player-loading" class="absolute inset-0 flex items-center justify-center text-white text-lg bg-black/50 hidden">正在解析直链并加载...</div>
             </div>
         </div>
     </div>
 
-    <!-- 路径选择弹窗 -->
     <div id="path-modal" class="hidden fixed inset-0 z-[90] bg-black/80 flex items-end md:items-center justify-center backdrop-blur-sm">
         <div class="bg-[#16191f] w-full md:w-2/3 lg:w-1/2 md:rounded-2xl rounded-t-2xl shadow-2xl flex flex-col h-[85vh] md:h-[75vh] border border-gray-700">
             <div class="p-4 border-b border-gray-800 flex justify-between items-center bg-[#1a1d24] rounded-t-2xl">
@@ -277,12 +237,11 @@
         let currentPath = '/media';
         let selectedPaths = [];
         let allLibraries = [];
-        
         let currentLibId = 'all';
         let currentType = 'all';
         let cachedItems = [];
         let currentPlayingItemId = null;
-        let isProbeSelecting = false; // 区分是选媒体库路径还是Probe路径
+        let isProbeSelecting = false;
 
         const defaultPosterSvg = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzFhMWQyNCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjNGI1NTYzIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg==';
 
@@ -293,36 +252,15 @@
             const overlay = document.getElementById('sidebar-overlay');
             const iconClose = document.getElementById('sidebar-icon-close');
             const iconOpen = document.getElementById('sidebar-icon-open');
-            const detailModal = document.getElementById('detail-modal');
-            const detailFanart = document.getElementById('detail-fanart');
             const isOpen = sidebar.classList.contains('w-48');
-
             if (isOpen) {
-                sidebar.classList.remove('w-48', 'opacity-100');
-                sidebar.classList.add('w-0', 'opacity-0');
-                if (window.innerWidth < 768) {
-                    sidebar.classList.add('hidden');
-                    sidebar.classList.remove('flex');
-                }
-                overlay.classList.add('hidden');
-                iconClose.classList.add('hidden');
-                iconOpen.classList.remove('hidden');
-                
-                detailModal.classList.remove('md:left-48');
-                detailFanart.classList.remove('md:left-48');
+                sidebar.classList.remove('w-48', 'opacity-100'); sidebar.classList.add('w-0', 'opacity-0');
+                if (window.innerWidth < 768) { sidebar.classList.add('hidden'); sidebar.classList.remove('flex'); }
+                overlay.classList.add('hidden'); iconClose.classList.add('hidden'); iconOpen.classList.remove('hidden');
             } else {
-                sidebar.classList.remove('w-0', 'opacity-0');
-                sidebar.classList.add('w-48', 'opacity-100');
-                if (window.innerWidth < 768) {
-                    sidebar.classList.remove('hidden');
-                    sidebar.classList.add('flex');
-                    overlay.classList.remove('hidden');
-                } else {
-                    detailModal.classList.add('md:left-48');
-                    detailFanart.classList.add('md:left-48');
-                }
-                iconClose.classList.remove('hidden');
-                iconOpen.classList.add('hidden');
+                sidebar.classList.remove('w-0', 'opacity-0'); sidebar.classList.add('w-48', 'opacity-100');
+                if (window.innerWidth < 768) { sidebar.classList.remove('hidden'); sidebar.classList.add('flex'); overlay.classList.remove('hidden'); }
+                iconClose.classList.remove('hidden'); iconOpen.classList.add('hidden');
             }
         }
 
@@ -341,39 +279,27 @@
         async function login() {
             const u = document.getElementById('username').value;
             const p = document.getElementById('password').value;
-            const res = await fetch('/api/login', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ username: u, password: p })
-            });
-            if (res.ok) {
-                const data = await res.json();
-                token = data.token; localStorage.setItem('token', token); showMain();
-            } else alert('登录失败');
+            const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ username: u, password: p }) });
+            if (res.ok) { const data = await res.json(); token = data.token; localStorage.setItem('token', token); showMain(); } else alert('登录失败');
         }
-        
         function logout() { localStorage.removeItem('token'); location.reload(); }
-        
+
         async function showMain() {
             document.getElementById('login-view').classList.add('hidden');
             document.getElementById('main-view').classList.remove('hidden');
             const sidebar = document.getElementById('desktop-sidebar');
             if (!sidebar.classList.contains('w-48')) toggleSidebar();
-            
-            await fetchLibraries();
-            switchTab('library');
+            await fetchLibraries(); switchTab('library');
         }
-        
+
         function switchTab(tab) {
             closeDetail();
             document.getElementById('tab-library').classList.add('hidden');
             document.getElementById('tab-settings').classList.add('hidden');
-            
             const topBar = document.getElementById('top-bar');
-            const contentHeader = document.getElementById('content-header');
-            
             if (tab === 'library') {
                 topBar.classList.remove('hidden');
-                contentHeader.classList.remove('hidden');
+                document.getElementById('content-header').classList.remove('hidden');
                 document.getElementById('tab-library').classList.remove('hidden');
                 loadMedia();
             } else if (tab === 'settings') {
@@ -382,40 +308,25 @@
                 renderSettingsLibraries();
                 loadSettings();
             }
-            
-            if (window.innerWidth < 768) {
-                const sidebar = document.getElementById('desktop-sidebar');
-                if (sidebar.classList.contains('w-48')) toggleSidebar();
-            }
         }
 
         async function fetchLibraries() {
             const data = await api('/api/libraries');
-            if (data.libraries) {
-                allLibraries = data.libraries;
-                renderSidebarLibraries();
-            }
+            if (data.libraries) { allLibraries = data.libraries; renderSidebarLibraries(); }
         }
 
         function renderSidebarLibraries() {
             const container = document.getElementById('sidebar-libs');
             let html = `<button onclick="setLibraryFilter('all')" class="flex items-center gap-3 text-left px-2 py-2.5 rounded-lg transition whitespace-nowrap w-full ${currentLibId === 'all' ? 'bg-gray-800 text-white font-medium shadow-sm' : 'hover:bg-gray-800/50 text-gray-400'}">全部媒体</button>`;
             allLibraries.forEach(lib => {
-                const isActive = currentLibId === lib.id;
-                const cls = isActive ? 'bg-gray-800 text-white font-medium shadow-sm' : 'hover:bg-gray-800/50 text-gray-400';
+                const cls = currentLibId === lib.id ? 'bg-gray-800 text-white font-medium shadow-sm' : 'hover:bg-gray-800/50 text-gray-400';
                 const icon = lib.type === 'movies' ? '🎬' : '📺';
                 html += `<button onclick="setLibraryFilter(${lib.id})" class="flex items-center gap-3 text-left px-2 py-2.5 rounded-lg transition truncate whitespace-nowrap w-full ${cls}"><span>${icon}</span> <span class="truncate">${lib.name}</span></button>`;
             });
             container.innerHTML = html;
         }
 
-        function setLibraryFilter(libId) { 
-            closeDetail();
-            currentLibId = libId; 
-            renderSidebarLibraries(); 
-            switchTab('library'); 
-        }
-        
+        function setLibraryFilter(libId) { closeDetail(); currentLibId = libId; renderSidebarLibraries(); switchTab('library'); }
         function setTypeFilter(type) {
             currentType = type;
             ['all', 'movies', 'tvshows'].forEach(t => {
@@ -431,20 +342,11 @@
                 let url = `/api/items?`;
                 if (currentLibId !== 'all') url += `library_id=${currentLibId}&`;
                 if (currentType !== 'all') url += `lib_type=${currentType}`;
-
                 const grid = document.getElementById('media-grid');
                 grid.innerHTML = Array(12).fill(`<div class="animate-pulse bg-[#16191f] rounded-xl overflow-hidden aspect-[2/3]"><div class="w-full h-full bg-gray-800/50"></div></div>`).join('');
-
                 const data = await api(url);
-                
-                if (!data.items || data.items.length === 0) {
-                    grid.innerHTML = `<div class="col-span-full flex flex-col items-center justify-center text-gray-500 mt-20"><svg class="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"></path></svg>该分类下暂无媒体内容</div>`;
-                    cachedItems = [];
-                    return;
-                }
-                
+                if (!data.items || data.items.length === 0) { grid.innerHTML = `<div class="col-span-full text-center text-gray-500 mt-20">该分类下暂无媒体内容</div>`; cachedItems = []; return; }
                 cachedItems = data.items;
-
                 grid.innerHTML = data.items.map(item => {
                     const imgUrl = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
                     const ratingVal = Number(item.rating) || 0;
@@ -462,10 +364,7 @@
                         </div>
                     </div>`;
                 }).join('');
-            } catch (e) { 
-                console.error(e); 
-                document.getElementById('media-grid').innerHTML = `<div class="col-span-full text-center text-red-500 mt-20">加载失败: ${e.message}</div>`;
-            }
+            } catch (e) { document.getElementById('media-grid').innerHTML = `<div class="col-span-full text-center text-red-500 mt-20">加载失败</div>`; }
         }
 
         function playVideo(partIndex = 0) {
@@ -474,71 +373,39 @@
             const video = document.getElementById('main-video');
             const loading = document.getElementById('player-loading');
             const title = document.getElementById('player-title');
-            
             const item = cachedItems.find(i => i.id === currentPlayingItemId);
-            if(item) title.innerText = item.title + (item.parts && item.parts.length > 1 ? ` (CD${partIndex + 1})` : '');
-
-            playerModal.classList.remove('hidden');
-            loading.classList.remove('hidden');
-            loading.innerHTML = "正在解析直链并加载...";
-            
+            if(item) title.innerText = item.title;
+            playerModal.classList.remove('hidden'); loading.classList.remove('hidden'); loading.innerHTML = "正在解析直链并加载...";
             video.src = `/Videos/${currentPlayingItemId}/stream?token=${token}&part=${partIndex}`;
-            
-            video.play().then(() => {
-                loading.classList.add('hidden');
-            }).catch(e => {
-                console.error("播放失败:", e);
-                loading.innerHTML = `<span class="text-red-400">播放失败: 浏览器可能不支持该视频格式，或网盘直链被拦截。<br>建议使用 Infuse 或 SenPlayer 等专业播放器。</span>`;
+            video.play().then(() => { loading.classList.add('hidden'); }).catch(e => {
+                loading.innerHTML = `<span class="text-red-400">播放失败: 浏览器可能不支持该视频格式。</span>`;
             });
         }
 
         function closePlayer() {
-            const playerModal = document.getElementById('video-player-modal');
-            const video = document.getElementById('main-video');
-            playerModal.classList.add('hidden');
-            video.pause();
-            video.src = ""; 
-        }
-
-        function scrollStills(direction) {
-            const container = document.getElementById('detail-stills-list');
-            const scrollAmount = 280 * direction;
-            container.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+            document.getElementById('video-player-modal').classList.add('hidden');
+            document.getElementById('main-video').pause(); document.getElementById('main-video').src = "";
         }
 
         function openDetail(itemId) {
             const item = cachedItems.find(i => i.id === itemId);
             if (!item) return;
             currentPlayingItemId = item.id;
+
             // 静默触发后端预热，加速网页端起播
             fetch(`/emby/Items/${item.id}/PlaybackInfo?IsPlayback=false`, {
                 method: "POST", headers: { "X-Emby-Token": token }
             }).catch(() => {});
 
-            if (window.innerWidth >= 768) {
-                const sidebar = document.getElementById('desktop-sidebar');
-                if (sidebar.classList.contains('w-48')) toggleSidebar();
-            }
-
             document.getElementById('detail-plot').innerText = item.plot || '暂无简介...';
             document.getElementById('detail-title').innerText = item.title || '未知';
-            
             const numEl = document.getElementById('detail-num');
             if (item.num) { numEl.innerText = item.num; numEl.classList.remove('hidden'); } else { numEl.classList.add('hidden'); }
-
             document.getElementById('detail-year').innerText = item.year || '未知年份';
-            
             const ratingVal = Number(item.rating) || 0;
             document.getElementById('detail-rating-val').innerText = ratingVal > 0 ? ratingVal.toFixed(1) : '暂无';
-            
             const runtimeVal = Number(item.runtime) || 0;
-            if (runtimeVal > 0) {
-                const h = Math.floor(runtimeVal / 60), m = runtimeVal % 60;
-                document.getElementById('detail-runtime').innerText = `${h > 0 ? h + 'h ' : ''}${m}min`;
-            } else { document.getElementById('detail-runtime').innerText = '未知'; }
-
-            const mpaaEl = document.getElementById('detail-mpaa');
-            if (item.mpaa) { mpaaEl.innerText = item.mpaa; mpaaEl.classList.remove('hidden'); } else { mpaaEl.classList.add('hidden'); }
+            document.getElementById('detail-runtime').innerText = runtimeVal > 0 ? `${Math.floor(runtimeVal / 60)}h ${runtimeVal % 60}min` : '未知';
 
             const genresBox = document.getElementById('detail-genres');
             if (item.genres) {
@@ -546,56 +413,23 @@
                 genresBox.classList.remove('hidden'); genresBox.classList.add('flex');
             } else { genresBox.classList.add('hidden'); }
 
-            const seriesBox = document.getElementById('detail-series-box');
-            if (item.series) { document.getElementById('detail-series').innerText = item.series; seriesBox.classList.remove('hidden'); } else { seriesBox.classList.add('hidden'); }
-            const labelBox = document.getElementById('detail-label-box');
-            if (item.label) { document.getElementById('detail-label').innerText = item.label; labelBox.classList.remove('hidden'); } else { labelBox.classList.add('hidden'); }
             const studioBox = document.getElementById('detail-studio-box');
             if (item.studios) { document.getElementById('detail-studios').innerText = item.studios; studioBox.classList.remove('hidden'); } else { studioBox.classList.add('hidden'); }
 
-            const updateTextBlock = (id, valId, value) => {
-                const el = document.getElementById(id);
-                const valEl = document.getElementById(valId);
-                if (value) { valEl.innerText = value; el.classList.remove('hidden'); }
-                else { el.classList.add('hidden'); }
-            };
-            updateTextBlock('detail-directors', 'detail-directors-val', item.directors);
-            
             const tagsBox = document.getElementById('detail-tags');
-            const tagsValBox = document.getElementById('detail-tags-val');
             if (item.tags) {
-                tagsValBox.innerHTML = item.tags.split(' / ').map(t => `<span class="bg-gray-800/40 border border-gray-500/30 text-gray-200 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap drop-shadow-sm">${t}</span>`).join('');
+                document.getElementById('detail-tags-val').innerHTML = item.tags.split(' / ').map(t => `<span class="bg-gray-800/40 border border-gray-500/30 text-gray-200 px-1.5 py-0.5 rounded text-[11px]">${t}</span>`).join('');
                 tagsBox.classList.remove('hidden'); tagsBox.classList.add('flex');
-            } else {
-                tagsBox.classList.add('hidden');
-            }
+            } else { tagsBox.classList.add('hidden'); }
 
-            const parts = item.parts || [];
             const playActions = document.getElementById('detail-play-actions');
-            if (parts.length <= 1) {
-                playActions.innerHTML = `
-                <button onclick="playVideo(0)" class="bg-white text-black hover:bg-gray-200 px-6 py-2 rounded-lg font-bold flex items-center gap-2 transition shadow-lg shadow-white/10 hover:shadow-white/20 text-sm">
-                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
-                    播放
-                </button>`;
-            } else {
-                playActions.innerHTML = parts.map((_, i) => `
-                <button onclick="playVideo(${i})" class="bg-white text-black hover:bg-gray-200 px-5 py-2 rounded-lg font-bold flex items-center gap-2 transition shadow-lg shadow-white/10 hover:shadow-white/20 text-sm">
-                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
-                    播放 CD${i + 1}
-                </button>`).join('');
-            }
+            playActions.innerHTML = `<button onclick="playVideo(0)" class="bg-white text-black hover:bg-gray-200 px-6 py-2 rounded-lg font-bold flex items-center gap-2 transition shadow-lg text-sm"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>播放</button>`;
 
-            const posterImg = document.getElementById('detail-poster');
-            posterImg.src = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
+            document.getElementById('detail-poster').src = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
+            document.getElementById('detail-fanart').style.backgroundImage = item.has_poster ? `url('/api/images/${item.id}/fanart?token=${token}')` : 'none';
 
-            const fanartDiv = document.getElementById('detail-fanart');
-            if (item.has_poster) fanartDiv.style.backgroundImage = `url('/api/images/${item.id}/fanart?token=${token}')`;
-            else fanartDiv.style.backgroundImage = 'none';
-
-            const sizeEl = document.getElementById('detail-file-size');
             const sizeVal = Number(item.size) || 0;
-            if (sizeVal > 0) { sizeEl.innerText = `${(sizeVal / (1024 * 1024 * 1024)).toFixed(2)} GB`; } else { sizeEl.innerText = '未知'; }
+            document.getElementById('detail-file-size').innerText = sizeVal > 0 ? `${(sizeVal / (1024 * 1024 * 1024)).toFixed(2)} GB` : '未知';
 
             const mediaStreamsBox = document.getElementById('detail-media-streams');
             if (item.media_streams && item.media_streams.length > 0) {
@@ -603,10 +437,13 @@
                 item.media_streams.forEach(s => {
                     if (s.Type === 'VIDEO' || s.Type === 'Video') {
                         const title = s.DisplayTitle || `${s.Height}p ${s.Codec.toUpperCase()}`;
+                        const depth = s.BitDepth ? `${s.BitDepth}bit` : '';
+                        const hdr = s.VideoRange && s.VideoRange !== 'SDR' ? s.VideoRange : '';
+                        const extra = [s.Profile, `${s.Width}x${s.Height}`, depth, hdr].filter(Boolean).join(' ');
                         html += `<div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
                             <div class="text-xs text-blue-400 font-bold mb-1 uppercase tracking-wider">视频流 VIDEO</div>
-                            <div class="text-sm text-gray-200 mb-0.5 font-medium">${title}</div>
-                            <div class="text-xs text-gray-500">${s.Codec.toUpperCase()} ${s.Profile || ''} ${s.Width}x${s.Height}</div>
+                            <div class="text-sm text-gray-200 mb-0.5 font-medium">${title} ${s.BitDepth == 10 ? '<span class="text-[10px] bg-yellow-500/20 text-yellow-300 px-1 rounded border border-yellow-500/30 ml-1">10bit</span>' : ''}</div>
+                            <div class="text-xs text-gray-500">${s.Codec.toUpperCase()} ${extra}</div>
                         </div>`;
                     } else if (s.Type === 'AUDIO' || s.Type === 'Audio') {
                         const title = s.DisplayTitle || `${s.Codec.toUpperCase()} ${s.Channels}ch`;
@@ -615,55 +452,14 @@
                             <div class="text-sm text-gray-200 mb-0.5 font-medium">${title}</div>
                             <div class="text-xs text-gray-500">${s.Codec.toUpperCase()} ${s.Language || 'und'}</div>
                         </div>`;
-                    } else if (s.Type === 'SUBTITLE' || s.Type === 'Subtitle') {
-                        html += `<div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
-                            <div class="text-xs text-yellow-400 font-bold mb-1 uppercase tracking-wider">字幕流 SUBTITLE</div>
-                            <div class="text-sm text-gray-200 mb-0.5 font-medium">${s.Codec.toUpperCase()}</div>
-                            <div class="text-xs text-gray-500">${s.Language || 'und'}</div>
-                        </div>`;
                     }
                 });
-                mediaStreamsBox.innerHTML = html || `<div class="col-span-full text-sm text-gray-500 py-2">未找到有效流信息</div>`;
+                mediaStreamsBox.innerHTML = html;
             } else {
                 mediaStreamsBox.innerHTML = `<div class="col-span-full text-sm text-gray-500 py-2">暂无探测信息，请执行媒体探测。</div>`;
             }
-            
+
             document.getElementById('detail-strm-path').innerText = item.file_path || '暂无路径';
-            let strmContent = item.strm_content || '暂无内容';
-            try { strmContent = decodeURIComponent(strmContent); } catch(e) {}
-            document.getElementById('detail-strm-content').innerText = strmContent;
-
-            const actorsContainer = document.getElementById('detail-actors-list');
-            if (item.actors && item.actors.length > 0) {
-                actorsContainer.innerHTML = item.actors.map(actor => {
-                    const name = actor.name || '未知';
-                    const role = actor.role || '';
-                    return `
-                    <div class="flex flex-col items-center shrink-0 w-20 snap-start">
-                        <div class="w-14 h-14 rounded-full bg-gray-800 border-2 border-gray-700 overflow-hidden flex items-center justify-center mb-2 shadow-md">
-                            <span class="text-gray-400 text-lg font-bold">${name.charAt(0)}</span>
-                        </div>
-                        <div class="text-xs text-white text-center font-medium w-full truncate drop-shadow-md">${name}</div>
-                        ${role ? `<div class="text-[10px] text-gray-400 text-center w-full truncate drop-shadow-md">${role}</div>` : ''}
-                    </div>`;
-                }).join('');
-            } else {
-                actorsContainer.innerHTML = `<div class="text-gray-500 text-sm">暂无演员信息</div>`;
-            }
-
-            const stillsSection = document.getElementById('detail-stills-section');
-            const stillsList = document.getElementById('detail-stills-list');
-            if (item.stills && item.stills.length > 0) {
-                stillsList.innerHTML = item.stills.map((_, index) => `
-                    <div class="w-48 md:w-64 shrink-0 aspect-video bg-gray-800 rounded-lg overflow-hidden border border-gray-700 shadow-lg hover:border-blue-500 transition-colors snap-start">
-                        <img src="/api/images/${item.id}/stills?index=${index}&token=${token}" class="w-full h-full object-cover" loading="lazy" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMTIwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjEyMCIgZmlsbD0iIzM3NDE1MSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE0IiBmaWxsPSIjOWNhM2FmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg=='">
-                    </div>
-                `).join('');
-                stillsSection.classList.remove('hidden');
-            } else {
-                stillsSection.classList.add('hidden');
-            }
-
             document.getElementById('detail-modal').classList.remove('hidden');
             document.body.style.overflow = 'hidden';
         }
@@ -681,34 +477,18 @@
                     <div class="flex items-center gap-3 truncate">
                         <span class="text-lg">${lib.type === 'movies' ? '🎬' : '📺'}</span>
                         <span class="font-medium text-gray-200">${lib.name}</span>
-                        <span class="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded">${lib.type === 'movies' ? '电影' : '剧集'}</span>
                     </div>
                     <div class="flex gap-2 shrink-0">
-                        <button onclick="rescanLibrary(${lib.id})" class="text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-1.5 rounded-lg text-sm transition border border-blue-500/20">刷新</button>
-                        <button onclick="deleteLibrary(${lib.id}, '${lib.name}')" class="text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 px-3 py-1.5 rounded-lg text-sm transition border border-red-500/20">删除</button>
+                        <button onclick="rescanLibrary(${lib.id})" class="text-blue-400 bg-blue-500/10 px-3 py-1.5 rounded-lg text-sm">刷新</button>
+                        <button onclick="deleteLibrary(${lib.id}, '${lib.name}')" class="text-red-400 bg-red-500/10 px-3 py-1.5 rounded-lg text-sm">删除</button>
                     </div>
                 </div>
             `).join('');
         }
 
-        async function deleteLibrary(id, name) {
-            if (!confirm(`⚠️ 确定要删除媒体库【${name}】吗？`)) return;
-            await api(`/api/libraries/${id}`, 'DELETE');
-            await fetchLibraries(); renderSettingsLibraries();
-        }
+        async function deleteLibrary(id, name) { if (confirm(`确定要删除媒体库【${name}】吗？`)) { await api(`/api/libraries/${id}`, 'DELETE'); await fetchLibraries(); renderSettingsLibraries(); } }
+        async function rescanLibrary(id) { const btn = event.target; btn.innerText = '扫描中...'; btn.disabled = true; await api(`/api/libraries/${id}/scan`, 'POST'); setTimeout(() => { btn.innerText = '刷新'; btn.disabled = false; alert('扫描任务已启动'); }, 1000); }
 
-        async function rescanLibrary(id) {
-            const btn = event.target;
-            const originalText = btn.innerText;
-            btn.innerText = '扫描中...'; btn.disabled = true; btn.classList.add('opacity-50');
-            await api(`/api/libraries/${id}/scan`, 'POST');
-            setTimeout(() => {
-                btn.innerText = originalText; btn.disabled = false; btn.classList.remove('opacity-50');
-                alert('扫描任务已在后台启动，请稍后刷新列表查看。');
-            }, 1000);
-        }
-
-        // --- 路径选择与探测逻辑 ---
         async function openPathPicker() { isProbeSelecting = false; document.getElementById('path-modal').classList.remove('hidden'); await browseDir(currentPath); }
         async function openProbePathPicker() { isProbeSelecting = true; document.getElementById('path-modal').classList.remove('hidden'); await browseDir(currentPath); }
         function closePathPicker() { document.getElementById('path-modal').classList.add('hidden'); }
@@ -716,133 +496,68 @@
         async function startProbe() {
             const path = document.getElementById('probe-dir-path').value;
             if (!path) return alert('请先选择要探测的目录');
-            const btn = event.target;
-            const text = btn.innerText;
-            btn.innerText = "任务已下发..."; btn.disabled = true; btn.classList.add("opacity-50");
-            const res = await api("/api/probe/scan", "POST", { path: path, interval_ms: 1000 });
-            if (res.status === "started") { alert("探测任务已在后台启动，请留意容器终端日志。"); }
-            else { alert("启动失败"); }
-            btn.innerText = text; btn.disabled = false; btn.classList.remove("opacity-50");
+            const btn = event.target; const text = btn.innerText;
+            btn.innerText = "任务已下发..."; btn.disabled = true;
+            await api("/api/probe/scan", "POST", { path: path, interval_ms: 1000 });
+            alert("探测任务已在后台启动，请留意容器终端日志。");
+            btn.innerText = text; btn.disabled = false;
         }
 
         async function browseDir(path) {
-            const list = document.getElementById('dir-list');
-            list.innerHTML = `<div class="p-4 text-center text-gray-500 animate-pulse">加载中...</div>`;
-            const url = `/api/browse?path=${encodeURIComponent(path)}&t=${Date.now()}`;
-            const res = await api(url, "GET");
-
-            if (res.error) { list.innerHTML = `<div class="p-4 text-center text-red-400 text-sm font-bold bg-red-900/20 rounded-lg">读取失败: ${res.error}</div>`; return; }
-            currentPath = res.current || path;
-            document.getElementById('current-path').innerText = currentPath;
-            list.innerHTML = '';
+            const list = document.getElementById('dir-list'); list.innerHTML = `<div class="p-4 text-center text-gray-500 animate-pulse">加载中...</div>`;
+            const res = await api(`/api/browse?path=${encodeURIComponent(path)}&t=${Date.now()}`, "GET");
+            if (res.error) { list.innerHTML = `<div class="p-4 text-center text-red-400">读取失败: ${res.error}</div>`; return; }
+            currentPath = res.current || path; document.getElementById('current-path').innerText = currentPath; list.innerHTML = '';
 
             if (currentPath !== '/media') {
                 const parent = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/media';
-                const backBtn = document.createElement('div');
-                backBtn.className = "p-3 border-b border-gray-800 cursor-pointer hover:bg-gray-800 flex items-center text-gray-400 font-medium transition";
-                backBtn.innerHTML = "⬅ 返回上一级";
-                backBtn.onclick = () => browseDir(parent);
-                list.appendChild(backBtn);
+                const backBtn = document.createElement('div'); backBtn.className = "p-3 border-b border-gray-800 cursor-pointer hover:bg-gray-800 text-gray-400"; backBtn.innerHTML = "⬅ 返回上一级"; backBtn.onclick = () => browseDir(parent); list.appendChild(backBtn);
             }
-
-            if (res.dirs && res.dirs.length > 0) {
-                res.dirs.forEach(d => {
-                    const row = document.createElement('div');
-                    row.className = "p-3 border-b border-gray-800 flex justify-between items-center hover:bg-gray-800 cursor-pointer transition";
-                    row.onclick = (e) => { if (e.target.tagName === 'INPUT') return; browseDir(d.path); };
-                    const leftArea = document.createElement('div');
-                    leftArea.className = "flex items-center flex-1 overflow-hidden pointer-events-none";
-                    leftArea.innerHTML = `<span class="text-yellow-500 mr-3">📁</span> <span class="truncate">${d.name}</span>`;
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox'; checkbox.className = "w-5 h-5 accent-blue-500 cursor-pointer flex-shrink-0 ml-2";
-                    checkbox.checked = selectedPaths.includes(d.path);
-                    checkbox.onchange = (e) => togglePath(d.path, e.target.checked);
-                    row.appendChild(leftArea); row.appendChild(checkbox); list.appendChild(row);
-                });
-            }
-
-            if (res.files && res.files.length > 0) {
-                res.files.forEach(f => {
-                    const row = document.createElement('div');
-                    row.className = "p-3 border-b border-gray-800 flex justify-between items-center hover:bg-gray-800 transition";
-                    row.onclick = (e) => {
-                        if (e.target.tagName === 'INPUT') return;
-                        const cb = row.querySelector('input[type="checkbox"]');
-                        cb.checked = !cb.checked; togglePath(f.path, cb.checked);
-                    };
-                    const leftArea = document.createElement('div');
-                    leftArea.className = "flex items-center flex-1 overflow-hidden pointer-events-none text-gray-400";
-                    leftArea.innerHTML = `<span class="text-blue-500 mr-3">📄</span> <span class="truncate">${f.name}</span>`;
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox'; checkbox.className = "w-5 h-5 accent-blue-500 cursor-pointer flex-shrink-0 ml-2";
-                    checkbox.checked = selectedPaths.includes(f.path);
-                    checkbox.onchange = (e) => togglePath(f.path, e.target.checked);
-                    row.appendChild(leftArea); row.appendChild(checkbox); list.appendChild(row);
-                });
-            }
+            if (res.dirs) res.dirs.forEach(d => {
+                const row = document.createElement('div'); row.className = "p-3 border-b border-gray-800 flex justify-between items-center hover:bg-gray-800 cursor-pointer"; row.onclick = (e) => { if (e.target.tagName === 'INPUT') return; browseDir(d.path); };
+                row.innerHTML = `<div class="flex items-center flex-1 overflow-hidden pointer-events-none"><span class="text-yellow-500 mr-3">📁</span> <span class="truncate">${d.name}</span></div><input type="checkbox" class="w-5 h-5 accent-blue-500 cursor-pointer flex-shrink-0 ml-2" ${selectedPaths.includes(d.path) ? 'checked' : ''} onchange="togglePath('${d.path}', this.checked)">`;
+                list.appendChild(row);
+            });
         }
 
-        function togglePath(path, isChecked) {
-            if (isChecked) { if (!selectedPaths.includes(path)) selectedPaths.push(path); }
-            else { selectedPaths = selectedPaths.filter(p => p !== path); }
-            renderSelectedPaths();
-        }
-
+        function togglePath(path, isChecked) { if (isChecked) { if (!selectedPaths.includes(path)) selectedPaths.push(path); } else { selectedPaths = selectedPaths.filter(p => p !== path); } renderSelectedPaths(); }
+        
         function selectCurrentPath() {
-            if (isProbeSelecting) {
-                document.getElementById('probe-dir-path').value = currentPath;
-            } else {
-                if (!selectedPaths.includes(currentPath)) { selectedPaths.push(currentPath); renderSelectedPaths(); }
-            }
+            if (isProbeSelecting) document.getElementById('probe-dir-path').value = currentPath;
+            else { if (!selectedPaths.includes(currentPath)) { selectedPaths.push(currentPath); renderSelectedPaths(); } }
             closePathPicker();
         }
 
         function renderSelectedPaths() {
             const container = document.getElementById('selected-paths');
             if (selectedPaths.length === 0) { container.innerHTML = `<div class="text-gray-600 text-sm italic mb-2">暂未选择任何路径</div>`; return; }
-            container.innerHTML = selectedPaths.map(p => `
-                <div class="flex justify-between items-center bg-[#1a1d24] border border-gray-700 p-2.5 rounded-lg text-sm mb-2">
-                    <span class="truncate mr-2 text-gray-300" title="${p}">${p}</span>
-                    <button onclick="removePath('${p}')" class="text-red-400 hover:text-red-300 px-2 transition">移除</button>
-                </div>
-            `).join('');
+            container.innerHTML = selectedPaths.map(p => `<div class="flex justify-between items-center bg-[#1a1d24] border border-gray-700 p-2.5 rounded-lg text-sm mb-2"><span class="truncate mr-2 text-gray-300">${p}</span><button onclick="removePath('${p}')" class="text-red-400">移除</button></div>`).join('');
         }
 
         function removePath(path) { selectedPaths = selectedPaths.filter(p => p !== path); renderSelectedPaths(); }
 
         async function addLibrary() {
-            const name = document.getElementById('lib-name').value;
-            const type = document.getElementById('lib-type').value;
+            const name = document.getElementById('lib-name').value; const type = document.getElementById('lib-type').value;
             if (!name || selectedPaths.length === 0) return alert('请填写名称并至少选择一个路径');
-            const res = await api('/api/libraries', 'POST', { name, paths: selectedPaths, type });
-            if (res.error) return alert(res.error);
-            alert('媒体库已保存，后台开始扫描。大目录可能需要一些时间，请稍后刷新。');
+            await api('/api/libraries', 'POST', { name, paths: selectedPaths, type });
+            alert('媒体库已保存，后台开始扫描。');
             selectedPaths = []; renderSelectedPaths(); document.getElementById('lib-name').value = '';
             await fetchLibraries(); renderSettingsLibraries(); switchTab('library');
         }
 
         async function updateUser() {
-            const oldPwd = document.getElementById('old-pwd').value;
-            const newUser = document.getElementById('new-user').value;
-            const newPwd = document.getElementById('new-pwd').value;
+            const oldPwd = document.getElementById('old-pwd').value; const newUser = document.getElementById('new-user').value; const newPwd = document.getElementById('new-pwd').value;
             if (!oldPwd || !newUser || !newPwd) return alert('请填写完整所有选项');
             const res = await api('/api/user/update', 'POST', { old_password: oldPwd, new_username: newUser, new_password: newPwd });
-            if (res && res.status === 'success') { alert('账号修改成功！请使用新账号重新登录。'); logout(); }
-            else if (res && res.error) { alert(res.error); }
+            if (res && res.status === 'success') { alert('账号修改成功！'); logout(); } else if (res && res.error) alert(res.error);
         }
 
         async function loadSettings() {
             const data = await api("/api/settings");
-            if (data && data.prefetch_playback === "true") {
-                document.getElementById("prefetch-toggle").checked = true;
-            } else {
-                document.getElementById("prefetch-toggle").checked = false;
-            }
+            document.getElementById("prefetch-toggle").checked = (data && data.prefetch_playback === "true");
         }
-        
         async function togglePrefetch() {
-            const checked = document.getElementById("prefetch-toggle").checked;
-            await api("/api/settings", "POST", { prefetch_playback: checked });
+            await api("/api/settings", "POST", { prefetch_playback: document.getElementById("prefetch-toggle").checked });
         }
     </script>
 </body>

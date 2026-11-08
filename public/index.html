@@ -252,14 +252,22 @@
             const overlay = document.getElementById('sidebar-overlay');
             const iconClose = document.getElementById('sidebar-icon-close');
             const iconOpen = document.getElementById('sidebar-icon-open');
+            const detailModal = document.getElementById('detail-modal');
+            const detailFanart = document.getElementById('detail-fanart');
             const isOpen = sidebar.classList.contains('w-48');
             if (isOpen) {
                 sidebar.classList.remove('w-48', 'opacity-100'); sidebar.classList.add('w-0', 'opacity-0');
                 if (window.innerWidth < 768) { sidebar.classList.add('hidden'); sidebar.classList.remove('flex'); }
                 overlay.classList.add('hidden'); iconClose.classList.add('hidden'); iconOpen.classList.remove('hidden');
+                if (detailModal) detailModal.classList.remove('md:left-48');
+                if (detailFanart) detailFanart.classList.remove('md:left-48');
             } else {
                 sidebar.classList.remove('w-0', 'opacity-0'); sidebar.classList.add('w-48', 'opacity-100');
                 if (window.innerWidth < 768) { sidebar.classList.remove('hidden'); sidebar.classList.add('flex'); overlay.classList.remove('hidden'); }
+                if (window.innerWidth >= 768) {
+                    if (detailModal) detailModal.classList.add('md:left-48');
+                    if (detailFanart) detailFanart.classList.add('md:left-48');
+                }
                 iconClose.classList.remove('hidden'); iconOpen.classList.add('hidden');
             }
         }
