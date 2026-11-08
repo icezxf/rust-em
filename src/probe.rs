@@ -1,8 +1,9 @@
 use serde_json::{json, Value};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
+use tempfile::NamedTempFile;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
@@ -72,60 +73,67 @@ fn parse_mediainfo(path: &Path) -> Result<Value, String> {
 
     let mut streams = Vec::new();
     
-    // 视频流
-    let video_count = mi.count_get(StreamKind::Video);
+    let video_count = mi.count_get(StreamKind::Video, None);
     for i in 0..video_count {
+        let get_str = |k| mi.get(StreamKind::Video, i, k, InfoKind::Text);
+        let get_i = |k| get_str(k).parse::<i64>().unwrap_or(0);
+        let get_f = |k| get_str(k).parse::<f64>().unwrap_or(0.0);
+        
         streams.push(json!({
             "Type": "VIDEO",
             "Index": i as i64,
-            "Codec": mi.get(StreamKind::Video, i, "Format", InfoKind::Text).to_lowercase(),
-            "Profile": mi.get(StreamKind::Video, i, "Format_Profile", InfoKind::Text),
-            "Level": mi.get(StreamKind::Video, i, "Format_Level", InfoKind::Integer),
-            "Width": mi.get(StreamKind::Video, i, "Width", InfoKind::Integer),
-            "Height": mi.get(StreamKind::Video, i, "Height", InfoKind::Integer),
-            "BitRate": mi.get(StreamKind::Video, i, "BitRate", InfoKind::Text),
-            "BitDepth": mi.get(StreamKind::Video, i, "BitDepth", InfoKind::Text),
-            "AverageFrameRate": mi.get(StreamKind::Video, i, "FrameRate", InfoKind::Text),
-            "RealFrameRate": mi.get(StreamKind::Video, i, "FrameRate", InfoKind::Text),
-            "PixelFormat": mi.get(StreamKind::Video, i, "ColorSpace", InfoKind::Text),
-            "IsDefault": mi.get(StreamKind::Video, i, "Default", InfoKind::Integer) == 1,
-            "IsForced": mi.get(StreamKind::Video, i, "Forced", InfoKind::Integer) == 1,
+            "Codec": get_str("Format").to_lowercase(),
+            "Profile": get_str("Format_Profile"),
+            "Level": get_i("Format_Level"),
+            "Width": get_i("Width"),
+            "Height": get_i("Height"),
+            "BitRate": get_str("BitRate"),
+            "BitDepth": get_str("BitDepth"),
+            "AverageFrameRate": get_str("FrameRate"),
+            "RealFrameRate": get_str("FrameRate"),
+            "PixelFormat": get_str("ColorSpace"),
+            "IsDefault": get_i("Default") == 1,
+            "IsForced": get_i("Forced") == 1,
             "IsExternal": false,
-            "Language": mi.get(StreamKind::Video, i, "Language", InfoKind::Text),
+            "Language": get_str("Language"),
         }));
     }
 
-    // 音频流
-    let audio_count = mi.count_get(StreamKind::Audio);
+    let audio_count = mi.count_get(StreamKind::Audio, None);
     for i in 0..audio_count {
+        let get_str = |k| mi.get(StreamKind::Audio, i, k, InfoKind::Text);
+        let get_i = |k| get_str(k).parse::<i64>().unwrap_or(0);
+        
         streams.push(json!({
             "Type": "AUDIO",
             "Index": (video_count + i) as i64,
-            "Codec": mi.get(StreamKind::Audio, i, "Format", InfoKind::Text).to_lowercase(),
-            "Profile": mi.get(StreamKind::Audio, i, "Format_Profile", InfoKind::Text),
-            "Channels": mi.get(StreamKind::Audio, i, "Channels", InfoKind::Integer),
-            "ChannelLayout": mi.get(StreamKind::Audio, i, "ChannelLayout", InfoKind::Text),
-            "BitRate": mi.get(StreamKind::Audio, i, "BitRate", InfoKind::Text),
-            "SampleRate": mi.get(StreamKind::Audio, i, "SamplingRate", InfoKind::Text),
-            "BitDepth": mi.get(StreamKind::Audio, i, "BitDepth", InfoKind::Text),
-            "IsDefault": mi.get(StreamKind::Audio, i, "Default", InfoKind::Integer) == 1,
-            "IsForced": mi.get(StreamKind::Audio, i, "Forced", InfoKind::Integer) == 1,
+            "Codec": get_str("Format").to_lowercase(),
+            "Profile": get_str("Format_Profile"),
+            "Channels": get_i("Channels"),
+            "ChannelLayout": get_str("ChannelLayout"),
+            "BitRate": get_str("BitRate"),
+            "SampleRate": get_str("SamplingRate"),
+            "BitDepth": get_str("BitDepth"),
+            "IsDefault": get_i("Default") == 1,
+            "IsForced": get_i("Forced") == 1,
             "IsExternal": false,
-            "Language": mi.get(StreamKind::Audio, i, "Language", InfoKind::Text),
+            "Language": get_str("Language"),
         }));
     }
 
-    // 字幕流
-    let text_count = mi.count_get(StreamKind::Text);
+    let text_count = mi.count_get(StreamKind::Text, None);
     for i in 0..text_count {
+        let get_str = |k| mi.get(StreamKind::Text, i, k, InfoKind::Text);
+        let get_i = |k| get_str(k).parse::<i64>().unwrap_or(0);
+        
         streams.push(json!({
             "Type": "SUBTITLE",
             "Index": (video_count + audio_count + i) as i64,
-            "Codec": mi.get(StreamKind::Text, i, "Format", InfoKind::Text).to_lowercase(),
-            "IsDefault": mi.get(StreamKind::Text, i, "Default", InfoKind::Integer) == 1,
-            "IsForced": mi.get(StreamKind::Text, i, "Forced", InfoKind::Integer) == 1,
+            "Codec": get_str("Format").to_lowercase(),
+            "IsDefault": get_i("Default") == 1,
+            "IsForced": get_i("Forced") == 1,
             "IsExternal": false,
-            "Language": mi.get(StreamKind::Text, i, "Language", InfoKind::Text),
+            "Language": get_str("Language"),
         }));
     }
 
@@ -187,8 +195,10 @@ pub async fn probe_strm(
     };
 
     let container = infer_container(&content_type, &direct_url);
-    let mut temp_file = tempfile::NamedTempFile::new().map_err(|e| format!("创建临时文件失败: {}", e))?;
-    temp_file.write_all(&header_bytes).await.map_err(|e| format!("写入临时文件失败: {}", e))?;
+    
+    // 修复：NamedTempFile::write_all 是同步方法，不能 await
+    let mut temp_file = NamedTempFile::new().map_err(|e| format!("创建临时文件失败: {}", e))?;
+    temp_file.write_all(&header_bytes).map_err(|e| format!("写入临时文件失败: {}", e))?;
     let temp_path = temp_file.path().to_owned();
 
     let streams = tokio::task::spawn_blocking(move || parse_mediainfo(&temp_path))
