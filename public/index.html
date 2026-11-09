@@ -147,8 +147,15 @@
                 </button>
 
                 <div class="w-full max-w-5xl flex flex-col gap-3 md:gap-4 mt-4 md:mt-6 z-10">
+                    <!-- 移动端 Fanart 大图 -->
+                    <div class="w-full md:hidden mb-2 rounded-2xl overflow-hidden aspect-video relative shadow-2xl border border-gray-600/30 bg-gray-800">
+                        <img id="detail-mobile-fanart" src="" class="w-full h-full object-cover">
+                        <div class="absolute inset-0 bg-gradient-to-t from-[#0b0e14] via-transparent to-transparent"></div>
+                    </div>
+
                     <div class="flex flex-col md:flex-row gap-5 md:gap-6 items-start">
-                        <div class="w-32 sm:w-40 md:w-64 shrink-0 aspect-[2/3] bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border border-gray-600/30 md:sticky md:top-6 mb-2">
+                        <!-- 竖版海报（仅桌面端展示） -->
+                        <div class="hidden md:block w-64 shrink-0 aspect-[2/3] bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border border-gray-600/30 md:sticky md:top-6 mb-2">
                             <img id="detail-poster" src="" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzM3NDE1MSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjIwIiBmaWxsPSIjOWNhM2FmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+5rW35oqlPC90ZXh0Pjwvc3ZnPg=='">
                         </div>
                         
@@ -210,7 +217,9 @@
                             <div id="detail-media-streams" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4"></div>
                             <div class="border-t border-gray-800/80 pt-3">
                                 <div class="text-xs text-gray-500 font-bold mb-1 uppercase tracking-wider">STRM 文件路径</div>
-                                <div id="detail-strm-path" class="text-sm font-mono text-gray-400 bg-black/40 p-2 rounded-lg break-all select-all border border-gray-800/50">暂无路径</div>
+                                <div id="detail-strm-path" class="text-sm font-mono text-gray-400 bg-black/40 p-2 rounded-lg break-all select-all border border-gray-800/50 mb-3">暂无路径</div>
+                                <div class="text-xs text-gray-500 font-bold mb-1 uppercase tracking-wider">STRM 文件内容 (URL)</div>
+                                <div id="detail-strm-content" class="text-sm font-mono text-gray-400 bg-black/40 p-2 rounded-lg break-all select-all border border-gray-800/50">暂无内容</div>
                             </div>
                         </div>
                     </div>
@@ -535,6 +544,20 @@
             }
 
             document.getElementById('detail-strm-path').innerText = item.file_path || '暂无路径';
+            document.getElementById('detail-strm-content').innerText = item.strm_content || '暂无内容';
+
+            // 移动端 Fanart 赋值
+            const mobileFanart = document.getElementById('detail-mobile-fanart');
+            if (item.has_poster) {
+                mobileFanart.src = `/api/images/${item.id}/fanart?token=${token}&t=${Date.now()}`;
+                mobileFanart.onerror = () => {
+                    mobileFanart.onerror = null;
+                    mobileFanart.src = `/api/images/${item.id}/poster?token=${token}&t=${Date.now()}`;
+                };
+            } else {
+                mobileFanart.src = defaultPosterSvg;
+            }
+
             document.getElementById('detail-modal').classList.remove('hidden');
             document.body.style.overflow = 'hidden';
         }
