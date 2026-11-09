@@ -907,51 +907,21 @@ pub async fn emby_subtitle_stream() -> impl IntoResponse {
 }
 
 
-async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
-    let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
-    
-    let path_opt = {
-        let conn = pool.lock().unwrap();
-        
-        match image_type.to_lowercase().as_str() {
-            "primary" | "poster" => conn.query_row("SELECT poster_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-            "thumb" => conn.query_row("SELECT thumb_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-            "logo" => conn.query_row("SELECT logo_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-            "banner" => conn.query_row("SELECT banner_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-            "backdrop" | "fanart" => {
-                let mut stmt = conn.prepare("SELECT stills, fanart_path FROM items WHERE id = ?1").unwrap();
-                stmt.query_row([id], |row| Ok((
-                    row.get::<_, String>(0).unwrap_or_default(),
-                    row.get::<_, String>(1).unwrap_or_default()
-                ))).map(|(stills_json, fanart_path)| {
-                    if index == 0 {
-                        if !fanart_path.is_empty() { Some(fanart_path) } else { None }
-                    } else {
-                        let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
-                        stills.get(index - 1).cloned()
-                    }
-                }).unwrap_or(None)
-            },
-            _ => None,
-        }
-    };
 
-    if let Some(path_str) = path_opt {
-        if !path_str.is_empty() {
-            if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
-            if let Ok(bytes) = tokio::fs::read(&path_str).await {
-                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
-                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
-            }
-        }
-    }
-    StatusCode::NOT_FOUND.into_response()
+
+pub async fn emby_item_detail(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<String>) -> Response {
+    emby_item_detail_inner(pool, item_id).await
 }
+pub async fn emby_item_detail_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>) -> Response {
+    emby_item_detail_inner(pool, item_id).await
+}
+
+
 
 async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -> Response {
     let conn = pool.lock().unwrap();
     
-    // 如果客户端点名要查某个影片属于哪个 BoxSet
+    // 查询影片所属合集
     if let Some(list_ids) = &query.list_item_ids {
         if let Ok(item_id) = list_ids.parse::<i64>() {
             let set_name_str: String = conn.query_row("SELECT set_name FROM items WHERE id = ?1", [item_id], |r| r.get(0)).unwrap_or_default();
@@ -962,7 +932,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
                 boxsets.push(json!({
                     "Name": name, "Id": boxset_id, "ServerId": "rust-em-server",
                     "Type": "BoxSet", "IsFolder": true, "MediaType": "Video",
-                    "ImageTags": {}, "BackdropImageTags": [],
+                    "ImageTags": {"Primary": "tag_boxset"}, "BackdropImageTags": [],
                     "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
                 }));
             }
@@ -970,23 +940,26 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         }
         return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response();
     }
+
     let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title FROM items WHERE 1=1".to_string();
     
-    // 如果客户端点击了合集，查该合集下的所有电影
+    // 查询普通媒体库，或合集内的影片
     if let Some(pid) = &query.parent_id {
         if pid.starts_with("lib_") {
             if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); }
         } else if pid.starts_with("boxset_") {
-            // 反向查找该 BoxSet 对应的 set_name
             let mut found_set_name = String::new();
             let mut stmt_all = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''").unwrap();
             let mut rows = stmt_all.query([]).unwrap();
             while let Ok(Some(r)) = rows.next() {
                 let s: String = r.get(0).unwrap_or_default();
-                let mut h = Sha256::new(); h.update(s.as_bytes()); let hash = h.finalize();
-                if format!("boxset_{:x}", hash) == *pid { found_set_name = s; break; }
+                for name in s.split(" / ").filter(|s| !s.trim().is_empty()) {
+                    let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
+                    if format!("boxset_{:x}", hash) == *pid { found_set_name = name.to_string(); break; }
+                }
+                if !found_set_name.is_empty() { break; }
             }
-            if !found_set_name.is_empty() { sql.push_str(&format!(" AND set_name = '{}'", found_set_name)); }
+            if !found_set_name.is_empty() { sql.push_str(&format!(" AND set_name LIKE '%{}%'", found_set_name)); }
             else { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
         }
     }
@@ -1011,43 +984,36 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
     Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response()
 }
 
-pub async fn emby_item_detail(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<String>) -> Response {
-    emby_item_detail_inner(pool, item_id).await
-}
-pub async fn emby_item_detail_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>) -> Response {
-    emby_item_detail_inner(pool, item_id).await
-}
-
-
 async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -> Response {
     let conn = pool.lock().unwrap();
     
-    // 如果请求的是 BoxSet 合集详情
     if item_id.starts_with("boxset_") {
         let mut found_set_name = String::new();
         let mut stmt_all = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''").unwrap();
         let mut rows = stmt_all.query([]).unwrap();
         while let Ok(Some(r)) = rows.next() {
-            let full_set_str: String = r.get(0).unwrap_or_default();
-            for name in full_set_str.split(" / ").filter(|s| !s.trim().is_empty()) {
+            let s: String = r.get(0).unwrap_or_default();
+            for name in s.split(" / ").filter(|s| !s.trim().is_empty()) {
                 let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
                 if format!("boxset_{:x}", hash) == item_id { found_set_name = name.to_string(); break; }
             }
             if !found_set_name.is_empty() { break; }
         }
         if found_set_name.is_empty() { return StatusCode::NOT_FOUND.into_response(); }
+        
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE set_name LIKE ?1", [format!("%{}%", found_set_name)], |r| r.get(0)).unwrap_or(0);
+        
         let item = json!({
             "Name": found_set_name, "Id": item_id, "ServerId": "rust-em-server",
             "Type": "BoxSet", "IsFolder": true, "MediaType": "Video",
             "ChildCount": count, "RecursiveItemCount": count,
-            "ImageTags": {}, "BackdropImageTags": [],
+            "ImageTags": {"Primary": "tag_boxset"}, "BackdropImageTags": [],
             "Overview": "合集",
             "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
         });
         return Json(item).into_response();
     }
-    // 原有的影片详情逻辑
+
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let item_opt = conn.query_row(
         "SELECT id, title, type, year, plot, poster_path, file_path, studios, parts, runtime, actors, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, series, label, set_name, tagline, tags, directors, num, stills, releasedate, original_title, sort_title, country, language, writers, trailer, media_streams, date_created, primary_image_aspect_ratio, original_language, fanart_path, logo_path, thumb_path, banner_path, strm_content FROM items WHERE id = ?1",
@@ -1191,4 +1157,72 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
     ).ok();
     
     if let Some(item) = item_opt { Json(item).into_response() } else { StatusCode::NOT_FOUND.into_response() }
+}
+
+async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
+    let conn = pool.lock().unwrap();
+
+    if item_id.starts_with("boxset_") {
+        let mut found_set_name = String::new();
+        let mut stmt_all = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''").unwrap();
+        let mut rows = stmt_all.query([]).unwrap();
+        while let Ok(Some(r)) = rows.next() {
+            let s: String = r.get(0).unwrap_or_default();
+            for name in s.split(" / ").filter(|s| !s.trim().is_empty()) {
+                let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
+                if format!("boxset_{:x}", hash) == item_id { found_set_name = name.to_string(); break; }
+            }
+            if !found_set_name.is_empty() { break; }
+        }
+        if !found_set_name.is_empty() {
+            let like_str = format!("%{}%", found_set_name);
+            if let Ok(mut stmt) = conn.prepare("SELECT poster_path FROM items WHERE set_name LIKE ?1 AND poster_path != '' LIMIT 1") {
+                if let Ok(poster_path) = stmt.query_row([like_str], |r| r.get::<_, String>(0)) {
+                    if !poster_path.is_empty() {
+                        if poster_path.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, poster_path)], "").into_response(); }
+                        if let Ok(bytes) = tokio::fs::read(&poster_path).await {
+                            let mime = if poster_path.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
+                            return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
+                        }
+                    }
+                }
+            }
+        }
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
+
+    let path_opt = match image_type.to_lowercase().as_str() {
+        "primary" | "poster" => conn.query_row("SELECT poster_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
+        "thumb" => conn.query_row("SELECT thumb_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
+        "logo" => conn.query_row("SELECT logo_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
+        "banner" => conn.query_row("SELECT banner_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
+        "backdrop" | "fanart" => {
+            let mut stmt = conn.prepare("SELECT stills, fanart_path FROM items WHERE id = ?1").unwrap();
+            stmt.query_row([id], |row| Ok((
+                row.get::<_, String>(0).unwrap_or_default(),
+                row.get::<_, String>(1).unwrap_or_default()
+            ))).map(|(stills_json, fanart_path)| {
+                if index == 0 {
+                    if !fanart_path.is_empty() { Some(fanart_path) } else { None }
+                } else {
+                    let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
+                    stills.get(index - 1).cloned()
+                }
+            }).unwrap_or(None)
+        },
+        _ => None,
+    };
+
+    if let Some(path_str) = path_opt {
+        if !path_str.is_empty() {
+            if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
+            if let Ok(bytes) = tokio::fs::read(&path_str).await {
+                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
+                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
+            }
+        }
+    }
+    StatusCode::NOT_FOUND.into_response()
 }
