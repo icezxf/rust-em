@@ -18,6 +18,7 @@
         .sidebar-transition { transition: width 0.3s ease-in-out, opacity 0.2s ease-in-out; }
         .modal-transition { transition: left 0.3s ease-in-out; }
         .text-shadow-strong { text-shadow: 0 1px 3px rgba(0,0,0,0.8), 0 2px 6px rgba(0,0,0,0.5); }
+        @media (max-width: 767px) { #global-sidebar-btn { display: none !important; } }
     </style>
 </head>
 <body class="bg-[#0f1115] text-gray-200 font-sans h-screen flex flex-col overflow-hidden">
@@ -75,7 +76,7 @@
                 </div>
             </div>
 
-            <div id="tab-library" class="hidden flex-1 overflow-y-auto p-4 md:px-8 md:py-4">
+            <div id="tab-library" class="hidden flex-1 overflow-y-auto p-4 pb-20 md:px-8 md:py-4 md:pb-4">
                 <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6"></div>
             </div>
 
@@ -242,6 +243,41 @@
                 <button onclick="selectCurrentPath()" class="flex-1 bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold text-white transition">选中当前目录</button>
                 <button onclick="closePathPicker()" class="flex-1 bg-gray-700 hover:bg-gray-600 py-3 rounded-xl font-bold text-white transition">确认勾选</button>
             </div>
+        </div>
+    </div>
+
+    <nav class="md:hidden fixed bottom-0 left-0 right-0 z-[65] bg-[#16191f]/95 backdrop-blur-md border-t border-gray-800">
+        <div class="flex justify-around items-center h-16">
+            <button onclick="openMobileLibrarySheet()" class="flex flex-col items-center gap-0.5 text-gray-400 hover:text-white px-3 py-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                <span class="text-[10px]">媒体库</span>
+            </button>
+            <button onclick="setTypeFilter('all'); switchTab('library')" class="flex flex-col items-center gap-0.5 text-gray-400 hover:text-white px-3 py-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+                <span class="text-[10px]">全部</span>
+            </button>
+            <button onclick="setTypeFilter('movies'); switchTab('library')" class="flex flex-col items-center gap-0.5 text-gray-400 hover:text-white px-3 py-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"></path></svg>
+                <span class="text-[10px]">电影</span>
+            </button>
+            <button onclick="setTypeFilter('tvshows'); switchTab('library')" class="flex flex-col items-center gap-0.5 text-gray-400 hover:text-white px-3 py-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+                <span class="text-[10px]">剧集</span>
+            </button>
+            <button onclick="switchTab('settings')" class="flex flex-col items-center gap-0.5 text-gray-400 hover:text-white px-3 py-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                <span class="text-[10px]">设置</span>
+            </button>
+        </div>
+    </nav>
+
+    <div id="mobile-lib-sheet" class="hidden md:hidden fixed inset-0 z-[66] bg-black/60" onclick="if(event.target===this)closeMobileLibSheet()">
+        <div class="absolute bottom-0 left-0 right-0 bg-[#16191f] rounded-t-2xl border-t border-gray-800 max-h-[70vh] overflow-y-auto">
+            <div class="p-4 border-b border-gray-800 flex justify-between items-center">
+                <h3 class="font-bold text-white">选择媒体库</h3>
+                <button onclick="closeMobileLibSheet()" class="text-gray-400 hover:text-white text-xl px-2">✕</button>
+            </div>
+            <div id="mobile-lib-list" class="p-2"></div>
         </div>
     </div>
 
@@ -508,6 +544,23 @@
             if (!el) return;
             const amount = Math.max(el.clientWidth * 0.8, 200);
             el.scrollBy({ left: dir * amount, behavior: 'smooth' });
+        }
+
+        function openMobileLibrarySheet() {
+            const sheet = document.getElementById('mobile-lib-sheet');
+            const list = document.getElementById('mobile-lib-list');
+            const activeCls = 'w-full text-left px-4 py-3 rounded-lg bg-gray-800 text-white mb-1';
+            const cls = 'w-full text-left px-4 py-3 rounded-lg hover:bg-gray-800 text-gray-300 mb-1';
+            let html = `<button onclick="setLibraryFilter('all'); closeMobileLibSheet()" class="${currentLibId === 'all' ? activeCls : cls}">全部媒体</button>`;
+            allLibraries.forEach(lib => {
+                const icon = lib.type === 'movies' ? '🎬' : '📺';
+                html += `<button onclick="setLibraryFilter(${lib.id}); closeMobileLibSheet()" class="${currentLibId === lib.id ? activeCls : cls}"><span class="mr-2">${icon}</span>${lib.name}</button>`;
+            });
+            list.innerHTML = html;
+            sheet.classList.remove('hidden');
+        }
+        function closeMobileLibSheet() {
+            document.getElementById('mobile-lib-sheet').classList.add('hidden');
         }
 
         function closeDetail() {
