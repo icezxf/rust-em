@@ -90,7 +90,7 @@ fn parse_mediainfo(path: &Path) -> Result<Value, String> {
         let display_title = format!("{} {}", p, codec.to_uppercase());
 
         streams.push(json!({
-            "Type": "Video", "Index": global_index, "Codec": codec,
+            "Type": "Video", "Index": global_index, "Codec": codec, "Width": width, "Height": height, "Profile": profile, "PixelFormat": pixel_format, "BitRate": get_i("BitRate"),
             "Profile": profile, "Level": get_i("Format_Level"),
             "Width": width, "Height": height, "PixelFormat": pixel_format,
             "BitRate": get_i("BitRate"), "AverageFrameRate": { let s = get_str("FrameRate"); if let Some((n, d)) = s.split_once(x27/x27) { n.parse::<f64>().unwrap_or(0.0) / d.parse::<f64>().unwrap_or(1.0) } else { s.parse::<f64>().unwrap_or(0.0) } }, "RealFrameRate": { let s = get_str("FrameRate"); if let Some((n, d)) = s.split_once(x27/x27) { n.parse::<f64>().unwrap_or(0.0) / d.parse::<f64>().unwrap_or(1.0) } else { s.parse::<f64>().unwrap_or(0.0) } },
@@ -122,7 +122,7 @@ fn parse_mediainfo(path: &Path) -> Result<Value, String> {
         if is_default && default_audio == -1 { default_audio = global_index as i64; }
 
         streams.push(json!({
-            "Type": "Audio", "Index": global_index, "Codec": codec.to_lowercase(),
+            "Type": "Audio", "Index": global_index, "Codec": codec.to_lowercase(), "BitRate": get_i("BitRate"), "SampleRate": get_i("SamplingRate"),
             "Channels": ch, "ChannelLayout": layout, "BitRate": get_i("BitRate"), "SampleRate": get_i("SamplingRate"),
             "DisplayTitle": display_title, "Title": display_title, "DisplayLanguage": lang_str,
             "Language": lang_iso, "IsDefault": is_default, "IsForced": false, "IsExternal": false,

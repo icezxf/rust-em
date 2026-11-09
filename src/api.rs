@@ -1131,8 +1131,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
 
             // 正确生成多张剧照的 Backdrop Tags
             let mut backdrop_tags = Vec::new();
-            if !fanart_path.is_empty() { backdrop_tags.push(json!(format!("backdrop_{}_0", id))); }
-            for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i + 1))); }
+            for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i))); }
 
             let date_created_ts = if date_created > 0 { date_created } else { mtime };
             let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
