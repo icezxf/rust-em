@@ -807,10 +807,11 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 }).collect()
             };
 
-            Ok(json!({
+            let mut item_value = json!({
                 "Id": id.to_string(), "ServerId": "rust-em-server", "Name": title.clone(),
                 "OriginalTitle": if original_title.is_empty() { Value::Null } else { json!(original_title) },
                 "SortName": if sort_title.is_empty() { title.clone() } else { sort_title },
+                "ForcedSortName": if sort_title.is_empty() { title.clone() } else { sort_title },
                 "Type": if typ == "movies" { "Movie" } else { "Series" },
                 "MediaType": "Video", "IsFolder": false, "Overview": plot,
                 "ProductionYear": year_str.parse::<i32>().unwrap_or(0), "PremiereDate": premiered, "ReleaseDate": releasedate,
@@ -831,7 +832,13 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 "ProbeEngine": "rust-native", "LocationType": "FileSystem",
                 "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
                 "UserData": { "ItemId": id.to_string(), "Key": id.to_string(), "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 }
-            }))
+            });
+            if typ == "movies" {
+                if let Some(obj) = item_value.as_object_mut() {
+                    obj.remove("SeriesName");
+                }
+            }
+            Ok(item_value)
         }
     ).ok();
     
