@@ -765,8 +765,8 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             if !banner_path.is_empty() { image_tags.insert("Banner".to_string(), json!(format!("banner_{}", id))); }
 
             let mut backdrop_tags: Vec<Value> = Vec::new();
-            if !fanart_path.is_empty() { backdrop_tags.push(json!(format!("backdrop_{}_0", id))); }
-            for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i + 1))); }
+            
+            for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i))); }
 
             let date_created_ts = if date_created > 0 { date_created } else { mtime };
             let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
@@ -1141,6 +1141,7 @@ pub async fn emby_item_image_user_only(_: AxumPath<(String, String)>) -> Respons
     StatusCode::NOT_FOUND.into_response()
 }
 
+
 async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
     let path_opt = {
         let conn = pool.lock().unwrap();
@@ -1174,17 +1175,10 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
                 "logo" => conn.query_row("SELECT logo_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
                 "banner" => conn.query_row("SELECT banner_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
                 "backdrop" | "fanart" => {
-                    let mut stmt = conn.prepare("SELECT stills, fanart_path FROM items WHERE id = ?1").unwrap();
-                    stmt.query_row([id], |row| Ok((
-                        row.get::<_, String>(0).unwrap_or_default(),
-                        row.get::<_, String>(1).unwrap_or_default()
-                    ))).map(|(stills_json, fanart_path)| {
-                        if index == 0 {
-                            if !fanart_path.is_empty() { Some(fanart_path) } else { None }
-                        } else {
-                            let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
-                            stills.get(index - 1).cloned()
-                        }
+                    let mut stmt = conn.prepare("SELECT stills FROM items WHERE id = ?1").unwrap();
+                    stmt.query_row([id], |row| Ok(row.get::<_, String>(0).unwrap_or_default())).map(|stills_json| {
+                        let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
+                        stills.get(index).cloned()
                     }).unwrap_or(None)
                 },
                 _ => None,

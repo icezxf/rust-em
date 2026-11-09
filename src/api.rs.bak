@@ -557,8 +557,8 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
 }
 
 pub async fn emby_items_latest(State(_pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_items_resume() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_items_next_up() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
+pub async fn emby_items_resume(_: AxumPath<String>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
+pub async fn emby_items_next_up(_: AxumPath<String>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
@@ -765,8 +765,8 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             if !banner_path.is_empty() { image_tags.insert("Banner".to_string(), json!(format!("banner_{}", id))); }
 
             let mut backdrop_tags: Vec<Value> = Vec::new();
-            if !fanart_path.is_empty() { backdrop_tags.push(json!(format!("backdrop_{}_0", id))); }
-            for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i + 1))); }
+            
+            for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i))); }
 
             let date_created_ts = if date_created > 0 { date_created } else { mtime };
             let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
@@ -1119,7 +1119,7 @@ pub async fn emby_search_hints(State(pool): State<Arc<Mutex<Connection>>>, Query
 pub async fn emby_shows_next_up() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 pub async fn emby_shows_seasons(_: AxumPath<String>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 pub async fn emby_shows_episodes(_: AxumPath<String>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_danmu() -> impl IntoResponse { Json(json!([])) }
+pub async fn emby_danmu(_: AxumPath<String>) -> impl IntoResponse { Json(json!([])) }
 pub async fn emby_person_image(_: AxumPath<(String, String)>) -> impl IntoResponse {
     let png_bytes: [u8; 67] = [
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
@@ -1142,7 +1142,6 @@ pub async fn emby_item_image_user_only(_: AxumPath<(String, String)>) -> Respons
 }
 
 async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
-    // 将锁的作用域严格限制在这个 block 内部
     let path_opt = {
         let conn = pool.lock().unwrap();
 
@@ -1191,9 +1190,8 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
                 _ => None,
             }
         }
-    }; // <--- 锁在这里被释放
+    };
 
-    // 现在可以安全地 await 了
     if let Some(path_str) = path_opt {
         if !path_str.is_empty() {
             if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
