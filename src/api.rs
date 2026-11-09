@@ -1121,3 +1121,7 @@ pub async fn emby_shows_next_up() -> impl IntoResponse { Json(json!({ "Items": [
 pub async fn emby_shows_seasons() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 pub async fn emby_shows_episodes() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 pub async fn emby_danmu() -> impl IntoResponse { Json(json!([])) }
+
+pub async fn emby_subtitle_stream() -> impl IntoResponse {
+    StatusCode::OK.into_response()
+}
