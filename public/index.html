@@ -82,7 +82,6 @@
             <div id="tab-settings" class="hidden flex-1 overflow-y-auto p-4 pt-16 md:px-8 md:py-8 md:pl-20 pb-20">
                 <div class="max-w-3xl mx-auto">
                     <h2 class="text-2xl font-bold mb-6">系统设置</h2>
-                    
                     <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
                         <h3 class="text-lg font-bold mb-4 text-blue-400 border-b border-gray-800 pb-2">媒体库管理</h3>
                         <div id="settings-lib-list" class="flex flex-col gap-3 mb-6"></div>
@@ -104,7 +103,7 @@
 
                     <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
                         <h3 class="text-lg font-bold mb-4 text-purple-400 border-b border-gray-800 pb-2">媒体信息探测 (Probe)</h3>
-                        <p class="text-sm text-gray-400 mb-4">探测指定目录下 .strm 的真实媒体参数（分辨率、编码等），生成合规的 JSON 缓存文件供客户端使用。探测有严格防风控限速（约 1 个/秒）。</p>
+                        <p class="text-sm text-gray-400 mb-4">探测指定目录下 .strm 的真实媒体参数，生成合规的 JSON 缓存文件。</p>
                         <div class="flex gap-3 mb-4">
                             <input id="probe-dir-path" placeholder="未选择目录" class="flex-1 p-3 bg-[#0f1115] border border-gray-700 rounded-lg outline-none text-white focus:border-purple-500 transition" readonly>
                             <button onclick="openProbePathPicker()" class="bg-gray-800 hover:bg-gray-700 px-6 py-3 rounded-lg font-bold text-white transition border border-gray-700">浏览</button>
@@ -170,6 +169,7 @@
                             <div id="detail-play-actions" class="flex flex-wrap gap-2 mb-4"></div>
                             <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base mb-4 whitespace-pre-wrap drop-shadow-md">暂无简介...</p>
                             <div class="flex flex-col gap-1 text-xs md:text-sm text-gray-300 pt-3 border-t border-gray-600/50">
+                                <div id="detail-series-box" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">系列:</span> <span id="detail-series" class="text-blue-400 font-medium drop-shadow-sm"></span></div>
                                 <div id="detail-studio-box" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">制作商:</span> <span id="detail-studios" class="text-gray-200 font-medium drop-shadow-sm"></span></div>
                                 <div id="detail-tags" class="hidden items-start mt-1">
                                     <span class="text-gray-400 shrink-0 w-12 inline-block mt-0.5 font-medium">标签:</span> 
@@ -189,11 +189,8 @@
                         <div class="bg-[#16191f]/80 backdrop-blur-md border border-gray-800 rounded-xl p-4 shadow-lg">
                             <div class="text-sm text-gray-400 mb-3 flex gap-6">
                                 <span>文件大小: <span id="detail-file-size" class="text-gray-200 font-medium">计算中...</span></span>
-                                <span>容器格式: <span class="text-gray-200 font-medium">STRM</span></span>
                             </div>
-                            <div id="detail-media-streams" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-                                <div class="col-span-full text-sm text-gray-500 py-2">暂无探测信息，请执行媒体探测。</div>
-                            </div>
+                            <div id="detail-media-streams" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4"></div>
                             <div class="border-t border-gray-800/80 pt-3">
                                 <div class="text-xs text-gray-500 font-bold mb-1 uppercase tracking-wider">STRM 文件路径</div>
                                 <div id="detail-strm-path" class="text-sm font-mono text-gray-400 bg-black/40 p-2 rounded-lg break-all select-all border border-gray-800/50">暂无路径</div>
@@ -252,22 +249,14 @@
             const overlay = document.getElementById('sidebar-overlay');
             const iconClose = document.getElementById('sidebar-icon-close');
             const iconOpen = document.getElementById('sidebar-icon-open');
-            const detailModal = document.getElementById('detail-modal');
-            const detailFanart = document.getElementById('detail-fanart');
             const isOpen = sidebar.classList.contains('w-48');
             if (isOpen) {
                 sidebar.classList.remove('w-48', 'opacity-100'); sidebar.classList.add('w-0', 'opacity-0');
                 if (window.innerWidth < 768) { sidebar.classList.add('hidden'); sidebar.classList.remove('flex'); }
                 overlay.classList.add('hidden'); iconClose.classList.add('hidden'); iconOpen.classList.remove('hidden');
-                if (detailModal) detailModal.classList.remove('md:left-48');
-                if (detailFanart) detailFanart.classList.remove('md:left-48');
             } else {
                 sidebar.classList.remove('w-0', 'opacity-0'); sidebar.classList.add('w-48', 'opacity-100');
                 if (window.innerWidth < 768) { sidebar.classList.remove('hidden'); sidebar.classList.add('flex'); overlay.classList.remove('hidden'); }
-                if (window.innerWidth >= 768) {
-                    if (detailModal) detailModal.classList.add('md:left-48');
-                    if (detailFanart) detailFanart.classList.add('md:left-48');
-                }
                 iconClose.classList.remove('hidden'); iconOpen.classList.add('hidden');
             }
         }
@@ -356,11 +345,11 @@
                 if (!data.items || data.items.length === 0) { grid.innerHTML = `<div class="col-span-full text-center text-gray-500 mt-20">该分类下暂无媒体内容</div>`; cachedItems = []; return; }
                 cachedItems = data.items;
                 grid.innerHTML = data.items.map(item => {
-                    const imgUrl = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
+                    const imgUrl = item.has_poster ? `/api/images/${item.id}/poster?token=${token}&t=${Date.now()}` : defaultPosterSvg;
                     const ratingVal = Number(item.rating) || 0;
                     const ratingHtml = ratingVal > 0 ? `<div class="absolute bottom-2 right-2 bg-yellow-500 text-black font-bold text-xs px-2 py-0.5 rounded shadow-lg border border-yellow-400">${ratingVal.toFixed(1)}</div>` : '';
                     return `
-                    <div onclick="openDetail(${item.id})" class="media-card flex flex-col cursor-pointer transition-all duration-300 group">
+                    <div onclick="openDetail('${item.id}')" class="media-card flex flex-col cursor-pointer transition-all duration-300 group">
                         <div class="bg-[#16191f] rounded-xl overflow-hidden aspect-[2/3] relative border border-gray-800/50">
                             <img src="${imgUrl}" class="media-poster w-full h-full object-cover transition-transform duration-500" onerror="this.src='${defaultPosterSvg}'">
                             ${ratingHtml}
@@ -381,7 +370,7 @@
             const video = document.getElementById('main-video');
             const loading = document.getElementById('player-loading');
             const title = document.getElementById('player-title');
-            const item = cachedItems.find(i => i.id === currentPlayingItemId);
+            const item = cachedItems.find(i => String(i.id) === String(currentPlayingItemId));
             if(item) title.innerText = item.title;
             playerModal.classList.remove('hidden'); loading.classList.remove('hidden'); loading.innerHTML = "正在解析直链并加载...";
             video.src = `/Videos/${currentPlayingItemId}/stream?token=${token}&part=${partIndex}`;
@@ -396,14 +385,11 @@
         }
 
         function openDetail(itemId) {
-            const item = cachedItems.find(i => i.id === itemId);
+            const item = cachedItems.find(i => String(i.id) === String(itemId));
             if (!item) return;
             currentPlayingItemId = item.id;
 
-            // 静默触发后端预热，加速网页端起播
-            fetch(`/emby/Items/${item.id}/PlaybackInfo?IsPlayback=false`, {
-                method: "POST", headers: { "X-Emby-Token": token }
-            }).catch(() => {});
+            fetch(`/emby/Items/${item.id}/PlaybackInfo?IsPlayback=false`, { method: "POST", headers: { "X-Emby-Token": token } }).catch(() => {});
 
             document.getElementById('detail-plot').innerText = item.plot || '暂无简介...';
             document.getElementById('detail-title').innerText = item.title || '未知';
@@ -421,6 +407,8 @@
                 genresBox.classList.remove('hidden'); genresBox.classList.add('flex');
             } else { genresBox.classList.add('hidden'); }
 
+            const seriesBox = document.getElementById('detail-series-box');
+            if (item.series) { document.getElementById('detail-series').innerText = item.series; seriesBox.classList.remove('hidden'); } else { seriesBox.classList.add('hidden'); }
             const studioBox = document.getElementById('detail-studio-box');
             if (item.studios) { document.getElementById('detail-studios').innerText = item.studios; studioBox.classList.remove('hidden'); } else { studioBox.classList.add('hidden'); }
 
@@ -433,8 +421,8 @@
             const playActions = document.getElementById('detail-play-actions');
             playActions.innerHTML = `<button onclick="playVideo(0)" class="bg-white text-black hover:bg-gray-200 px-6 py-2 rounded-lg font-bold flex items-center gap-2 transition shadow-lg text-sm"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>播放</button>`;
 
-            document.getElementById('detail-poster').src = item.has_poster ? `/api/images/${item.id}/poster?token=${token}` : defaultPosterSvg;
-            document.getElementById('detail-fanart').style.backgroundImage = item.has_poster ? `url('/api/images/${item.id}/fanart?token=${token}')` : 'none';
+            document.getElementById('detail-poster').src = item.has_poster ? `/api/images/${item.id}/poster?token=${token}&t=${Date.now()}` : defaultPosterSvg;
+            document.getElementById('detail-fanart').style.backgroundImage = item.has_poster ? `url('/api/images/${item.id}/fanart?token=${token}&t=${Date.now()}')` : 'none';
 
             const sizeVal = Number(item.size) || 0;
             document.getElementById('detail-file-size').innerText = sizeVal > 0 ? `${(sizeVal / (1024 * 1024 * 1024)).toFixed(2)} GB` : '未知';
@@ -445,12 +433,10 @@
                 item.media_streams.forEach(s => {
                     if (s.Type === 'VIDEO' || s.Type === 'Video') {
                         const title = s.DisplayTitle || `${s.Height}p ${s.Codec.toUpperCase()}`;
-                        const depth = s.BitDepth ? `${s.BitDepth}bit` : '';
-                        const hdr = s.VideoRange && s.VideoRange !== 'SDR' ? s.VideoRange : '';
-                        const extra = [s.Profile, `${s.Width}x${s.Height}`, depth, hdr].filter(Boolean).join(' ');
+                        const extra = [s.Profile, `${s.Width}x${s.Height}`, s.BitDepth ? `${s.BitDepth}bit` : '', s.VideoRange && s.VideoRange !== 'SDR' ? s.VideoRange : ''].filter(Boolean).join(' ');
                         html += `<div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
                             <div class="text-xs text-blue-400 font-bold mb-1 uppercase tracking-wider">视频流 VIDEO</div>
-                            <div class="text-sm text-gray-200 mb-0.5 font-medium">${title} ${s.BitDepth == 10 ? '<span class="text-[10px] bg-yellow-500/20 text-yellow-300 px-1 rounded border border-yellow-500/30 ml-1">10bit</span>' : ''}</div>
+                            <div class="text-sm text-gray-200 mb-0.5 font-medium">${title}</div>
                             <div class="text-xs text-gray-500">${s.Codec.toUpperCase()} ${extra}</div>
                         </div>`;
                     } else if (s.Type === 'AUDIO' || s.Type === 'Audio') {
