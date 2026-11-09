@@ -1027,6 +1027,8 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             
             let stills_json: String = row.get(26).unwrap_or_default();
             let stills_vec: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
+            let mut backdrop_tags: Vec<Value> = Vec::new();
+            for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i))); }
             
             let releasedate: String = row.get(27).unwrap_or_default();
             let original_title: String = row.get(28).unwrap_or_default();
@@ -1083,8 +1085,9 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let mut image_tags = serde_json::Map::new();
             if !poster_path.is_empty() { image_tags.insert("Primary".to_string(), json!(format!("tag_{}", id))); }
             if !logo_path.is_empty() { image_tags.insert("Logo".to_string(), json!(format!("logo_{}", id))); }
-            if !fanart_path.is_empty() { image_tags.insert("Thumb".to_string(), json!(format!("v4_thumb_{}", id))); } else if !thumb_path.is_empty() { image_tags.insert("Thumb".to_string(), json!(format!("v4_thumb_{}", id))); }
+            if !thumb_path.is_empty() { image_tags.insert("Thumb".to_string(), json!(format!("thumb_{}", id))); }
             if !banner_path.is_empty() { image_tags.insert("Banner".to_string(), json!(format!("banner_{}", id))); }
+
 
 async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
@@ -1092,31 +1095,28 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
     let path_opt = {
         let conn = pool.lock().unwrap();
         
-        if image_type.to_lowercase() == "backdrop" || image_type.to_lowercase() == "fanart" {
-            let mut stmt = conn.prepare("SELECT stills, fanart_path FROM items WHERE id = ?1").unwrap();
-            stmt.query_row([id], |row| Ok((
-                row.get::<_, String>(0).unwrap_or_default(),
-                row.get::<_, String>(1).unwrap_or_default()
-            ))).map(|(stills_json, fanart_path)| {
-                let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
-                if !stills.is_empty() {
+        match image_type.to_lowercase().as_str() {
+            "primary" | "poster" => {
+                conn.query_row("SELECT poster_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok()
+            },
+            "thumb" => {
+                conn.query_row("SELECT thumb_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok()
+            },
+            "logo" => {
+                conn.query_row("SELECT logo_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok()
+            },
+            "banner" => {
+                conn.query_row("SELECT banner_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok()
+            },
+            "backdrop" | "fanart" => {
+                // 严格只取 stills 数组（extrafanart 文件夹的图），如果没有就是空
+                let mut stmt = conn.prepare("SELECT stills FROM items WHERE id = ?1").unwrap();
+                stmt.query_row([id], |row| Ok(row.get::<_, String>(0).unwrap_or_default())).map(|stills_json| {
+                    let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
                     stills.get(index).cloned()
-                } else if index == 0 && !fanart_path.is_empty() {
-                    Some(fanart_path)
-                } else {
-                    None
-                }
-            }).unwrap_or(None)
-        } else {
-            let query = match image_type.to_lowercase().as_str() {
-                "primary" | "poster" => "SELECT poster_path FROM items WHERE id = ?1",
-                "thumb" => "SELECT fanart_path FROM items WHERE id = ?1",
-                "logo" => "SELECT logo_path FROM items WHERE id = ?1", 
-                "banner" => "SELECT banner_path FROM items WHERE id = ?1",
-                _ => "SELECT poster_path FROM items WHERE id = ?1",
-            };
-            let mut stmt = conn.prepare(query).unwrap();
-            stmt.query_row([id], |row| row.get::<_, String>(0)).ok()
+                }).unwrap_or(None)
+            },
+            _ => None,
         }
     };
 

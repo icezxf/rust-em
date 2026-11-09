@@ -992,11 +992,11 @@ pub async fn emby_danmu() -> impl IntoResponse {
 
 
 
+
 async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -> Response {
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let conn = pool.lock().unwrap();
     
-    // 注意：SQL 里的列索引顺序必须和 row.get(n) 严格对应
     let item_opt = conn.query_row(
         "SELECT id, title, type, year, plot, poster_path, file_path, studios, parts, runtime, actors, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, series, label, set_name, tagline, tags, directors, num, stills, releasedate, original_title, sort_title, country, language, writers, trailer, media_streams, date_created, primary_image_aspect_ratio, original_language, fanart_path, logo_path, thumb_path, banner_path, strm_content FROM items WHERE id = ?1",
         [id],
@@ -1024,18 +1024,14 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let tags_str: String = row.get(23).unwrap_or_default();
             let directors_str: String = row.get(24).unwrap_or_default();
             let num: String = row.get(25).unwrap_or_default();
-            
             let stills_json: String = row.get(26).unwrap_or_default();
             let stills_vec: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
-            let mut backdrop_tags: Vec<Value> = Vec::new();
-            for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i))); }
-            
             let releasedate: String = row.get(27).unwrap_or_default();
             let original_title: String = row.get(28).unwrap_or_default();
             let sort_title: String = row.get(29).unwrap_or_default();
             let country: String = row.get(30).unwrap_or_default();
             let language: String = row.get(31).unwrap_or_default();
-            let _writers_str: String = row.get(32).unwrap_or_default();
+            let writers_str: String = row.get(32).unwrap_or_default();
             let media_streams_json: String = row.get(34).unwrap_or_default();
             let date_created: i64 = row.get(35).unwrap_or(0);
             let aspect_ratio: f64 = row.get(36).unwrap_or(0.0);
@@ -1088,46 +1084,60 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             if !thumb_path.is_empty() { image_tags.insert("Thumb".to_string(), json!(format!("thumb_{}", id))); }
             if !banner_path.is_empty() { image_tags.insert("Banner".to_string(), json!(format!("banner_{}", id))); }
 
-
-async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
-    let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
-    
-    let path_opt = {
-        let conn = pool.lock().unwrap();
-        
-        match image_type.to_lowercase().as_str() {
-            "primary" | "poster" => {
-                conn.query_row("SELECT poster_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok()
-            },
-            "thumb" => {
-                conn.query_row("SELECT thumb_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok()
-            },
-            "logo" => {
-                conn.query_row("SELECT logo_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok()
-            },
-            "banner" => {
-                conn.query_row("SELECT banner_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok()
-            },
-            "backdrop" | "fanart" => {
-                // 严格只取 stills 数组（extrafanart 文件夹的图），如果没有就是空
-                let mut stmt = conn.prepare("SELECT stills FROM items WHERE id = ?1").unwrap();
-                stmt.query_row([id], |row| Ok(row.get::<_, String>(0).unwrap_or_default())).map(|stills_json| {
-                    let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
-                    stills.get(index).cloned()
-                }).unwrap_or(None)
-            },
-            _ => None,
-        }
-    };
-
-    if let Some(path_str) = path_opt {
-        if !path_str.is_empty() {
-            if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
-            if let Ok(bytes) = tokio::fs::read(&path_str).await {
-                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
-                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
+            let mut backdrop_tags: Vec<Value> = Vec::new();
+            for i in 0..stills_vec.len() { 
+                backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i))); 
             }
+
+            let date_created_ts = if date_created > 0 { date_created } else { mtime };
+            let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
+            let est_bitrate = if size > 0 && run_time_ticks > 0 { (size * 8) / (run_time_ticks / 10_000_000) } else { 0 };
+
+            let media_sources: Vec<Value> = if parts.is_empty() { vec![] } else {
+                parts.iter().enumerate().map(|(i, _path)| {
+                    let stream_url = format!("/Videos/{}/original.mp4?MediaSourceId={}_cd{}", id, id, i);
+                    json!({
+                        "Id": format!("{}_cd{}", id, i), "ItemId": id.to_string(),
+                        "Path": real_path.clone(), "DirectStreamUrl": stream_url,
+                        "Protocol": "Http", "Container": "mp4", "Name": title.clone(),
+                        "Type": "Default", "VideoType": "VideoFile", "IsRemote": true,
+                        "Bitrate": est_bitrate, "RunTimeTicks": run_time_ticks, "Size": size,
+                        "DefaultAudioStreamIndex": 1, "DefaultSubtitleStreamIndex": -1,
+                        "SupportsDirectPlay": true, "SupportsDirectStream": true,
+                        "SupportsProbing": true, "SupportsTranscoding": false,
+                        "AddApiKeyToDirectStreamUrl": false, "RequiresClosing": false, "RequiresOpening": false,
+                        "ProbeEngine": "rust-native", "MediaStreams": media_streams.clone()
+                    })
+                }).collect()
+            };
+
+            Ok(json!({
+                "Id": id.to_string(), "ServerId": "rust-em-server", "Name": title.clone(),
+                "OriginalTitle": if original_title.is_empty() { Value::Null } else { json!(original_title) },
+                "SortName": if sort_title.is_empty() { title.clone() } else { sort_title },
+                "Type": if typ == "movies" { "Movie" } else { "Series" },
+                "MediaType": "Video", "IsFolder": false, "Overview": plot,
+                "ProductionYear": year_str.parse::<i32>().unwrap_or(0), "PremiereDate": premiered, "ReleaseDate": releasedate,
+                "DateCreated": format_iso8601(date_created_ts), "CommunityRating": rating, "OfficialRating": mpaa,
+                "RunTimeTicks": run_time_ticks, "Size": size, "Bitrate": est_bitrate,
+                "Genres": genres_vec, "GenreItems": genre_items, "Tags": tags_vec, "TagItems": tag_items,
+                "Taglines": if tagline.is_empty() { json!([]) } else { json!([tagline]) },
+                "Studios": studios, "People": people,
+                "ProviderIds": { "Tmdb": if tmdb_id.is_empty() { Value::Null } else { json!(tmdb_id) }, "Imdb": if imdb_id.is_empty() { Value::Null } else { json!(imdb_id) } },
+                "ImageTags": image_tags, "BackdropImageTags": backdrop_tags,
+                "PrimaryImageAspectRatio": if aspect_ratio > 0.0 { json!(aspect_ratio) } else { json!(0.6666666666666666) },
+                "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(),
+                "OriginalLanguage": if !original_language.is_empty() { json!(original_language) } else if !language.is_empty() { json!(language) } else { Value::Null },
+                "SetName": if set_name.is_empty() { Value::Null } else { json!(set_name) },
+                "SeriesName": if series.is_empty() { Value::Null } else { json!(series) },
+                "Num": num, "Path": real_path, "Container": "mp4", "MediaSourceCount": media_sources.len(),
+                "MediaSources": media_sources, "MediaStreams": media_streams,
+                "ProbeEngine": "rust-native", "LocationType": "FileSystem",
+                "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
+                "UserData": { "ItemId": id.to_string(), "Key": id.to_string(), "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 }
+            }))
         }
-    }
-    StatusCode::NOT_FOUND.into_response()
+    ).ok();
+    
+    if let Some(item) = item_opt { Json(item).into_response() } else { StatusCode::NOT_FOUND.into_response() }
 }
