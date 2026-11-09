@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 use axum::{
     routing::{get, post, any},
     Router,
@@ -53,39 +52,20 @@ async fn main() {
         .route("/Items/{item_id}/Images/{image_type}/{index}", get(api::emby_item_image_with_index))
         .route("/Users/{user_id}/Items/{item_id}/Images/{image_type}", get(api::emby_item_image_with_user))
         .route("/Users/{user_id}/Images/{image_type}", get(api::emby_item_image))
+        .route("/Persons/{person_id}/Images/{image_type}", get(api::emby_person_image))
 
         .route("/Items/{item_id}/PlaybackInfo", get(api::emby_playback_info).post(api::emby_playback_info))
-        
-        // --- 兼容大写的 Videos ---
         .route("/Videos/{item_id}/stream", get(api::emby_stream))
         .route("/Videos/{item_id}/stream.{ext}", get(api::emby_stream_with_ext))
         .route("/Videos/{item_id}/original", get(api::emby_stream))
         .route("/Videos/{item_id}/original.{ext}", get(api::emby_stream_with_ext))
         .route("/Videos/{item_id}/{source_id}/stream", get(api::emby_stream_with_source))
         .route("/Videos/{item_id}/{source_id}/stream.{ext}", get(api::emby_stream_with_source_ext))
-        
-        // --- 【核心修复】：兼容 Yamby 文档要求的小写 videos 路由 ---
-        .route("/videos/{item_id}/stream", get(api::emby_stream))
-        .route("/videos/{item_id}/stream.{ext}", get(api::emby_stream_with_ext))
-        .route("/videos/{item_id}/original", get(api::emby_stream))
-        .route("/videos/{item_id}/original.{ext}", get(api::emby_stream_with_ext))
-        .route("/videos/{item_id}/{source_id}/stream", get(api::emby_stream_with_source))
-        .route("/videos/{item_id}/{source_id}/stream.{ext}", get(api::emby_stream_with_source_ext))
-
         .route("/Items/{item_id}/Download", get(api::emby_download))
         .route("/Items/{item_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream))
         .route("/Videos/{item_id}/{source_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream))
         
         .route("/Sessions", get(api::emby_sessions))
-        .route("/Items/{item_id}/Similar", get(api::emby_similar))
-        .route("/Items/{item_id}/ThumbnailSet", get(api::emby_thumbnail_set))
-        .route("/api/danmu/{item_id}", get(api::emby_danmu))
-        .route("/Library/VirtualFolders", get(api::emby_virtual_folders))
-        .route("/Items/Counts", get(api::emby_item_counts))
-        .route("/Search/Hints", get(api::emby_search_hints))
-        .route("/Shows/NextUp", get(api::emby_shows_next_up))
-        .route("/Shows/{series_id}/Seasons", get(api::emby_shows_seasons))
-        .route("/Shows/{series_id}/Episodes", get(api::emby_shows_episodes))
         .route("/Sessions/Playing", post(api::emby_playing))
         .route("/Sessions/Playing/Progress", post(api::emby_playing_progress))
         .route("/Sessions/Playing/Stopped", post(api::emby_playing_stopped))
@@ -93,6 +73,16 @@ async fn main() {
         .route("/Users/{user_id}/Items/{item_id}/HideFromResume", post(api::emby_hide_from_resume))
         .route("/Users/{user_id}/FavoriteItems/{item_id}", post(api::emby_action).delete(api::emby_action))
         .route("/Users/{user_id}/PlayedItems/{item_id}", post(api::emby_action).delete(api::emby_action))
+        
+        .route("/Items/{item_id}/Similar", get(api::emby_similar))
+        .route("/Items/{item_id}/ThumbnailSet", get(api::emby_thumbnail_set))
+        .route("/Library/VirtualFolders", get(api::emby_virtual_folders))
+        .route("/Items/Counts", get(api::emby_item_counts))
+        .route("/Search/Hints", get(api::emby_search_hints))
+        .route("/Shows/NextUp", get(api::emby_shows_next_up))
+        .route("/Shows/{series_id}/Seasons", get(api::emby_shows_seasons))
+        .route("/Shows/{series_id}/Episodes", get(api::emby_shows_episodes))
+        .route("/api/danmu/{item_id}", get(api::emby_danmu))
         
         .fallback(any(|req: axum::extract::Request| async move {
             println!("⚠️ [EMBY 未捕获路由] {} {}", req.method(), req.uri().path());
@@ -109,7 +99,8 @@ async fn main() {
         .route("/api/images/{id}/{type}", get(api::get_image))
         .route("/api/user/update", post(api::update_user))
         .route("/api/settings", get(api::get_settings).post(api::update_settings))
-        .route("/api/probe/scan", post(api::probe_scan));
+        .route("/api/probe/scan", post(api::probe_scan))
+        .route("/api/probe/test", post(api::probe_test));
 
     let app = Router::new()
         .merge(web_routes)

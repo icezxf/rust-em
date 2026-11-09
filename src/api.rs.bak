@@ -307,7 +307,6 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                     if let Some(s) = &meta.series { series = s.clone(); }
                     if let Some(l) = &meta.label { label = l.clone(); }
                     if !meta.sets.is_empty() { set_name = meta.sets.join(" / "); }
-                    if let Some(n) = &meta.num { num = n.clone(); }
                     if let Some(pr) = &meta.premiered { premiered = pr.clone(); }
                     if let Some(rd) = &meta.releasedate { releasedate = rd.clone(); }
                     if let Some(y) = &meta.year { year = y.clone(); } 
@@ -589,8 +588,257 @@ pub struct EmbyItemsQuery {
 }
 
 pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
+async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -> Response {
+    let conn = pool.lock().unwrap();
+    
+    if let Some(list_ids) = &query.list_item_ids {
+        if let Ok(item_id) = list_ids.parse::<i64>() {
+            let set_name_str: String = conn.query_row("SELECT set_name FROM items WHERE id = ?1", [item_id], |r| r.get(0)).unwrap_or_default();
+            let mut boxsets = Vec::new();
+            for name in set_name_str.split(" / ").filter(|s| !s.trim().is_empty()) {
+                let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
+                let boxset_id = format!("boxset_{:x}", hash);
+                boxsets.push(json!({
+                    "Name": name, "Id": boxset_id, "ServerId": "rust-em-server",
+                    "Type": "BoxSet", "IsFolder": true, "MediaType": "Video",
+                    "ImageTags": {"Primary": "tag_boxset"}, "BackdropImageTags": [],
+                    "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
+                }));
+            }
+            return Json(json!({ "Items": boxsets, "TotalRecordCount": boxsets.len() })).into_response();
+        }
+        return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response();
+    }
 
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title FROM items WHERE 1=1".to_string();
+    
+    if let Some(pid) = &query.parent_id {
+        if pid.starts_with("lib_") {
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); }
+        } else if pid.starts_with("boxset_") {
+            let mut found_set_name = String::new();
+            let mut names = Vec::new();
+            if let Ok(mut stmt_all) = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''") {
+                if let Ok(mapped) = stmt_all.query_map([], |r| r.get::<_, String>(0)) {
+                    for s in mapped.flatten() { names.push(s); }
+                }
+            }
+            for full_str in names {
+                for name in full_str.split(" / ").filter(|s| !s.trim().is_empty()) {
+                    let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
+                    if format!("boxset_{:x}", hash) == *pid { found_set_name = name.to_string(); break; }
+                }
+                if !found_set_name.is_empty() { break; }
+            }
+            if !found_set_name.is_empty() { sql.push_str(&format!(" AND set_name LIKE '%{}%'", found_set_name)); }
+            else { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
+        }
+    }
+    sql.push_str(" ORDER BY id DESC LIMIT 100");
+    
+    let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
+    let items: Vec<Value> = stmt.query_map([], |row| {
+        let id: i64 = row.get(0).unwrap_or_default();
+        let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
+        Ok(json!({
+            "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
+            "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
+            "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
+            "Overview": row.get::<_, String>(4).unwrap_or_default(), 
+            "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0), 
+            "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) },
+            "Path": row.get::<_, String>(6).unwrap_or_default(),
+            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
+            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
+        }))
+    }).unwrap().filter_map(Result::ok).collect();
+    Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response()
+}
 
+pub async fn emby_item_detail(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<String>) -> Response {
+    emby_item_detail_inner(pool, item_id).await
+}
+pub async fn emby_item_detail_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>) -> Response {
+    emby_item_detail_inner(pool, item_id).await
+}
+
+async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -> Response {
+    let conn = pool.lock().unwrap();
+    
+    if item_id.starts_with("boxset_") {
+        let mut found_set_name = String::new();
+        let mut names = Vec::new();
+        if let Ok(mut stmt_all) = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''") {
+            if let Ok(mapped) = stmt_all.query_map([], |r| r.get::<_, String>(0)) {
+                for s in mapped.flatten() { names.push(s); }
+            }
+        }
+        for full_str in names {
+            for name in full_str.split(" / ").filter(|s| !s.trim().is_empty()) {
+                let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
+                if format!("boxset_{:x}", hash) == item_id { found_set_name = name.to_string(); break; }
+            }
+            if !found_set_name.is_empty() { break; }
+        }
+        if found_set_name.is_empty() { return StatusCode::NOT_FOUND.into_response(); }
+        
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE set_name LIKE ?1", [format!("%{}%", found_set_name)], |r| r.get(0)).unwrap_or(0);
+        
+        let item = json!({
+            "Name": found_set_name, "Id": item_id, "ServerId": "rust-em-server",
+            "Type": "BoxSet", "IsFolder": true, "MediaType": "Video",
+            "ChildCount": count, "RecursiveItemCount": count,
+            "ImageTags": {"Primary": "tag_boxset"}, "BackdropImageTags": [],
+            "Overview": "合集",
+            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
+        });
+        return Json(item).into_response();
+    }
+
+    let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
+    let item_opt = conn.query_row(
+        "SELECT id, title, type, year, plot, poster_path, file_path, studios, parts, runtime, actors, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, series, label, set_name, tagline, tags, directors, num, stills, releasedate, original_title, sort_title, country, language, writers, trailer, media_streams, date_created, primary_image_aspect_ratio, original_language, fanart_path, logo_path, thumb_path, banner_path, strm_content FROM items WHERE id = ?1",
+        [id],
+        |row| {
+            let title: String = row.get(1).unwrap_or_default();
+            let typ: String = row.get(2).unwrap_or_default();
+            let year_str: String = row.get(3).unwrap_or_default();
+            let plot: String = row.get(4).unwrap_or_default();
+            let poster_path: String = row.get(5).unwrap_or_default();
+            let studios_str: String = row.get(7).unwrap_or_default();
+            let parts_json: String = row.get(8).unwrap_or_default();
+            let runtime: i32 = row.get(9).unwrap_or(0);
+            let actors_json: String = row.get(10).unwrap_or_default();
+            let rating: f64 = row.get(11).unwrap_or(0.0);
+            let mpaa: String = row.get(12).unwrap_or_default();
+            let genres_str: String = row.get(13).unwrap_or_default();
+            let premiered: String = row.get(14).unwrap_or_default();
+            let tmdb_id: String = row.get(15).unwrap_or_default();
+            let imdb_id: String = row.get(16).unwrap_or_default();
+            let size: i64 = row.get(17).unwrap_or(0);
+            let mtime: i64 = row.get(18).unwrap_or(0);
+            let series: String = row.get(19).unwrap_or_default();
+            let set_name: String = row.get(21).unwrap_or_default();
+            let tagline: String = row.get(22).unwrap_or_default();
+            let tags_str: String = row.get(23).unwrap_or_default();
+            let directors_str: String = row.get(24).unwrap_or_default();
+            let num: String = row.get(25).unwrap_or_default();
+            let stills_json: String = row.get(26).unwrap_or_default();
+            let stills_vec: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
+            let releasedate: String = row.get(27).unwrap_or_default();
+            let original_title: String = row.get(28).unwrap_or_default();
+            let sort_title: String = row.get(29).unwrap_or_default();
+            let country: String = row.get(30).unwrap_or_default();
+            let language: String = row.get(31).unwrap_or_default();
+            let _writers_str: String = row.get(32).unwrap_or_default();
+            let media_streams_json: String = row.get(34).unwrap_or_default();
+            let date_created: i64 = row.get(35).unwrap_or(0);
+            let aspect_ratio: f64 = row.get(36).unwrap_or(0.0);
+            let original_language: String = row.get(37).unwrap_or_default();
+            let fanart_path: String = row.get(38).unwrap_or_default();
+            let logo_path: String = row.get(39).unwrap_or_default();
+            let thumb_path: String = row.get(40).unwrap_or_default();
+            let banner_path: String = row.get(41).unwrap_or_default();
+            let strm_content: String = row.get(42).unwrap_or_default();
+
+            let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
+            let actors: Vec<Value> = serde_json::from_str(&actors_json).unwrap_or_default();
+            let mut media_streams: Value = serde_json::from_str(&media_streams_json).unwrap_or(json!([]));
+            sanitize_media_streams(&mut media_streams);
+            let real_path = strm_content.lines().map(str::trim).find(|s| !s.is_empty()).unwrap_or("").to_string();
+
+            let genres_vec: Vec<&str> = genres_str.split(" / ").filter(|s| !s.is_empty()).collect();
+            let mut genre_items = Vec::new();
+            for g in &genres_vec {
+                let mut h = Sha256::new(); h.update(g.as_bytes()); let hash = h.finalize();
+                genre_items.push(json!({"Id": format!("genre-{:x}", hash), "Name": g}));
+            }
+            let tags_vec: Vec<&str> = tags_str.split(" / ").filter(|s| !s.is_empty()).collect();
+            let mut tag_items = Vec::new();
+            for t in &tags_vec {
+                let mut h = Sha256::new(); h.update(t.as_bytes()); let hash = h.finalize();
+                tag_items.push(json!({"Id": format!("tag-{:x}", hash), "Name": t}));
+            }
+
+            let studios: Vec<Value> = studios_str.split(" / ").filter(|s| !s.trim().is_empty()).map(|s| {
+                let mut h = Sha256::new(); h.update(s.as_bytes()); let hash = h.finalize();
+                let sid = (i64::from_be_bytes([hash[0], hash[1], hash[2], hash[3], hash[4], hash[5], hash[6], hash[7]])).abs() % 1_000_000_000 + 1;
+                json!({ "Name": s, "Id": sid })
+            }).collect();
+
+            let mut people: Vec<Value> = actors.iter().map(|a| json!({
+                "Name": a["name"].as_str().unwrap_or_default(),
+                "Role": a["role"].as_str().unwrap_or_default(),
+                "Type": "Actor",
+                "Id": format!("person_{}", a["name"].as_str().unwrap_or_default()),
+                "PrimaryImageTag": a["thumb"].as_str().unwrap_or_default()
+            })).collect();
+            for d in directors_str.split(" / ").filter(|s| !s.is_empty()) {
+                people.push(json!({ "Name": d, "Type": "Director", "Id": format!("person_{}", d), "PrimaryImageTag": Value::Null }));
+            }
+
+            let mut image_tags = serde_json::Map::new();
+            if !poster_path.is_empty() { image_tags.insert("Primary".to_string(), json!(format!("tag_{}", id))); }
+            if !logo_path.is_empty() { image_tags.insert("Logo".to_string(), json!(format!("logo_{}", id))); }
+            if !thumb_path.is_empty() { image_tags.insert("Thumb".to_string(), json!(format!("thumb_{}", id))); }
+            if !banner_path.is_empty() { image_tags.insert("Banner".to_string(), json!(format!("banner_{}", id))); }
+
+            let mut backdrop_tags: Vec<Value> = Vec::new();
+            if !fanart_path.is_empty() { backdrop_tags.push(json!(format!("backdrop_{}_0", id))); }
+            for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i + 1))); }
+
+            let date_created_ts = if date_created > 0 { date_created } else { mtime };
+            let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
+            let est_bitrate = if size > 0 && run_time_ticks > 0 { (size * 8) / (run_time_ticks / 10_000_000) } else { 0 };
+
+            let media_sources: Vec<Value> = if parts.is_empty() { vec![] } else {
+                parts.iter().enumerate().map(|(i, _path)| {
+                    let stream_url = format!("/Videos/{}/original.mp4?MediaSourceId={}_cd{}", id, id, i);
+                    json!({
+                        "Id": format!("{}_cd{}", id, i), "ItemId": id.to_string(),
+                        "Path": real_path.clone(), "DirectStreamUrl": stream_url,
+                        "Protocol": "Http", "Container": "mp4", "Name": title.clone(),
+                        "Type": "Default", "VideoType": "VideoFile", "IsRemote": true,
+                        "Bitrate": est_bitrate, "RunTimeTicks": run_time_ticks, "Size": size,
+                        "DefaultAudioStreamIndex": 1, "DefaultSubtitleStreamIndex": -1,
+                        "SupportsDirectPlay": true, "SupportsDirectStream": true,
+                        "SupportsProbing": true, "SupportsTranscoding": false,
+                        "AddApiKeyToDirectStreamUrl": false, "RequiresClosing": false, "RequiresOpening": false,
+                        "ProbeEngine": "rust-native", "MediaStreams": media_streams.clone()
+                    })
+                }).collect()
+            };
+
+            Ok(json!({
+                "Id": id.to_string(), "ServerId": "rust-em-server", "Name": title.clone(),
+                "OriginalTitle": if original_title.is_empty() { Value::Null } else { json!(original_title) },
+                "SortName": if sort_title.is_empty() { title.clone() } else { sort_title },
+                "Type": if typ == "movies" { "Movie" } else { "Series" },
+                "MediaType": "Video", "IsFolder": false, "Overview": plot,
+                "ProductionYear": year_str.parse::<i32>().unwrap_or(0), "PremiereDate": premiered, "ReleaseDate": releasedate,
+                "DateCreated": format_iso8601(date_created_ts), "CommunityRating": rating, "OfficialRating": mpaa,
+                "RunTimeTicks": run_time_ticks, "Size": size, "Bitrate": est_bitrate,
+                "Genres": genres_vec, "GenreItems": genre_items, "Tags": tags_vec, "TagItems": tag_items,
+                "Taglines": if tagline.is_empty() { json!([]) } else { json!([tagline]) },
+                "Studios": studios, "People": people,
+                "ProviderIds": { "Tmdb": if tmdb_id.is_empty() { Value::Null } else { json!(tmdb_id) }, "Imdb": if imdb_id.is_empty() { Value::Null } else { json!(imdb_id) } },
+                "ImageTags": image_tags, "BackdropImageTags": backdrop_tags,
+                "PrimaryImageAspectRatio": if aspect_ratio > 0.0 { json!(aspect_ratio) } else { json!(0.6666666666666666) },
+                "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(),
+                "OriginalLanguage": if !original_language.is_empty() { json!(original_language) } else if !language.is_empty() { json!(language) } else { Value::Null },
+                "SetName": if set_name.is_empty() { Value::Null } else { json!(set_name) },
+                "SeriesName": if series.is_empty() { Value::Null } else { json!(series) },
+                "Num": num, "Path": real_path, "Container": "mp4", "MediaSourceCount": media_sources.len(),
+                "MediaSources": media_sources, "MediaStreams": media_streams,
+                "ProbeEngine": "rust-native", "LocationType": "FileSystem",
+                "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
+                "UserData": { "ItemId": id.to_string(), "Key": id.to_string(), "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 }
+            }))
+        }
+    ).ok();
+    
+    if let Some(item) = item_opt { Json(item).into_response() } else { StatusCode::NOT_FOUND.into_response() }
+}
 
 pub async fn emby_item_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type)): AxumPath<(String, String)>) -> Response {
     emby_item_image_inner(pool, item_id, image_type, 0).await
@@ -603,16 +851,75 @@ pub async fn emby_item_image_with_user(State(pool): State<Arc<Mutex<Connection>>
     emby_item_image_inner(pool, item_id, image_type, 0).await
 }
 
+async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
+    let conn = pool.lock().unwrap();
 
-pub async fn emby_person_image() -> impl IntoResponse {
-    let png_bytes: [u8; 67] = [
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-        0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-        0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
-        0x42, 0x60, 0x82
-    ];
-    (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response()
+    if item_id.starts_with("boxset_") {
+        let mut found_set_name = String::new();
+        let mut names = Vec::new();
+        if let Ok(mut stmt_all) = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''") {
+            if let Ok(mapped) = stmt_all.query_map([], |r| r.get::<_, String>(0)) {
+                for s in mapped.flatten() { names.push(s); }
+            }
+        }
+        for full_str in names {
+            for name in full_str.split(" / ").filter(|s| !s.trim().is_empty()) {
+                let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
+                if format!("boxset_{:x}", hash) == item_id { found_set_name = name.to_string(); break; }
+            }
+            if !found_set_name.is_empty() { break; }
+        }
+        if !found_set_name.is_empty() {
+            let like_str = format!("%{}%", found_set_name);
+            if let Ok(mut stmt) = conn.prepare("SELECT poster_path FROM items WHERE set_name LIKE ?1 AND poster_path != '' LIMIT 1") {
+                if let Ok(poster_path) = stmt.query_row([like_str], |r| r.get::<_, String>(0)) {
+                    if !poster_path.is_empty() {
+                        if poster_path.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, poster_path)], "").into_response(); }
+                        if let Ok(bytes) = tokio::fs::read(&poster_path).await {
+                            let mime = if poster_path.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
+                            return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
+                        }
+                    }
+                }
+            }
+        }
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
+
+    let path_opt = match image_type.to_lowercase().as_str() {
+        "primary" | "poster" => conn.query_row("SELECT poster_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
+        "thumb" => conn.query_row("SELECT thumb_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
+        "logo" => conn.query_row("SELECT logo_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
+        "banner" => conn.query_row("SELECT banner_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
+        "backdrop" | "fanart" => {
+            let mut stmt = conn.prepare("SELECT stills, fanart_path FROM items WHERE id = ?1").unwrap();
+            stmt.query_row([id], |row| Ok((
+                row.get::<_, String>(0).unwrap_or_default(),
+                row.get::<_, String>(1).unwrap_or_default()
+            ))).map(|(stills_json, fanart_path)| {
+                if index == 0 {
+                    if !fanart_path.is_empty() { Some(fanart_path) } else { None }
+                } else {
+                    let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
+                    stills.get(index - 1).cloned()
+                }
+            }).unwrap_or(None)
+        },
+        _ => None,
+    };
+
+    if let Some(path_str) = path_opt {
+        if !path_str.is_empty() {
+            if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
+            if let Ok(bytes) = tokio::fs::read(&path_str).await {
+                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
+                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
+            }
+        }
+    }
+    StatusCode::NOT_FOUND.into_response()
 }
 
 pub async fn emby_playback_info(
@@ -664,7 +971,6 @@ pub async fn emby_playback_info(
         parsed_streams
     };
 
-    // 提前预热
     let prefetch = {
         let conn = pool.lock().unwrap();
         conn.query_row("SELECT value FROM settings WHERE key = 'prefetch_playback'", [], |r| r.get::<_, String>(0)).unwrap_or_else(|_| "false".to_string()) == "true"
@@ -832,7 +1138,8 @@ pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(i
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(),
             "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
             "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
-            "Overview": row.get::<_, String>(4).unwrap_or_default(), "CommunityRating": row.get::<_, f64>(6).unwrap_or(0.0),
+            "Overview": row.get::<_, String>(4).unwrap_or_default(),
+            "CommunityRating": row.get::<_, f64>(6).unwrap_or(0.0),
             "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) },
             "BackdropImageTags": []
         }))
@@ -901,328 +1208,16 @@ pub async fn emby_shows_next_up() -> impl IntoResponse { Json(json!({ "Items": [
 pub async fn emby_shows_seasons() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 pub async fn emby_shows_episodes() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 pub async fn emby_danmu() -> impl IntoResponse { Json(json!([])) }
-
+pub async fn emby_person_image() -> impl IntoResponse {
+    let png_bytes: [u8; 67] = [
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+        0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+        0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+        0x42, 0x60, 0x82
+    ];
+    (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response()
+}
 pub async fn emby_subtitle_stream() -> impl IntoResponse {
     StatusCode::OK.into_response()
-}
-
-
-
-
-pub async fn emby_item_detail(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<String>) -> Response {
-    emby_item_detail_inner(pool, item_id).await
-}
-pub async fn emby_item_detail_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>) -> Response {
-    emby_item_detail_inner(pool, item_id).await
-}
-
-
-
-async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -> Response {
-    let conn = pool.lock().unwrap();
-    
-    // 查询影片所属合集
-    if let Some(list_ids) = &query.list_item_ids {
-        if let Ok(item_id) = list_ids.parse::<i64>() {
-            let set_name_str: String = conn.query_row("SELECT set_name FROM items WHERE id = ?1", [item_id], |r| r.get(0)).unwrap_or_default();
-            let mut boxsets = Vec::new();
-            for name in set_name_str.split(" / ").filter(|s| !s.trim().is_empty()) {
-                let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
-                let boxset_id = format!("boxset_{:x}", hash);
-                boxsets.push(json!({
-                    "Name": name, "Id": boxset_id, "ServerId": "rust-em-server",
-                    "Type": "BoxSet", "IsFolder": true, "MediaType": "Video",
-                    "ImageTags": {"Primary": "tag_boxset"}, "BackdropImageTags": [],
-                    "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
-                }));
-            }
-            return Json(json!({ "Items": boxsets, "TotalRecordCount": boxsets.len() })).into_response();
-        }
-        return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response();
-    }
-
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title FROM items WHERE 1=1".to_string();
-    
-    // 查询普通媒体库，或合集内的影片
-    if let Some(pid) = &query.parent_id {
-        if pid.starts_with("lib_") {
-            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); }
-        } else if pid.starts_with("boxset_") {
-            let mut found_set_name = String::new();
-            let mut stmt_all = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''").unwrap();
-            let mut rows = stmt_all.query([]).unwrap();
-            while let Ok(Some(r)) = rows.next() {
-                let s: String = r.get(0).unwrap_or_default();
-                for name in s.split(" / ").filter(|s| !s.trim().is_empty()) {
-                    let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
-                    if format!("boxset_{:x}", hash) == *pid { found_set_name = name.to_string(); break; }
-                }
-                if !found_set_name.is_empty() { break; }
-            }
-            if !found_set_name.is_empty() { sql.push_str(&format!(" AND set_name LIKE '%{}%'", found_set_name)); }
-            else { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
-        }
-    }
-    sql.push_str(" ORDER BY id DESC LIMIT 100");
-    
-    let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
-    let items: Vec<Value> = stmt.query_map([], |row| {
-        let id: i64 = row.get(0).unwrap_or_default();
-        let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
-        Ok(json!({
-            "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
-            "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
-            "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
-            "Overview": row.get::<_, String>(4).unwrap_or_default(), 
-            "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0), 
-            "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) },
-            "Path": row.get::<_, String>(6).unwrap_or_default(),
-            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
-            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
-        }))
-    }).unwrap().filter_map(Result::ok).collect();
-    Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response()
-}
-
-async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -> Response {
-    let conn = pool.lock().unwrap();
-    
-    if item_id.starts_with("boxset_") {
-        let mut found_set_name = String::new();
-        let mut stmt_all = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''").unwrap();
-        let mut rows = stmt_all.query([]).unwrap();
-        while let Ok(Some(r)) = rows.next() {
-            let s: String = r.get(0).unwrap_or_default();
-            for name in s.split(" / ").filter(|s| !s.trim().is_empty()) {
-                let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
-                if format!("boxset_{:x}", hash) == item_id { found_set_name = name.to_string(); break; }
-            }
-            if !found_set_name.is_empty() { break; }
-        }
-        if found_set_name.is_empty() { return StatusCode::NOT_FOUND.into_response(); }
-        
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE set_name LIKE ?1", [format!("%{}%", found_set_name)], |r| r.get(0)).unwrap_or(0);
-        
-        let item = json!({
-            "Name": found_set_name, "Id": item_id, "ServerId": "rust-em-server",
-            "Type": "BoxSet", "IsFolder": true, "MediaType": "Video",
-            "ChildCount": count, "RecursiveItemCount": count,
-            "ImageTags": {"Primary": "tag_boxset"}, "BackdropImageTags": [],
-            "Overview": "合集",
-            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
-        });
-        return Json(item).into_response();
-    }
-
-    let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
-    let item_opt = conn.query_row(
-        "SELECT id, title, type, year, plot, poster_path, file_path, studios, parts, runtime, actors, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, series, label, set_name, tagline, tags, directors, num, stills, releasedate, original_title, sort_title, country, language, writers, trailer, media_streams, date_created, primary_image_aspect_ratio, original_language, fanart_path, logo_path, thumb_path, banner_path, strm_content FROM items WHERE id = ?1",
-        [id],
-        |row| {
-            let title: String = row.get(1).unwrap_or_default();
-            let typ: String = row.get(2).unwrap_or_default();
-            let year_str: String = row.get(3).unwrap_or_default();
-            let plot: String = row.get(4).unwrap_or_default();
-            let poster_path: String = row.get(5).unwrap_or_default();
-            let studios_str: String = row.get(7).unwrap_or_default();
-            let parts_json: String = row.get(8).unwrap_or_default();
-            let runtime: i32 = row.get(9).unwrap_or(0);
-            let actors_json: String = row.get(10).unwrap_or_default();
-            let rating: f64 = row.get(11).unwrap_or(0.0);
-            let mpaa: String = row.get(12).unwrap_or_default();
-            let genres_str: String = row.get(13).unwrap_or_default();
-            let premiered: String = row.get(14).unwrap_or_default();
-            let tmdb_id: String = row.get(15).unwrap_or_default();
-            let imdb_id: String = row.get(16).unwrap_or_default();
-            let size: i64 = row.get(17).unwrap_or(0);
-            let mtime: i64 = row.get(18).unwrap_or(0);
-            let series: String = row.get(19).unwrap_or_default();
-            let set_name: String = row.get(21).unwrap_or_default();
-            let tagline: String = row.get(22).unwrap_or_default();
-            let tags_str: String = row.get(23).unwrap_or_default();
-            let directors_str: String = row.get(24).unwrap_or_default();
-            let num: String = row.get(25).unwrap_or_default();
-            let stills_json: String = row.get(26).unwrap_or_default();
-            let stills_vec: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
-            let releasedate: String = row.get(27).unwrap_or_default();
-            let original_title: String = row.get(28).unwrap_or_default();
-            let sort_title: String = row.get(29).unwrap_or_default();
-            let country: String = row.get(30).unwrap_or_default();
-            let language: String = row.get(31).unwrap_or_default();
-            let _writers_str: String = row.get(32).unwrap_or_default();
-            let media_streams_json: String = row.get(34).unwrap_or_default();
-            let date_created: i64 = row.get(35).unwrap_or(0);
-            let aspect_ratio: f64 = row.get(36).unwrap_or(0.0);
-            let original_language: String = row.get(37).unwrap_or_default();
-            let fanart_path: String = row.get(38).unwrap_or_default();
-            let logo_path: String = row.get(39).unwrap_or_default();
-            let thumb_path: String = row.get(40).unwrap_or_default();
-            let banner_path: String = row.get(41).unwrap_or_default();
-            let strm_content: String = row.get(42).unwrap_or_default();
-
-            let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
-            let actors: Vec<Value> = serde_json::from_str(&actors_json).unwrap_or_default();
-            let mut media_streams: Value = serde_json::from_str(&media_streams_json).unwrap_or(json!([]));
-            sanitize_media_streams(&mut media_streams);
-            let real_path = strm_content.lines().map(str::trim).find(|s| !s.is_empty()).unwrap_or("").to_string();
-
-            let genres_vec: Vec<&str> = genres_str.split(" / ").filter(|s| !s.is_empty()).collect();
-            let mut genre_items = Vec::new();
-            for g in &genres_vec {
-                let mut h = Sha256::new(); h.update(g.as_bytes()); let hash = h.finalize();
-                genre_items.push(json!({"Id": format!("genre-{:x}", hash), "Name": g}));
-            }
-            let tags_vec: Vec<&str> = tags_str.split(" / ").filter(|s| !s.is_empty()).collect();
-            let mut tag_items = Vec::new();
-            for t in &tags_vec {
-                let mut h = Sha256::new(); h.update(t.as_bytes()); let hash = h.finalize();
-                tag_items.push(json!({"Id": format!("tag-{:x}", hash), "Name": t}));
-            }
-
-            let studios: Vec<Value> = studios_str.split(" / ").filter(|s| !s.trim().is_empty()).map(|s| {
-                let mut h = Sha256::new(); h.update(s.as_bytes()); let hash = h.finalize();
-                let sid = (i64::from_be_bytes([hash[0], hash[1], hash[2], hash[3], hash[4], hash[5], hash[6], hash[7]])).abs() % 1_000_000_000 + 1;
-                json!({ "Name": s, "Id": sid })
-            }).collect();
-
-            let mut people: Vec<Value> = actors.iter().map(|a| json!({
-                "Name": a["name"].as_str().unwrap_or_default(),
-                "Role": a["role"].as_str().unwrap_or_default(),
-                "Type": "Actor",
-                "Id": format!("person_{}", a["name"].as_str().unwrap_or_default()),
-                "PrimaryImageTag": a["thumb"].as_str().unwrap_or_default()
-            })).collect();
-            for d in directors_str.split(" / ").filter(|s| !s.is_empty()) {
-                people.push(json!({ "Name": d, "Type": "Director", "Id": format!("person_{}", d), "PrimaryImageTag": Value::Null }));
-            }
-
-            let mut image_tags = serde_json::Map::new();
-            if !poster_path.is_empty() { image_tags.insert("Primary".to_string(), json!(format!("tag_{}", id))); }
-            if !logo_path.is_empty() { image_tags.insert("Logo".to_string(), json!(format!("logo_{}", id))); }
-            if !thumb_path.is_empty() { image_tags.insert("Thumb".to_string(), json!(format!("thumb_{}", id))); }
-            if !banner_path.is_empty() { image_tags.insert("Banner".to_string(), json!(format!("banner_{}", id))); }
-
-            let mut backdrop_tags: Vec<Value> = Vec::new();
-            if !fanart_path.is_empty() { backdrop_tags.push(json!(format!("backdrop_{}_0", id))); }
-            for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i + 1))); }
-
-            let date_created_ts = if date_created > 0 { date_created } else { mtime };
-            let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
-            let est_bitrate = if size > 0 && run_time_ticks > 0 { (size * 8) / (run_time_ticks / 10_000_000) } else { 0 };
-
-            let media_sources: Vec<Value> = if parts.is_empty() { vec![] } else {
-                parts.iter().enumerate().map(|(i, _path)| {
-                    let stream_url = format!("/Videos/{}/original.mp4?MediaSourceId={}_cd{}", id, id, i);
-                    json!({
-                        "Id": format!("{}_cd{}", id, i), "ItemId": id.to_string(),
-                        "Path": real_path.clone(), "DirectStreamUrl": stream_url,
-                        "Protocol": "Http", "Container": "mp4", "Name": title.clone(),
-                        "Type": "Default", "VideoType": "VideoFile", "IsRemote": true,
-                        "Bitrate": est_bitrate, "RunTimeTicks": run_time_ticks, "Size": size,
-                        "DefaultAudioStreamIndex": 1, "DefaultSubtitleStreamIndex": -1,
-                        "SupportsDirectPlay": true, "SupportsDirectStream": true,
-                        "SupportsProbing": true, "SupportsTranscoding": false,
-                        "AddApiKeyToDirectStreamUrl": false, "RequiresClosing": false, "RequiresOpening": false,
-                        "ProbeEngine": "rust-native", "MediaStreams": media_streams.clone()
-                    })
-                }).collect()
-            };
-
-            Ok(json!({
-                "Id": id.to_string(), "ServerId": "rust-em-server", "Name": title.clone(),
-                "OriginalTitle": if original_title.is_empty() { Value::Null } else { json!(original_title) },
-                "SortName": if sort_title.is_empty() { title.clone() } else { sort_title },
-                "Type": if typ == "movies" { "Movie" } else { "Series" },
-                "MediaType": "Video", "IsFolder": false, "Overview": plot,
-                "ProductionYear": year_str.parse::<i32>().unwrap_or(0), "PremiereDate": premiered, "ReleaseDate": releasedate,
-                "DateCreated": format_iso8601(date_created_ts), "CommunityRating": rating, "OfficialRating": mpaa,
-                "RunTimeTicks": run_time_ticks, "Size": size, "Bitrate": est_bitrate,
-                "Genres": genres_vec, "GenreItems": genre_items, "Tags": tags_vec, "TagItems": tag_items,
-                "Taglines": if tagline.is_empty() { json!([]) } else { json!([tagline]) },
-                "Studios": studios, "People": people,
-                "ProviderIds": { "Tmdb": if tmdb_id.is_empty() { Value::Null } else { json!(tmdb_id) }, "Imdb": if imdb_id.is_empty() { Value::Null } else { json!(imdb_id) } },
-                "ImageTags": image_tags, "BackdropImageTags": backdrop_tags,
-                "PrimaryImageAspectRatio": if aspect_ratio > 0.0 { json!(aspect_ratio) } else { json!(0.6666666666666666) },
-                "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(),
-                "OriginalLanguage": if !original_language.is_empty() { json!(original_language) } else if !language.is_empty() { json!(language) } else { Value::Null },
-                "SetName": if set_name.is_empty() { Value::Null } else { json!(set_name) },
-                "SeriesName": if series.is_empty() { Value::Null } else { json!(series) },
-                "Num": num, "Path": real_path, "Container": "mp4", "MediaSourceCount": media_sources.len(),
-                "MediaSources": media_sources, "MediaStreams": media_streams,
-                "ProbeEngine": "rust-native", "LocationType": "FileSystem",
-                "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
-                "UserData": { "ItemId": id.to_string(), "Key": id.to_string(), "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 }
-            }))
-        }
-    ).ok();
-    
-    if let Some(item) = item_opt { Json(item).into_response() } else { StatusCode::NOT_FOUND.into_response() }
-}
-
-async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
-    let conn = pool.lock().unwrap();
-
-    if item_id.starts_with("boxset_") {
-        let mut found_set_name = String::new();
-        let mut stmt_all = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''").unwrap();
-        let mut rows = stmt_all.query([]).unwrap();
-        while let Ok(Some(r)) = rows.next() {
-            let s: String = r.get(0).unwrap_or_default();
-            for name in s.split(" / ").filter(|s| !s.trim().is_empty()) {
-                let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
-                if format!("boxset_{:x}", hash) == item_id { found_set_name = name.to_string(); break; }
-            }
-            if !found_set_name.is_empty() { break; }
-        }
-        if !found_set_name.is_empty() {
-            let like_str = format!("%{}%", found_set_name);
-            if let Ok(mut stmt) = conn.prepare("SELECT poster_path FROM items WHERE set_name LIKE ?1 AND poster_path != '' LIMIT 1") {
-                if let Ok(poster_path) = stmt.query_row([like_str], |r| r.get::<_, String>(0)) {
-                    if !poster_path.is_empty() {
-                        if poster_path.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, poster_path)], "").into_response(); }
-                        if let Ok(bytes) = tokio::fs::read(&poster_path).await {
-                            let mime = if poster_path.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
-                            return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
-                        }
-                    }
-                }
-            }
-        }
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
-
-    let path_opt = match image_type.to_lowercase().as_str() {
-        "primary" | "poster" => conn.query_row("SELECT poster_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-        "thumb" => conn.query_row("SELECT thumb_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-        "logo" => conn.query_row("SELECT logo_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-        "banner" => conn.query_row("SELECT banner_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-        "backdrop" | "fanart" => {
-            let mut stmt = conn.prepare("SELECT stills, fanart_path FROM items WHERE id = ?1").unwrap();
-            stmt.query_row([id], |row| Ok((
-                row.get::<_, String>(0).unwrap_or_default(),
-                row.get::<_, String>(1).unwrap_or_default()
-            ))).map(|(stills_json, fanart_path)| {
-                if index == 0 {
-                    if !fanart_path.is_empty() { Some(fanart_path) } else { None }
-                } else {
-                    let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
-                    stills.get(index - 1).cloned()
-                }
-            }).unwrap_or(None)
-        },
-        _ => None,
-    };
-
-    if let Some(path_str) = path_opt {
-        if !path_str.is_empty() {
-            if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
-            if let Ok(bytes) = tokio::fs::read(&path_str).await {
-                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
-                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
-            }
-        }
-    }
-    StatusCode::NOT_FOUND.into_response()
 }

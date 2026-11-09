@@ -1208,7 +1208,7 @@ pub async fn emby_shows_next_up() -> impl IntoResponse { Json(json!({ "Items": [
 pub async fn emby_shows_seasons() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 pub async fn emby_shows_episodes() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 pub async fn emby_danmu() -> impl IntoResponse { Json(json!([])) }
-pub async fn emby_person_image() -> impl IntoResponse {
+pub async fn emby_person_image() -> Response {
     let png_bytes: [u8; 67] = [
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
         0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
@@ -1218,6 +1218,45 @@ pub async fn emby_person_image() -> impl IntoResponse {
     ];
     (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response()
 }
-pub async fn emby_subtitle_stream() -> impl IntoResponse {
+pub async fn emby_subtitle_stream() -> Response {
     StatusCode::OK.into_response()
+}
+
+#[derive(Deserialize)]
+pub struct ProbeTestReq { pub path: String }
+
+pub async fn probe_test(Json(req): Json<ProbeTestReq>) -> impl IntoResponse {
+    let file_path = std::path::Path::new(&req.path);
+    if !file_path.exists() {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "文件不存在"}))).into_response();
+    }
+    let mut mi = mediainfo::MediaInfo::new();
+    if !mi.open(req.path.as_str()) {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "mediainfo 无法打开该文件"}))).into_response();
+    }
+    let mut audio_tracks = Vec::new();
+    let audio_count = mi.count_get(mediainfo::StreamKind::Audio, None);
+    for i in 0..audio_count {
+        audio_tracks.push(json!({
+            "index": i,
+            "language": mi.get(mediainfo::StreamKind::Audio, i, "Language", mediainfo::InfoKind::Text),
+            "title": mi.get(mediainfo::StreamKind::Audio, i, "Title", mediainfo::InfoKind::Text),
+        }));
+    }
+    let mut text_tracks = Vec::new();
+    let text_count = mi.count_get(mediainfo::StreamKind::Text, None);
+    for i in 0..text_count {
+        text_tracks.push(json!({
+            "index": i,
+            "language": mi.get(mediainfo::StreamKind::Text, i, "Language", mediainfo::InfoKind::Text),
+            "title": mi.get(mediainfo::StreamKind::Text, i, "Title", mediainfo::InfoKind::Text),
+        }));
+    }
+    Json(json!({
+        "video_count": mi.count_get(mediainfo::StreamKind::Video, None),
+        "audio_count": audio_count,
+        "audio_tracks": audio_tracks,
+        "text_count": text_count,
+        "text_tracks": text_tracks
+    })).into_response()
 }
