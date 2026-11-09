@@ -120,8 +120,43 @@ async fn resolve_qmediasync_url(client: &reqwest::Client, url: &str, ua: &str) -
 
 fn sanitize_media_streams(streams: &mut Value) {
     if let Some(arr) = streams.as_array_mut() {
-        for stream in arr {
+        for (idx, stream) in arr.iter_mut().enumerate() {
             if let Some(obj) = stream.as_object_mut() {
+                obj.insert("Index".to_string(), json!(idx));
+
+                if let Some(Value::String(t)) = obj.get_mut("Type") {
+                    *t = if t.eq_ignore_ascii_case("video") { "Video".to_string() }
+                         else if t.eq_ignore_ascii_case("audio") { "Audio".to_string() }
+                         else if t.eq_ignore_ascii_case("subtitle") { "Subtitle".to_string() }
+                         else { t.clone() };
+                }
+
+                let stream_type = obj.get("Type").and_then(|v| v.as_str()).unwrap_or("");
+                let codec = obj.get("Codec").and_then(|v| v.as_str()).unwrap_or("unknown").to_uppercase();
+                let mut display_title = obj.get("DisplayTitle").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+                if stream_type == "Video" {
+                    let h = obj.get("Height").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let depth = obj.get("BitDepth").and_then(|v| v.as_i64()).unwrap_or(0);
+                    
+                    if display_title.is_empty() || !display_title.contains(&format!("{}p", h)) {
+                        let p = if h >= 2160 { "2160p" } else if h >= 1080 { "1080p" } else if h >= 720 { "720p" } else { "SD" };
+                        display_title = format!("{} {}", p, codec);
+                    }
+                    if !display_title.contains("bit") && depth > 0 {
+                        display_title = format!("{} {}bit", display_title, depth);
+                    }
+                } else if stream_type == "Audio" {
+                    if display_title.is_empty() || display_title.contains("Unknown") {
+                        let ch = obj.get("Channels").and_then(|v| v.as_i64()).unwrap_or(2);
+                        let layout = obj.get("ChannelLayout").and_then(|v| v.as_str()).unwrap_or(if ch == 2 { "stereo" } else if ch == 6 { "5.1" } else { "" });
+                        display_title = format!("{} {}", codec, layout).trim().to_string();
+                    }
+                }
+
+                obj.insert("DisplayTitle".to_string(), json!(display_title));
+                obj.remove("Title"); // 移除多余的 Title 防止 Yamby 双倍渲染
+
                 for k in &["AverageFrameRate", "RealFrameRate"] {
                     if let Some(v) = obj.get_mut(*k) {
                         let f = match v {
@@ -149,12 +184,6 @@ fn sanitize_media_streams(streams: &mut Value) {
                         };
                         *v = json!(i);
                     }
-                }
-                if let Some(Value::String(t)) = obj.get_mut("Type") {
-                    *t = if t.eq_ignore_ascii_case("video") { "Video".to_string() }
-                         else if t.eq_ignore_ascii_case("audio") { "Audio".to_string() }
-                         else if t.eq_ignore_ascii_case("subtitle") { "Subtitle".to_string() }
-                         else { t.clone() };
                 }
                 for k in &["IsDefault", "IsForced", "IsExternal"] {
                     let b = match obj.get(*k) {
@@ -992,7 +1021,7 @@ pub async fn emby_playback_info(
         json!({
             "Id": format!("{}_cd{}", item_id, i), "PlaySessionId": play_session_id.clone(),
             "Path": stream_url.clone(), "DirectStreamUrl": stream_url,
-            "Protocol": "Http", "Container": ext, "Name": "Default", "Type": "Default", "VideoType": "VideoFile",
+            "Protocol": "Http", "Container": ext, "Name": "Direct Play", "Type": "Default", "VideoType": "VideoFile",
             "IsRemote": true, "RunTimeTicks": run_time_ticks, "Size": estimated_size, "Bitrate": 8000000,
             "DefaultAudioStreamIndex": 1, "DefaultSubtitleStreamIndex": -1,
             "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsProbing": true, "SupportsTranscoding": false,
