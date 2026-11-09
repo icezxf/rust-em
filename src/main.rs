@@ -1,5 +1,4 @@
 #![recursion_limit = "512"]
-#![recursion_limit = "512"]
 use axum::{
     routing::{get, post, any},
     Router,
@@ -43,17 +42,18 @@ async fn main() {
         .route("/Users/{user_id}/Items/Latest", get(api::emby_items_latest))
         .route("/Users/{user_id}/Items/Resume", get(api::emby_items_resume))
         .route("/Users/{user_id}/Items/NextUp", get(api::emby_items_next_up))
-        .route("/Users/{user_id}/Items", get(api::emby_items))
+        
+        .route("/Users/{user_id}/Items", get(api::emby_items_with_user))
         .route("/Items", get(api::emby_items))
-        .route("/Items/Latest", get(api::emby_items_latest))
         
         .route("/Items/{item_id}", get(api::emby_item_detail))
         .route("/Users/{user_id}/Items/{item_id}", get(api::emby_item_detail_with_user))
         
+        // 图片路由极其容易因为参数数量不匹配报错，这里统一修改 Handler 名称和参数
         .route("/Items/{item_id}/Images/{image_type}", get(api::emby_item_image))
         .route("/Items/{item_id}/Images/{image_type}/{index}", get(api::emby_item_image_with_index))
         .route("/Users/{user_id}/Items/{item_id}/Images/{image_type}", get(api::emby_item_image_with_user))
-        .route("/Users/{user_id}/Images/{image_type}", get(api::emby_item_image))
+        .route("/Users/{user_id}/Images/{image_type}", get(api::emby_item_image_user_only))
         .route("/Persons/{person_id}/Images/{image_type}", get(api::emby_person_image))
 
         .route("/Items/{item_id}/PlaybackInfo", get(api::emby_playback_info).post(api::emby_playback_info))
@@ -74,18 +74,11 @@ async fn main() {
         .route("/Sessions/Playing/Stopped", post(api::emby_playing_stopped))
         
         .route("/Users/{user_id}/Items/{item_id}/HideFromResume", post(api::emby_hide_from_resume))
-        .route("/Users/{user_id}/FavoriteItems/{item_id}", post(api::emby_action).delete(api::emby_action))
-        .route("/Users/{user_id}/PlayedItems/{item_id}", post(api::emby_action).delete(api::emby_action))
         
         .route("/Items/{item_id}/Similar", get(api::emby_similar))
         .route("/Items/{item_id}/ThumbnailSet", get(api::emby_thumbnail_set))
         .route("/Library/VirtualFolders", get(api::emby_virtual_folders))
         .route("/Items/Counts", get(api::emby_item_counts))
-        .route("/Search/Hints", get(api::emby_search_hints))
-        .route("/Shows/NextUp", get(api::emby_shows_next_up))
-        .route("/Shows/{series_id}/Seasons", get(api::emby_shows_seasons))
-        .route("/Shows/{series_id}/Episodes", get(api::emby_shows_episodes))
-        .route("/api/danmu/{item_id}", get(api::emby_danmu))
         
         .fallback(any(|req: axum::extract::Request| async move {
             println!("⚠️ [EMBY 未捕获路由] {} {}", req.method(), req.uri().path());
