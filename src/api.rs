@@ -565,6 +565,8 @@ pub async fn emby_items_next_up(_: AxumPath<String>) -> impl IntoResponse { Json
 pub struct EmbyItemsQuery { 
     #[serde(rename = "ParentId")] parent_id: Option<String>,
     #[serde(rename = "ListItemIds")] list_item_ids: Option<String>,
+    #[serde(rename = "StartIndex")] start_index: Option<i64>,
+    #[serde(rename = "Limit")] limit: Option<i64>,
 }
 
 pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
@@ -611,23 +613,31 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
                 }
                 if !found_set_name.is_empty() { break; }
             }
-            if !found_set_name.is_empty() { sql.push_str(&format!(" AND set_name LIKE '%{}%'", found_set_name)); }
+            if !found_set_name.is_empty() { sql.push_str(&format!(" AND (set_name = '{}' OR set_name LIKE '{} / %' OR set_name LIKE '% / {}' OR set_name LIKE '% / {} / %')", found_set_name, found_set_name, found_set_name, found_set_name)); }
             else { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
         }
     }
-    sql.push_str(" ORDER BY id DESC LIMIT 100");
+    let start = query.start_index.unwrap_or(0);
+    let limit = query.limit.unwrap_or(100);
+    sql.push_str(&format!(" ORDER BY id DESC LIMIT {} OFFSET {}", limit, start));
     
     let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
     let items: Vec<Value> = stmt.query_map([], |row| {
         let id: i64 = row.get(0).unwrap_or_default();
-        let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
+        let poster_path: String = row.get(5).unwrap_or_default();
+        let has_poster = !poster_path.is_empty();
+        let poster_tag = if has_poster {
+            let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
+            let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+            format!("tag_{}_{}", id, &hash_hex[..8])
+        } else { String::new() };
         Ok(json!({
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
             "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
             "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
             "Overview": row.get::<_, String>(4).unwrap_or_default(), 
             "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0), 
-            "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) },
+            "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
             "Path": row.get::<_, String>(6).unwrap_or_default(),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
             "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
@@ -663,7 +673,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
         }
         if found_set_name.is_empty() { return StatusCode::NOT_FOUND.into_response(); }
         
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE set_name LIKE ?1", [format!("%{}%", found_set_name)], |r| r.get(0)).unwrap_or(0);
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE (set_name = ?1 OR set_name LIKE ?2 OR set_name LIKE ?3 OR set_name LIKE ?4)", [&found_set_name, &format!("{} / %", found_set_name), &format!("% / {}", found_set_name), &format!("% / {} / %", found_set_name)], |r| r.get(0)).unwrap_or(0);
         
         let item = json!({
             "Name": found_set_name, "Id": item_id, "ServerId": "rust-em-server",
@@ -759,14 +769,16 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             }
 
             let mut image_tags = serde_json::Map::new();
-            if !poster_path.is_empty() { image_tags.insert("Primary".to_string(), json!(format!("tag_{}", id))); }
+            if !poster_path.is_empty() {
+                let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
+                let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+                image_tags.insert("Primary".to_string(), json!(format!("tag_{}_{}", id, &hash_hex[..8])));
+            }
             if !logo_path.is_empty() { image_tags.insert("Logo".to_string(), json!(format!("logo_{}", id))); }
             if !thumb_path.is_empty() { image_tags.insert("Thumb".to_string(), json!(format!("thumb_{}", id))); }
             if !banner_path.is_empty() { image_tags.insert("Banner".to_string(), json!(format!("banner_{}", id))); }
 
             let mut backdrop_tags: Vec<Value> = Vec::new();
-            if !fanart_path.is_empty() { backdrop_tags.push(json!(format!("backdrop_{}_0", id))); }
-            
             if !fanart_path.is_empty() { backdrop_tags.push(json!(format!("backdrop_{}_0", id))); }
             for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i + 1))); }
 
@@ -1165,9 +1177,8 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
                 if !found_set_name.is_empty() { break; }
             }
             if !found_set_name.is_empty() {
-                let like_str = format!("%{}%", found_set_name);
-                if let Ok(mut stmt) = conn.prepare("SELECT poster_path FROM items WHERE set_name LIKE ?1 AND poster_path != '' LIMIT 1") {
-                    stmt.query_row([like_str], |r| r.get::<_, String>(0)).ok()
+                if let Ok(mut stmt) = conn.prepare("SELECT poster_path FROM items WHERE (set_name = ?1 OR set_name LIKE ?2 OR set_name LIKE ?3 OR set_name LIKE ?4) AND poster_path != '' LIMIT 1") {
+                    stmt.query_row([&found_set_name, &format!("{} / %", found_set_name), &format!("% / {}", found_set_name), &format!("% / {} / %", found_set_name)], |r| r.get::<_, String>(0)).ok()
                 } else { None }
             } else { None }
         } else {
