@@ -218,8 +218,8 @@
                             <div class="border-t border-gray-800/80 pt-3">
                                 <div class="text-xs text-gray-500 font-bold mb-1 uppercase tracking-wider">STRM 文件路径</div>
                                 <div id="detail-strm-path" class="text-sm font-mono text-gray-400 bg-black/40 p-2 rounded-lg break-all select-all border border-gray-800/50 mb-3">暂无路径</div>
-                                <div class="text-xs text-gray-500 font-bold mb-1 uppercase tracking-wider">STRM 文件内容 (URL)</div>
-                                <div id="detail-strm-content" class="text-sm font-mono text-gray-400 bg-black/40 p-2 rounded-lg break-all select-all border border-gray-800/50">暂无内容</div>
+                                <div class="text-xs text-gray-500 font-bold mb-1 uppercase tracking-wider">STRM 原始文件内容</div>
+                                <pre id="detail-strm-content" class="text-sm font-mono text-gray-400 bg-black/40 p-3 rounded-lg whitespace-pre-wrap break-all select-all border border-gray-800/50 overflow-x-auto max-h-60 overflow-y-auto m-0">暂无内容</pre>
                             </div>
                         </div>
                     </div>
@@ -544,7 +544,8 @@
             }
 
             document.getElementById('detail-strm-path').innerText = item.file_path || '暂无路径';
-            document.getElementById('detail-strm-content').innerText = item.strm_content || '暂无内容';
+            const strmEl = document.getElementById('detail-strm-content');
+            strmEl.textContent = item.strm_content || '暂无内容';
 
             // 移动端 Fanart 赋值
             const mobileFanart = document.getElementById('detail-mobile-fanart');
