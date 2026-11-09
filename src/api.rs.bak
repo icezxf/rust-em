@@ -1141,6 +1141,7 @@ pub async fn emby_item_image_user_only(_: AxumPath<(String, String)>) -> Respons
     StatusCode::NOT_FOUND.into_response()
 }
 
+
 async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
     let path_opt = {
         let conn = pool.lock().unwrap();
@@ -1174,17 +1175,10 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
                 "logo" => conn.query_row("SELECT logo_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
                 "banner" => conn.query_row("SELECT banner_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
                 "backdrop" | "fanart" => {
-                    let mut stmt = conn.prepare("SELECT stills, fanart_path FROM items WHERE id = ?1").unwrap();
-                    stmt.query_row([id], |row| Ok((
-                        row.get::<_, String>(0).unwrap_or_default(),
-                        row.get::<_, String>(1).unwrap_or_default()
-                    ))).map(|(stills_json, fanart_path)| {
-                        if index == 0 {
-                            if !fanart_path.is_empty() { Some(fanart_path) } else { None }
-                        } else {
-                            let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
-                            stills.get(index - 1).cloned()
-                        }
+                    let mut stmt = conn.prepare("SELECT stills FROM items WHERE id = ?1").unwrap();
+                    stmt.query_row([id], |row| Ok(row.get::<_, String>(0).unwrap_or_default())).map(|stills_json| {
+                        let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
+                        stills.get(index).cloned()
                     }).unwrap_or(None)
                 },
                 _ => None,
