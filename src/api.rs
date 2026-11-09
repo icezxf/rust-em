@@ -1027,6 +1027,8 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             
             let stills_json: String = row.get(26).unwrap_or_default();
             let stills_vec: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
+            let mut backdrop_tags: Vec<Value> = Vec::new();
+            for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i))); }
             
             let releasedate: String = row.get(27).unwrap_or_default();
             let original_title: String = row.get(28).unwrap_or_default();
@@ -1086,62 +1088,6 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             if !thumb_path.is_empty() { image_tags.insert("Thumb".to_string(), json!(format!("thumb_{}", id))); }
             if !banner_path.is_empty() { image_tags.insert("Banner".to_string(), json!(format!("banner_{}", id))); }
 
-            // 正确生成多张剧照的 Backdrop Tags
-            let mut backdrop_tags = Vec::new();
-            for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i))); }
-
-            let date_created_ts = if date_created > 0 { date_created } else { mtime };
-            let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
-            let est_bitrate = if size > 0 && run_time_ticks > 0 { (size * 8) / (run_time_ticks / 10_000_000) } else { 0 };
-
-            let media_sources: Vec<Value> = if parts.is_empty() { vec![] } else {
-                parts.iter().enumerate().map(|(i, _path)| {
-                    let stream_url = format!("/Videos/{}/original.mp4?MediaSourceId={}_cd{}", id, id, i);
-                    json!({
-                        "Id": format!("{}_cd{}", id, i), "ItemId": id.to_string(),
-                        "Path": real_path.clone(), "DirectStreamUrl": stream_url,
-                        "Protocol": "Http", "Container": "mp4", "Name": title.clone(),
-                        "Type": "Default", "VideoType": "VideoFile", "IsRemote": true,
-                        "Bitrate": est_bitrate, "RunTimeTicks": run_time_ticks, "Size": size,
-                        "DefaultAudioStreamIndex": 1, "DefaultSubtitleStreamIndex": -1,
-                        "SupportsDirectPlay": true, "SupportsDirectStream": true,
-                        "SupportsProbing": true, "SupportsTranscoding": false,
-                        "AddApiKeyToDirectStreamUrl": false, "RequiresClosing": false, "RequiresOpening": false,
-                        "ProbeEngine": "rust-native", "MediaStreams": media_streams.clone()
-                    })
-                }).collect()
-            };
-
-            Ok(json!({
-                "Id": id.to_string(), "ServerId": "rust-em-server", "Name": title.clone(),
-                "OriginalTitle": if original_title.is_empty() { Value::Null } else { json!(original_title) },
-                "SortName": if sort_title.is_empty() { title.clone() } else { sort_title },
-                "Type": if typ == "movies" { "Movie" } else { "Series" },
-                "MediaType": "Video", "IsFolder": false, "Overview": plot,
-                "ProductionYear": year_str.parse::<i32>().unwrap_or(0), "PremiereDate": premiered, "ReleaseDate": releasedate,
-                "DateCreated": format_iso8601(date_created_ts), "CommunityRating": rating, "OfficialRating": mpaa,
-                "RunTimeTicks": run_time_ticks, "Size": size, "Bitrate": est_bitrate,
-                "Genres": genres_vec, "GenreItems": genre_items, "Tags": tags_vec, "TagItems": tag_items,
-                "Taglines": if tagline.is_empty() { json!([]) } else { json!([tagline]) },
-                "Studios": studios, "People": people,
-                "ProviderIds": { "Tmdb": if tmdb_id.is_empty() { Value::Null } else { json!(tmdb_id) }, "Imdb": if imdb_id.is_empty() { Value::Null } else { json!(imdb_id) } },
-                "ImageTags": image_tags, "BackdropImageTags": backdrop_tags,
-                "PrimaryImageAspectRatio": if aspect_ratio > 0.0 { json!(aspect_ratio) } else { json!(0.6666666666666666) },
-                "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(),
-                "OriginalLanguage": if !original_language.is_empty() { json!(original_language) } else if !language.is_empty() { json!(language) } else { Value::Null },
-                "SetName": if set_name.is_empty() { Value::Null } else { json!(set_name) },
-                "SeriesName": if series.is_empty() { Value::Null } else { json!(series) },
-                "Num": num, "Path": real_path, "Container": "mp4", "MediaSourceCount": media_sources.len(),
-                "MediaSources": media_sources, "MediaStreams": media_streams,
-                "ProbeEngine": "rust-native", "LocationType": "FileSystem",
-                "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
-                "UserData": { "ItemId": id.to_string(), "Key": id.to_string(), "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 }
-            }))
-        }
-    ).ok();
-    if let Some(item) = item_opt { Json(item).into_response() } else { StatusCode::NOT_FOUND.into_response() }
-}
-
 
 async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
@@ -1149,22 +1095,28 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
     let path_opt = {
         let conn = pool.lock().unwrap();
         
-        if image_type.to_lowercase() == "backdrop" || image_type.to_lowercase() == "fanart" {
-            // 只读 stills，绝不混入 fanart
-            let mut stmt = conn.prepare("SELECT stills FROM items WHERE id = ?1").unwrap();
-            stmt.query_row([id], |row| Ok(row.get::<_, String>(0).unwrap_or_default())).map(|stills_json| {
-                let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
-                stills.get(index).cloned()
-            }).unwrap_or(None)
-        } else {
-            let query = match image_type.to_lowercase().as_str() {
-                "primary" | "poster" | "thumb" => "SELECT poster_path FROM items WHERE id = ?1",
-                "logo" => "SELECT logo_path FROM items WHERE id = ?1", 
-                "banner" => "SELECT banner_path FROM items WHERE id = ?1",
-                _ => "SELECT poster_path FROM items WHERE id = ?1",
-            };
-            let mut stmt = conn.prepare(query).unwrap();
-            stmt.query_row([id], |row| row.get::<_, String>(0)).ok()
+        match image_type.to_lowercase().as_str() {
+            "primary" | "poster" => {
+                conn.query_row("SELECT poster_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok()
+            },
+            "thumb" => {
+                conn.query_row("SELECT thumb_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok()
+            },
+            "logo" => {
+                conn.query_row("SELECT logo_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok()
+            },
+            "banner" => {
+                conn.query_row("SELECT banner_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok()
+            },
+            "backdrop" | "fanart" => {
+                // 严格只取 stills 数组（extrafanart 文件夹的图），如果没有就是空
+                let mut stmt = conn.prepare("SELECT stills FROM items WHERE id = ?1").unwrap();
+                stmt.query_row([id], |row| Ok(row.get::<_, String>(0).unwrap_or_default())).map(|stills_json| {
+                    let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
+                    stills.get(index).cloned()
+                }).unwrap_or(None)
+            },
+            _ => None,
         }
     };
 
@@ -1178,59 +1130,4 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
         }
     }
     StatusCode::NOT_FOUND.into_response()
-}
-
-fn sanitize_media_streams(streams: &mut Value) {
-    if let Some(arr) = streams.as_array_mut() {
-        for stream in arr {
-            if let Some(obj) = stream.as_object_mut() {
-                // 1. 帧率转浮点数
-                for k in &["AverageFrameRate", "RealFrameRate"] {
-                    if let Some(v) = obj.get_mut(*k) {
-                        let f = match v {
-                            Value::String(s) => {
-                                let s = s.trim();
-                                if s.is_empty() || s == "0/0" { 0.0 }
-                                else if let Some((num, den)) = s.split_once('/') {
-                                    let n = num.parse::<f64>().unwrap_or(0.0);
-                                    let d = den.parse::<f64>().unwrap_or(1.0);
-                                    if d > 0.0 { n / d } else { 0.0 }
-                                } else { s.parse::<f64>().unwrap_or(0.0) }
-                            }
-                            Value::Number(n) => n.as_f64().unwrap_or(0.0),
-                            _ => 0.0,
-                        };
-                        *v = json!(f);
-                    }
-                }
-                // 2. 所有整数强转 (重点：BitDepth 必须是真整数)
-                for k in &["BitRate", "BitDepth", "Width", "Height", "Level", "Channels", "SampleRate", "Index"] {
-                    if let Some(v) = obj.get_mut(*k) {
-                        let i = match v {
-                            Value::String(s) => s.trim().parse::<i64>().unwrap_or(0),
-                            Value::Number(n) => n.as_i64().unwrap_or(0),
-                            _ => 0,
-                        };
-                        *v = json!(i);
-                    }
-                }
-                // 3. 统一 Type
-                if let Some(Value::String(t)) = obj.get_mut("Type") {
-                    *t = if t.eq_ignore_ascii_case("video") { "Video".to_string() }
-                         else if t.eq_ignore_ascii_case("audio") { "Audio".to_string() }
-                         else if t.eq_ignore_ascii_case("subtitle") { "Subtitle".to_string() }
-                         else { t.clone() };
-                }
-                // 4. 布尔强转
-                for k in &["IsDefault", "IsForced", "IsExternal"] {
-                    let b = match obj.get(*k) {
-                        Some(Value::Bool(b)) => *b,
-                        Some(Value::String(s)) => s.to_lowercase() == "true",
-                        _ => false,
-                    };
-                    obj.insert(k.to_string(), json!(b));
-                }
-            }
-        }
-    }
 }
