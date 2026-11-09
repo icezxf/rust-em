@@ -94,7 +94,7 @@ fn process_text(text: &str, tag: &str, movie: &mut NfoMovie, current_actor: &mut
         "imdbid" => movie.unique_ids.push(("imdb".to_string(), text.to_string())),
         "name" => {
             if in_set {
-                movie.set = Some(text.to_string());
+                movie.sets.push(text.to_string());
             } else if let Some(a) = current_actor.as_mut() {
                 a.name = Some(text.to_string());
             }

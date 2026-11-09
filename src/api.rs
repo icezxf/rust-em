@@ -1202,3 +1202,11 @@ pub async fn emby_person_image(_: AxumPath<(String, String)>) -> impl IntoRespon
 }
 pub async fn emby_subtitle_stream(_: AxumPath<(String, String)>) -> impl IntoResponse { StatusCode::OK.into_response() }
 pub async fn emby_subtitle_stream_with_source(_: AxumPath<(String, String, String)>) -> impl IntoResponse { StatusCode::OK.into_response() }
+
+pub async fn emby_display_preferences(_: AxumPath<String>) -> impl IntoResponse {
+    Json(json!({"Id": "default", "ViewType": "Poster", "SortBy": "SortName", "PrimaryImageHeight": 250, "PrimaryImageWidth": 250, "ScrollDirection": "Horizontal"}))
+}
+
+pub async fn emby_item_image_user_only(_: AxumPath<(String, String)>) -> Response {
+    StatusCode::NOT_FOUND.into_response()
+}
