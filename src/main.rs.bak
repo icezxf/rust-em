@@ -1,4 +1,5 @@
 #![recursion_limit = "512"]
+#![recursion_limit = "512"]
 use axum::{
     routing::{get, post, any},
     Router,
@@ -63,8 +64,9 @@ async fn main() {
         .route("/Videos/{item_id}/{source_id}/stream", get(api::emby_stream_with_source))
         .route("/Videos/{item_id}/{source_id}/stream.{ext}", get(api::emby_stream_with_source_ext))
         .route("/Items/{item_id}/Download", get(api::emby_download))
+        
         .route("/Items/{item_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream))
-        .route("/Videos/{item_id}/{source_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream))
+        .route("/Videos/{item_id}/{source_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream_with_source))
         
         .route("/Sessions", get(api::emby_sessions))
         .route("/Sessions/Playing", post(api::emby_playing))
@@ -100,8 +102,7 @@ async fn main() {
         .route("/api/images/{id}/{type}", get(api::get_image))
         .route("/api/user/update", post(api::update_user))
         .route("/api/settings", get(api::get_settings).post(api::update_settings))
-        .route("/api/probe/scan", post(api::probe_scan))
-        .route("/api/probe/test", post(api::probe_test));
+        .route("/api/probe/scan", post(api::probe_scan));
 
     let app = Router::new()
         .merge(web_routes)

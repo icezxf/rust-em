@@ -1206,6 +1206,11 @@ pub async fn emby_subtitle_stream(_: AxumPath<(String, String)>) -> impl IntoRes
     StatusCode::OK.into_response()
 }
 
+
+pub async fn emby_subtitle_stream(_: AxumPath<(String, String)>) -> impl IntoResponse {
+    StatusCode::OK.into_response()
+}
+
 pub async fn emby_subtitle_stream_with_source(_: AxumPath<(String, String, String)>) -> impl IntoResponse {
     StatusCode::OK.into_response()
 }

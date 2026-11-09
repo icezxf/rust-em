@@ -1201,5 +1201,11 @@ pub async fn emby_person_image(_: AxumPath<(String, String)>) -> impl IntoRespon
     ];
     (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response()
 }
-pub async fn emby_subtitle_stream() -> impl IntoResponse { StatusCode::OK.into_response() }
-pub async fn emby_subtitle_stream_with_source(_: AxumPath<(i64, String, String)>) -> impl IntoResponse { StatusCode::OK.into_response() }
+
+pub async fn emby_subtitle_stream(_: AxumPath<(String, String)>) -> impl IntoResponse {
+    StatusCode::OK.into_response()
+}
+
+pub async fn emby_subtitle_stream_with_source(_: AxumPath<(String, String, String)>) -> impl IntoResponse {
+    StatusCode::OK.into_response()
+}
