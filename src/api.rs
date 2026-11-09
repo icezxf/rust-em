@@ -765,6 +765,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             if !banner_path.is_empty() { image_tags.insert("Banner".to_string(), json!(format!("banner_{}", id))); }
 
             let mut backdrop_tags: Vec<Value> = Vec::new();
+            if !fanart_path.is_empty() { backdrop_tags.push(json!(format!("backdrop_{}_0", id))); }
             
             if !fanart_path.is_empty() { backdrop_tags.push(json!(format!("backdrop_{}_0", id))); }
             for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i + 1))); }
@@ -1143,6 +1144,7 @@ pub async fn emby_item_image_user_only(_: AxumPath<(String, String)>) -> Respons
 }
 
 
+
 async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
     let path_opt = {
         let conn = pool.lock().unwrap();
@@ -1189,7 +1191,6 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
                         }
                     }).unwrap_or(None)
                 },
-                "banner" => conn.query_row("SELECT banner_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
                 _ => None,
             }
         }
