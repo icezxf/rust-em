@@ -810,7 +810,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let mut item_value = json!({
                 "Id": id.to_string(), "ServerId": "rust-em-server", "Name": title.clone(),
                 "OriginalTitle": if original_title.is_empty() { Value::Null } else { json!(original_title) },
-                "SortName": if sort_title.is_empty() { title.clone() } else { sort_title },
+                "SortName": if sort_title.is_empty() { title.clone() } else { sort_title.clone() },
                 "ForcedSortName": if sort_title.is_empty() { title.clone() } else { sort_title },
                 "Type": if typ == "movies" { "Movie" } else { "Series" },
                 "MediaType": "Video", "IsFolder": false, "Overview": plot,
