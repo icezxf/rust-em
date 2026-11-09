@@ -991,49 +991,6 @@ pub async fn emby_danmu() -> impl IntoResponse {
 
 
 
-async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
-    let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
-    
-    let path_opt = {
-        let conn = pool.lock().unwrap();
-        
-        if image_type.to_lowercase() == "backdrop" || image_type.to_lowercase() == "fanart" {
-            // 处理多张艺术图/剧照
-            let mut stmt = conn.prepare("SELECT fanart_path, stills FROM items WHERE id = ?1").unwrap();
-            stmt.query_row([id], |row| Ok((
-                row.get::<_, String>(0).unwrap_or_default(),
-                row.get::<_, String>(1).unwrap_or_default()
-            ))).map(|(fanart, stills_json)| {
-                let mut paths = Vec::new();
-                if !fanart.is_empty() { paths.push(fanart); }
-                let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
-                paths.extend(stills);
-                paths.get(index).cloned()
-            }).unwrap_or(None)
-        } else {
-            // 处理海报、缩略图等单张图片
-            let query = match image_type.to_lowercase().as_str() {
-                "primary" | "poster" | "thumb" => "SELECT poster_path FROM items WHERE id = ?1",
-                "logo" => "SELECT logo_path FROM items WHERE id = ?1", 
-                "banner" => "SELECT banner_path FROM items WHERE id = ?1",
-                _ => "SELECT poster_path FROM items WHERE id = ?1",
-            };
-            let mut stmt = conn.prepare(query).unwrap();
-            stmt.query_row([id], |row| row.get::<_, String>(0)).ok()
-        }
-    };
-
-    if let Some(path_str) = path_opt {
-        if !path_str.is_empty() {
-            if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
-            if let Ok(bytes) = tokio::fs::read(&path_str).await {
-                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
-                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
-            }
-        }
-    }
-    StatusCode::NOT_FOUND.into_response()
-}
 
 async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -> Response {
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
@@ -1185,11 +1142,49 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
     if let Some(item) = item_opt { Json(item).into_response() } else { StatusCode::NOT_FOUND.into_response() }
 }
 
+
+async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
+    let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
+    
+    let path_opt = {
+        let conn = pool.lock().unwrap();
+        
+        if image_type.to_lowercase() == "backdrop" || image_type.to_lowercase() == "fanart" {
+            // 只读 stills，绝不混入 fanart
+            let mut stmt = conn.prepare("SELECT stills FROM items WHERE id = ?1").unwrap();
+            stmt.query_row([id], |row| Ok(row.get::<_, String>(0).unwrap_or_default())).map(|stills_json| {
+                let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
+                stills.get(index).cloned()
+            }).unwrap_or(None)
+        } else {
+            let query = match image_type.to_lowercase().as_str() {
+                "primary" | "poster" | "thumb" => "SELECT poster_path FROM items WHERE id = ?1",
+                "logo" => "SELECT logo_path FROM items WHERE id = ?1", 
+                "banner" => "SELECT banner_path FROM items WHERE id = ?1",
+                _ => "SELECT poster_path FROM items WHERE id = ?1",
+            };
+            let mut stmt = conn.prepare(query).unwrap();
+            stmt.query_row([id], |row| row.get::<_, String>(0)).ok()
+        }
+    };
+
+    if let Some(path_str) = path_opt {
+        if !path_str.is_empty() {
+            if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
+            if let Ok(bytes) = tokio::fs::read(&path_str).await {
+                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
+                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
+            }
+        }
+    }
+    StatusCode::NOT_FOUND.into_response()
+}
+
 fn sanitize_media_streams(streams: &mut Value) {
     if let Some(arr) = streams.as_array_mut() {
         for stream in arr {
             if let Some(obj) = stream.as_object_mut() {
-                // 1. 清理帧率 (强转 Float)
+                // 1. 帧率转浮点数
                 for k in &["AverageFrameRate", "RealFrameRate"] {
                     if let Some(v) = obj.get_mut(*k) {
                         let f = match v {
@@ -1208,7 +1203,7 @@ fn sanitize_media_streams(streams: &mut Value) {
                         *v = json!(f);
                     }
                 }
-                // 2. 清理所有整数 (强转 Int)
+                // 2. 所有整数强转 (重点：BitDepth 必须是真整数)
                 for k in &["BitRate", "BitDepth", "Width", "Height", "Level", "Channels", "SampleRate", "Index"] {
                     if let Some(v) = obj.get_mut(*k) {
                         let i = match v {
@@ -1226,7 +1221,7 @@ fn sanitize_media_streams(streams: &mut Value) {
                          else if t.eq_ignore_ascii_case("subtitle") { "Subtitle".to_string() }
                          else { t.clone() };
                 }
-                // 4. 布尔字段强转
+                // 4. 布尔强转
                 for k in &["IsDefault", "IsForced", "IsExternal"] {
                     let b = match obj.get(*k) {
                         Some(Value::Bool(b)) => *b,
