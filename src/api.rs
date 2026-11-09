@@ -68,6 +68,29 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     Err(StatusCode::UNAUTHORIZED)
 }
 
+fn decode_url(input: &str) -> String {
+    let mut result = Vec::new();
+    let mut bytes = input.bytes();
+    while let Some(b) = bytes.next() {
+        if b == b'%' {
+            if let (Some(c1), Some(c2)) = (bytes.next(), bytes.next()) {
+                if let Ok(hex_str) = std::str::from_utf8(&[c1, c2]) {
+                    if let Ok(hex_val) = u8::from_str_radix(hex_str, 16) {
+                        result.push(hex_val);
+                        continue;
+                    }
+                }
+                result.push(b'%'); result.push(c1); result.push(c2);
+            } else {
+                result.push(b'%');
+            }
+        } else {
+            result.push(b);
+        }
+    }
+    String::from_utf8_lossy(&result).into_owned()
+}
+
 fn format_iso8601(unix_secs: i64) -> String {
     if let Some(dt) = chrono::DateTime::from_timestamp(unix_secs, 0) { dt.format("%Y-%m-%dT%H:%M:%S.0000000Z").to_string() } 
     else { "2024-01-01T00:00:00.0000000Z".to_string() }
@@ -699,6 +722,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let year_str: String = row.get(3).unwrap_or_default();
             let plot: String = row.get(4).unwrap_or_default();
             let poster_path: String = row.get(5).unwrap_or_default();
+            let file_path: String = row.get(6).unwrap_or_default();
             let studios_str: String = row.get(7).unwrap_or_default();
             let parts_json: String = row.get(8).unwrap_or_default();
             let runtime: i32 = row.get(9).unwrap_or(0);
@@ -794,7 +818,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                     let stream_url = format!("/Videos/{}/original.mp4?MediaSourceId={}_cd{}", id, id, i);
                     json!({
                         "Id": format!("{}_cd{}", id, i), "ItemId": id.to_string(),
-                        "Path": real_path.clone(), "DirectStreamUrl": stream_url,
+                        "Path": decode_url(&real_path), "DirectStreamUrl": stream_url,
                         "Protocol": "Http", "Container": "mp4", "Name": title.clone(),
                         "Type": "Default", "VideoType": "VideoFile", "IsRemote": true,
                         "Bitrate": est_bitrate, "RunTimeTicks": run_time_ticks, "Size": size,
@@ -831,7 +855,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 "OriginalLanguage": if !original_language.is_empty() { json!(original_language) } else if !language.is_empty() { json!(language) } else { Value::Null },
                 "SetName": if set_name.is_empty() { Value::Null } else { json!(set_name) },
                 "SeriesName": if series.is_empty() { Value::Null } else { json!(series) },
-                "Path": real_path, "Container": "mp4", "MediaSourceCount": media_sources.len(),
+                "Path": file_path, "Container": "mp4", "MediaSourceCount": media_sources.len(),
                 "MediaSources": media_sources, "MediaStreams": media_streams,
                 "ProbeEngine": "rust-native", "LocationType": "FileSystem",
                 "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
