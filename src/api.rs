@@ -832,76 +832,6 @@ pub async fn emby_item_image_with_user(State(pool): State<Arc<Mutex<Connection>>
     emby_item_image_inner(pool, item_id, image_type, 0).await
 }
 
-async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
-    let conn = pool.lock().unwrap();
-
-    if item_id.starts_with("boxset_") {
-        let mut found_set_name = String::new();
-        let mut names = Vec::new();
-        if let Ok(mut stmt_all) = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''") {
-            if let Ok(mapped) = stmt_all.query_map([], |r| r.get::<_, String>(0)) {
-                for s in mapped.flatten() { names.push(s); }
-            }
-        }
-        for full_str in names {
-            for name in full_str.split(" / ").filter(|s| !s.trim().is_empty()) {
-                let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
-                if format!("boxset_{:x}", hash) == item_id { found_set_name = name.to_string(); break; }
-            }
-            if !found_set_name.is_empty() { break; }
-        }
-        if !found_set_name.is_empty() {
-            let like_str = format!("%{}%", found_set_name);
-            if let Ok(mut stmt) = conn.prepare("SELECT poster_path FROM items WHERE set_name LIKE ?1 AND poster_path != '' LIMIT 1") {
-                if let Ok(poster_path) = stmt.query_row([like_str], |r| r.get::<_, String>(0)) {
-                    if !poster_path.is_empty() {
-                        if poster_path.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, poster_path)], "").into_response(); }
-                        if let Ok(bytes) = tokio::fs::read(&poster_path).await {
-                            let mime = if poster_path.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
-                            return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
-                        }
-                    }
-                }
-            }
-        }
-        return StatusCode::NOT_FOUND.into_response();
-    }
-
-    let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
-
-    let path_opt = match image_type.to_lowercase().as_str() {
-        "primary" | "poster" => conn.query_row("SELECT poster_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-        "thumb" => conn.query_row("SELECT thumb_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-        "logo" => conn.query_row("SELECT logo_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-        "banner" => conn.query_row("SELECT banner_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-        "backdrop" | "fanart" => {
-            let mut stmt = conn.prepare("SELECT stills, fanart_path FROM items WHERE id = ?1").unwrap();
-            stmt.query_row([id], |row| Ok((
-                row.get::<_, String>(0).unwrap_or_default(),
-                row.get::<_, String>(1).unwrap_or_default()
-            ))).map(|(stills_json, fanart_path)| {
-                if index == 0 {
-                    if !fanart_path.is_empty() { Some(fanart_path) } else { None }
-                } else {
-                    let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
-                    stills.get(index - 1).cloned()
-                }
-            }).unwrap_or(None)
-        },
-        _ => None,
-    };
-
-    if let Some(path_str) = path_opt {
-        if !path_str.is_empty() {
-            if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
-            if let Ok(bytes) = tokio::fs::read(&path_str).await {
-                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
-                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
-            }
-        }
-    }
-    StatusCode::NOT_FOUND.into_response()
-}
 
 pub async fn emby_playback_info(
     State(pool): State<Arc<Mutex<Connection>>>,
@@ -1208,5 +1138,70 @@ pub async fn emby_display_preferences(_: AxumPath<String>) -> impl IntoResponse 
 }
 
 pub async fn emby_item_image_user_only(_: AxumPath<(String, String)>) -> Response {
+    StatusCode::NOT_FOUND.into_response()
+}
+
+async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
+    // 将锁的作用域严格限制在这个 block 内部
+    let path_opt = {
+        let conn = pool.lock().unwrap();
+
+        if item_id.starts_with("boxset_") {
+            let mut found_set_name = String::new();
+            let mut names = Vec::new();
+            if let Ok(mut stmt_all) = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''") {
+                if let Ok(mapped) = stmt_all.query_map([], |r| r.get::<_, String>(0)) {
+                    for s in mapped.flatten() { names.push(s); }
+                }
+            }
+            for full_str in names {
+                for name in full_str.split(" / ").filter(|s| !s.trim().is_empty()) {
+                    let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
+                    if format!("boxset_{:x}", hash) == item_id { found_set_name = name.to_string(); break; }
+                }
+                if !found_set_name.is_empty() { break; }
+            }
+            if !found_set_name.is_empty() {
+                let like_str = format!("%{}%", found_set_name);
+                if let Ok(mut stmt) = conn.prepare("SELECT poster_path FROM items WHERE set_name LIKE ?1 AND poster_path != '' LIMIT 1") {
+                    stmt.query_row([like_str], |r| r.get::<_, String>(0)).ok()
+                } else { None }
+            } else { None }
+        } else {
+            let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
+            match image_type.to_lowercase().as_str() {
+                "primary" | "poster" => conn.query_row("SELECT poster_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
+                "thumb" => conn.query_row("SELECT thumb_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
+                "logo" => conn.query_row("SELECT logo_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
+                "banner" => conn.query_row("SELECT banner_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
+                "backdrop" | "fanart" => {
+                    let mut stmt = conn.prepare("SELECT stills, fanart_path FROM items WHERE id = ?1").unwrap();
+                    stmt.query_row([id], |row| Ok((
+                        row.get::<_, String>(0).unwrap_or_default(),
+                        row.get::<_, String>(1).unwrap_or_default()
+                    ))).map(|(stills_json, fanart_path)| {
+                        if index == 0 {
+                            if !fanart_path.is_empty() { Some(fanart_path) } else { None }
+                        } else {
+                            let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
+                            stills.get(index - 1).cloned()
+                        }
+                    }).unwrap_or(None)
+                },
+                _ => None,
+            }
+        }
+    }; // <--- 锁在这里被释放
+
+    // 现在可以安全地 await 了
+    if let Some(path_str) = path_opt {
+        if !path_str.is_empty() {
+            if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
+            if let Ok(bytes) = tokio::fs::read(&path_str).await {
+                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
+                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
+            }
+        }
+    }
     StatusCode::NOT_FOUND.into_response()
 }
