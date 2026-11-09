@@ -545,7 +545,22 @@
 
             document.getElementById('detail-strm-path').innerText = item.file_path || '暂无路径';
             const strmEl = document.getElementById('detail-strm-content');
-            strmEl.textContent = item.strm_content || '暂无内容';
+            let rawStrm = item.strm_content || '暂无内容';
+            
+            // 前端安全解码：按行拆分，如果是 http 链接就尝试 decodeURIComponent
+            rawStrm = rawStrm.split('\n').map(line => {
+                let trimmed = line.trim();
+                if (trimmed.startsWith('http')) {
+                    try { 
+                        return decodeURIComponent(trimmed); 
+                    } catch(e) { 
+                        return line; 
+                    }
+                }
+                return line;
+            }).join('\n');
+            
+            strmEl.textContent = rawStrm;
 
             // 移动端 Fanart 赋值
             const mobileFanart = document.getElementById('detail-mobile-fanart');
