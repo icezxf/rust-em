@@ -306,7 +306,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                     if let Some(tg) = &meta.tagline { tagline = tg.clone(); }
                     if let Some(s) = &meta.series { series = s.clone(); }
                     if let Some(l) = &meta.label { label = l.clone(); }
-                    if let Some(set) = &meta.set { set_name = set.clone(); }
+                    if !meta.sets.is_empty() { set_name = meta.sets.join(" / "); }
                     if let Some(n) = &meta.num { num = n.clone(); }
                     if let Some(pr) = &meta.premiered { premiered = pr.clone(); }
                     if let Some(rd) = &meta.releasedate { releasedate = rd.clone(); }
@@ -954,22 +954,22 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
     // 如果客户端点名要查某个影片属于哪个 BoxSet
     if let Some(list_ids) = &query.list_item_ids {
         if let Ok(item_id) = list_ids.parse::<i64>() {
-            let set_name: String = conn.query_row("SELECT set_name FROM items WHERE id = ?1", [item_id], |r| r.get(0)).unwrap_or_default();
-            if !set_name.is_empty() {
-                let mut h = Sha256::new(); h.update(set_name.as_bytes()); let hash = h.finalize();
+            let set_name_str: String = conn.query_row("SELECT set_name FROM items WHERE id = ?1", [item_id], |r| r.get(0)).unwrap_or_default();
+            let mut boxsets = Vec::new();
+            for name in set_name_str.split(" / ").filter(|s| !s.trim().is_empty()) {
+                let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
                 let boxset_id = format!("boxset_{:x}", hash);
-                let item = json!({
-                    "Name": set_name, "Id": boxset_id, "ServerId": "rust-em-server",
+                boxsets.push(json!({
+                    "Name": name, "Id": boxset_id, "ServerId": "rust-em-server",
                     "Type": "BoxSet", "IsFolder": true, "MediaType": "Video",
                     "ImageTags": {}, "BackdropImageTags": [],
                     "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
-                });
-                return Json(json!({ "Items": [item], "TotalRecordCount": 1 })).into_response();
+                }));
             }
+            return Json(json!({ "Items": boxsets, "TotalRecordCount": boxsets.len() })).into_response();
         }
         return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response();
     }
-
     let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title FROM items WHERE 1=1".to_string();
     
     // 如果客户端点击了合集，查该合集下的所有电影
@@ -1028,14 +1028,15 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
         let mut stmt_all = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''").unwrap();
         let mut rows = stmt_all.query([]).unwrap();
         while let Ok(Some(r)) = rows.next() {
-            let s: String = r.get(0).unwrap_or_default();
-            let mut h = Sha256::new(); h.update(s.as_bytes()); let hash = h.finalize();
-            if format!("boxset_{:x}", hash) == item_id { found_set_name = s; break; }
+            let full_set_str: String = r.get(0).unwrap_or_default();
+            for name in full_set_str.split(" / ").filter(|s| !s.trim().is_empty()) {
+                let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
+                if format!("boxset_{:x}", hash) == item_id { found_set_name = name.to_string(); break; }
+            }
+            if !found_set_name.is_empty() { break; }
         }
         if found_set_name.is_empty() { return StatusCode::NOT_FOUND.into_response(); }
-        
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE set_name = ?1", [&found_set_name], |r| r.get(0)).unwrap_or(0);
-        
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE set_name LIKE ?1", [format!("%{}%", found_set_name)], |r| r.get(0)).unwrap_or(0);
         let item = json!({
             "Name": found_set_name, "Id": item_id, "ServerId": "rust-em-server",
             "Type": "BoxSet", "IsFolder": true, "MediaType": "Video",
@@ -1046,7 +1047,6 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
         });
         return Json(item).into_response();
     }
-
     // 原有的影片详情逻辑
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let item_opt = conn.query_row(

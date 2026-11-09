@@ -11,7 +11,7 @@ pub struct NfoMovie {
     pub num: Option<String>, pub plot: Option<String>, pub year: Option<String>,
     pub premiered: Option<String>, pub releasedate: Option<String>, pub runtime: Option<i32>,
     pub rating: Option<f64>, pub mpaa: Option<String>, pub tagline: Option<String>,
-    pub series: Option<String>, pub label: Option<String>, pub set: Option<String>,
+    pub series: Option<String>, pub label: Option<String>, pub sets: Vec<String>,
     pub poster: Option<String>, pub fanart: Option<String>, pub trailer: Option<String>,
     pub genres: Vec<String>, pub tags: Vec<String>, pub directors: Vec<String>,
     pub writers: Vec<String>, pub studios: Vec<String>, pub countries: Vec<String>,
