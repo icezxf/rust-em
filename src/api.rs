@@ -606,7 +606,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
             "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
             "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
-            "Overview": row.get::<_, String>(4).unwrap_or_default(), "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) },
+            "Overview": row.get::<_, String>(4).unwrap_or_default(), "CommunityRating": row.get::<_, f64>(6).unwrap_or(0.0), "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0), "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) },
             "Path": row.get::<_, String>(6).unwrap_or_default(),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
             "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
@@ -855,7 +855,7 @@ pub async fn emby_playing_stopped() -> impl IntoResponse { StatusCode::OK.into_r
 
 pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path FROM items WHERE id != ?1 ORDER BY RANDOM() LIMIT 6").unwrap();
+    let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path, rating FROM items WHERE id != ?1 ORDER BY RANDOM() LIMIT 6").unwrap();
     let items: Vec<Value> = stmt.query_map([item_id], |row| {
         let id: i64 = row.get(0).unwrap_or_default();
         let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
@@ -863,7 +863,7 @@ pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(i
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(),
             "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
             "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
-            "Overview": row.get::<_, String>(4).unwrap_or_default(),
+            "Overview": row.get::<_, String>(4).unwrap_or_default(), "CommunityRating": row.get::<_, f64>(6).unwrap_or(0.0),
             "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) },
             "BackdropImageTags": []
         }))
