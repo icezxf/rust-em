@@ -185,6 +185,21 @@
                         <div id="detail-actors-list" class="flex gap-3 overflow-x-auto pb-2 no-scrollbar snap-x-mandatory min-w-0"></div>
                     </div>
 
+                    <div class="w-full mt-2">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-sm text-gray-500 font-bold uppercase tracking-wider">剧照 STILLS</h3>
+                            <div class="flex gap-1">
+                                <button onclick="scrollStills(-1)" class="w-7 h-7 flex items-center justify-center rounded-full bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition" aria-label="上一张">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                                </button>
+                                <button onclick="scrollStills(1)" class="w-7 h-7 flex items-center justify-center rounded-full bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition" aria-label="下一张">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="detail-stills-list" class="flex gap-3 overflow-x-auto pb-2 no-scrollbar snap-x-mandatory min-w-0 scroll-smooth"></div>
+                    </div>
+
                     <div class="w-full mt-2 mb-16">
                         <h3 class="text-sm text-gray-500 font-bold mb-2 uppercase tracking-wider">媒体文件 MEDIA FILES</h3>
                         <div class="bg-[#16191f]/80 backdrop-blur-md border border-gray-800 rounded-xl p-4 shadow-lg">
@@ -445,6 +460,18 @@
             const sizeVal = Number(item.size) || 0;
             document.getElementById('detail-file-size').innerText = sizeVal > 0 ? `${(sizeVal / (1024 * 1024 * 1024)).toFixed(2)} GB` : '未知';
 
+            const stillsContainer = document.getElementById('detail-stills-list');
+            const stillsArr = Array.isArray(item.stills) ? item.stills : [];
+            if (stillsArr.length > 0) {
+                stillsContainer.innerHTML = stillsArr.map((_, i) =>
+                    `<div class="shrink-0 snap-start w-48 sm:w-64 aspect-video bg-gray-800 rounded-lg overflow-hidden border border-gray-700/50">
+                        <img src="/api/images/${item.id}/stills?token=${token}&index=${i}&t=${Date.now()}" class="w-full h-full object-cover" loading="lazy" onerror="this.parentElement.style.display='none'">
+                    </div>`
+                ).join('');
+            } else {
+                stillsContainer.innerHTML = `<div class="text-sm text-gray-500 py-2">暂无剧照</div>`;
+            }
+
             const mediaStreamsBox = document.getElementById('detail-media-streams');
             if (item.media_streams && item.media_streams.length > 0) {
                 let html = '';
@@ -474,6 +501,13 @@
             document.getElementById('detail-strm-path').innerText = item.file_path || '暂无路径';
             document.getElementById('detail-modal').classList.remove('hidden');
             document.body.style.overflow = 'hidden';
+        }
+
+        function scrollStills(dir) {
+            const el = document.getElementById('detail-stills-list');
+            if (!el) return;
+            const amount = Math.max(el.clientWidth * 0.8, 200);
+            el.scrollBy({ left: dir * amount, behavior: 'smooth' });
         }
 
         function closeDetail() {
