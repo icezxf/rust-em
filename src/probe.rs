@@ -64,110 +64,6 @@ fn infer_container(content_type: &str, url: &str) -> String {
     "mov,mp4,m4a,3gp,3g2,mj2".into()
 }
 
-fn parse_mediainfo(path: &Path) -> Result<Value, String> {
-    let mut mi = MediaInfo::new();
-    if !mi.open(path.to_str().unwrap_or_default()) {
-        return Err("mediainfo 无法打开文件".to_string());
-    }
-
-    let mut streams = Vec::new();
-    let mut global_index = 0;
-    let mut default_audio: i64 = -1;
-    let mut default_sub: i64 = -1;
-
-    // 1. 视频流
-    let video_count = mi.count_get(StreamKind::Video, None);
-    for i in 0..video_count {
-        let get_str = |k| mi.get(StreamKind::Video, i, k, InfoKind::Text);
-        let get_i = |k| get_str(k).parse::<i64>().unwrap_or(0);
-        let codec = get_str("Format").to_lowercase();
-        let profile = get_str("Format_Profile");
-        let width = get_i("Width");
-        let height = get_i("Height");
-        let pixel_format = get_str("ColorSpace");
-        
-        let p = if width >= 2160 { "2160p" } else if width >= 1080 { "1080p" } else { "720p" };
-        let display_title = format!("{} {}", p, codec.to_uppercase());
-
-        streams.push(json!({
-            "Type": "Video", "Index": global_index, "Codec": codec, "Width": width, "Height": height, "Profile": profile, "PixelFormat": pixel_format, "BitRate": get_i("BitRate"),
-            "Profile": profile, "Level": get_i("Format_Level"),
-            "Width": width, "Height": height, "PixelFormat": pixel_format,
-            "BitRate": get_i("BitRate"), "AverageFrameRate": { let s = get_str("FrameRate"); if let Some((n, d)) = s.split_once(x27/x27) { n.parse::<f64>().unwrap_or(0.0) / d.parse::<f64>().unwrap_or(1.0) } else { s.parse::<f64>().unwrap_or(0.0) } }, "RealFrameRate": { let s = get_str("FrameRate"); if let Some((n, d)) = s.split_once(x27/x27) { n.parse::<f64>().unwrap_or(0.0) / d.parse::<f64>().unwrap_or(1.0) } else { s.parse::<f64>().unwrap_or(0.0) } },
-            "DisplayTitle": display_title, "Title": display_title,
-            "AspectRatio": "16:9", "IsAnamorphic": false, "IsDefault": true, "IsForced": false, "IsExternal": false, "Language": get_str("Language"),
-            "Protocol": "File", "SupportsExternalStream": false, "AttachmentSize": 0
-        }));
-        global_index += 1;
-    }
-
-    // 2. 音频流
-    let audio_count = mi.count_get(StreamKind::Audio, None);
-    for i in 0..audio_count {
-        let get_str = |k| mi.get(StreamKind::Audio, i, k, InfoKind::Text);
-        let get_i = |k| get_str(k).parse::<i64>().unwrap_or(0);
-        
-        let codec = get_str("Format").to_uppercase();
-        let ch = get_i("Channels");
-        let layout = get_str("ChannelLayout");
-        let lang_code = get_str("Language").to_lowercase();
-        let lang_str = if lang_code.starts_with("zh") || lang_code == "chi" { "Chinese" } else if lang_code.starts_with("en") || lang_code == "eng" { "English" } else { "Unknown" };
-        let lang_iso = if lang_code.starts_with("zh") || lang_code == "chi" { "chi" } else if lang_code.starts_with("en") || lang_code == "eng" { "eng" } else { "und" };
-        let title_name = get_str("Title");
-        
-        let mut display_title = format!("{} {} {}", lang_str, codec, layout);
-        if !title_name.is_empty() { display_title = format!("{} {}", display_title, title_name); }
-
-        let is_default = get_i("Default") == 1 || (default_audio == -1 && i == 0);
-        if is_default && default_audio == -1 { default_audio = global_index as i64; }
-
-        streams.push(json!({
-            "Type": "Audio", "Index": global_index, "Codec": codec.to_lowercase(), "BitRate": get_i("BitRate"), "SampleRate": get_i("SamplingRate"),
-            "Channels": ch, "ChannelLayout": layout, "BitRate": get_i("BitRate"), "SampleRate": get_i("SamplingRate"),
-            "DisplayTitle": display_title, "Title": display_title, "DisplayLanguage": lang_str,
-            "Language": lang_iso, "IsDefault": is_default, "IsForced": false, "IsExternal": false,
-            "Protocol": "File", "SupportsExternalStream": false, "AttachmentSize": 0, "IsAnamorphic": false
-        }));
-        global_index += 1;
-    }
-
-    // 3. 字幕流
-    let text_count = mi.count_get(StreamKind::Text, None);
-    for i in 0..text_count {
-        let get_str = |k| mi.get(StreamKind::Text, i, k, InfoKind::Text);
-        let get_i = |k| get_str(k).parse::<i64>().unwrap_or(0);
-        
-        let codec = get_str("Format").to_uppercase();
-        let lang_code = get_str("Language").to_lowercase();
-        let lang_str = if lang_code.starts_with("zh") || lang_code == "chi" { "Chinese" } else if lang_code.starts_with("en") || lang_code == "eng" { "English" } else { "Unknown" };
-        let lang_iso = if lang_code.starts_with("zh") || lang_code == "chi" { "chi" } else if lang_code.starts_with("en") || lang_code == "eng" { "eng" } else { "und" };
-        let title_name = get_str("Title");
-        
-        let display_title = if title_name.is_empty() { format!("{} ({})", lang_str, codec) } else { format!("{} ({}) {}", lang_str, codec, title_name) };
-
-        let is_default = get_i("Default") == 1;
-        if is_default && default_sub == -1 { default_sub = global_index as i64; }
-
-        streams.push(json!({
-            "Type": "Subtitle", "Index": global_index, "Codec": codec.to_lowercase(),
-            "DisplayTitle": display_title, "Title": display_title, "DisplayLanguage": lang_str,
-            "Language": lang_iso, "IsDefault": is_default, "IsForced": get_i("Forced") == 1, "IsExternal": false, "IsExternalUrl": false,
-            "Protocol": "File", "SupportsExternalStream": false, "AttachmentSize": 0, "IsAnamorphic": false,
-            "DeliveryMethod": "Embed", "SubtitleLocationType": "InternalStream"
-        }));
-        global_index += 1;
-    }
-
-    if default_sub == -1 && text_count > 0 {
-        default_sub = (video_count + audio_count) as i64; // 选第一条字幕
-    }
-
-    Ok(json!({
-        "MediaStreams": streams,
-        "DefaultAudioStreamIndex": default_audio,
-        "DefaultSubtitleStreamIndex": default_sub
-    }))
-}
 
 pub async fn probe_strm(
     strm_path: &Path,
@@ -273,4 +169,117 @@ pub async fn probe_strm(
         let _ = tokio::fs::write(&json_path, s).await;
     }
     Ok(media_source)
+}
+
+fn parse_mediainfo(path: &Path) -> Result<Value, String> {
+    let mut mi = MediaInfo::new();
+    if !mi.open(path.to_str().unwrap_or_default()) {
+        return Err("mediainfo 无法打开文件".to_string());
+    }
+
+    let mut streams = Vec::new();
+    let mut global_index = 0;
+    let mut default_audio: i64 = -1;
+    let mut default_sub: i64 = -1;
+
+    // 1. 视频流
+    let video_count = mi.count_get(StreamKind::Video, None);
+    for i in 0..video_count {
+        let get_str = |k| mi.get(StreamKind::Video, i, k, InfoKind::Text);
+        let get_i = |k| get_str(k).parse::<i64>().unwrap_or(0);
+        let codec = get_str("Format").to_lowercase();
+        let profile = get_str("Format_Profile");
+        let width = get_i("Width");
+        let height = get_i("Height");
+        let pixel_format = get_str("ColorSpace");
+        let bit_depth = get_i("BitDepth");
+        let depth = if bit_depth > 0 { bit_depth } else { 8 };
+        
+        let p = if width >= 2160 { "2160p" } else if width >= 1080 { "1080p" } else { "720p" };
+        let display_title = format!("{} {}", p, codec.to_uppercase());
+
+        let fr_str = get_str("FrameRate");
+        let fr_val = if let Some((n, d)) = fr_str.split_once('/') {
+            n.parse::<f64>().unwrap_or(0.0) / d.parse::<f64>().unwrap_or(1.0)
+        } else {
+            fr_str.parse::<f64>().unwrap_or(0.0)
+        };
+
+        streams.push(json!({
+            "Type": "Video", "Index": global_index, "Codec": codec, "Width": width, "Height": height,
+            "Profile": profile, "Level": get_i("Format_Level"), "PixelFormat": pixel_format, "BitDepth": depth,
+            "BitRate": get_i("BitRate"), "AverageFrameRate": fr_val, "RealFrameRate": fr_val,
+            "DisplayTitle": display_title, "Title": display_title,
+            "AspectRatio": "16:9", "IsAnamorphic": false, "IsDefault": true, "IsForced": false, "IsExternal": false, "Language": get_str("Language"),
+            "Protocol": "File", "SupportsExternalStream": false, "AttachmentSize": 0
+        }));
+        global_index += 1;
+    }
+
+    // 2. 音频流
+    let audio_count = mi.count_get(StreamKind::Audio, None);
+    for i in 0..audio_count {
+        let get_str = |k| mi.get(StreamKind::Audio, i, k, InfoKind::Text);
+        let get_i = |k| get_str(k).parse::<i64>().unwrap_or(0);
+        
+        let codec = get_str("Format").to_uppercase();
+        let ch = get_i("Channels");
+        let layout = get_str("ChannelLayout");
+        let lang_code = get_str("Language").to_lowercase();
+        let lang_str = if lang_code.starts_with("zh") || lang_code == "chi" { "Chinese" } else if lang_code.starts_with("en") || lang_code == "eng" { "English" } else { "Unknown" };
+        let lang_iso = if lang_code.starts_with("zh") || lang_code == "chi" { "chi" } else if lang_code.starts_with("en") || lang_code == "eng" { "eng" } else { "und" };
+        let title_name = get_str("Title");
+        
+        let mut display_title = format!("{} {} {}", lang_str, codec, layout);
+        if !title_name.is_empty() { display_title = format!("{} {}", display_title, title_name); }
+
+        let is_default = get_i("Default") == 1 || (default_audio == -1 && i == 0);
+        if is_default && default_audio == -1 { default_audio = global_index as i64; }
+
+        streams.push(json!({
+            "Type": "Audio", "Index": global_index, "Codec": codec.to_lowercase(),
+            "Channels": ch, "ChannelLayout": layout, "BitRate": get_i("BitRate"), "SampleRate": get_i("SamplingRate"),
+            "DisplayTitle": display_title, "Title": display_title, "DisplayLanguage": lang_str,
+            "Language": lang_iso, "IsDefault": is_default, "IsForced": false, "IsExternal": false,
+            "Protocol": "File", "SupportsExternalStream": false, "AttachmentSize": 0, "IsAnamorphic": false
+        }));
+        global_index += 1;
+    }
+
+    // 3. 字幕流
+    let text_count = mi.count_get(StreamKind::Text, None);
+    for i in 0..text_count {
+        let get_str = |k| mi.get(StreamKind::Text, i, k, InfoKind::Text);
+        let get_i = |k| get_str(k).parse::<i64>().unwrap_or(0);
+        
+        let codec = get_str("Format").to_uppercase();
+        let lang_code = get_str("Language").to_lowercase();
+        let lang_str = if lang_code.starts_with("zh") || lang_code == "chi" { "Chinese" } else if lang_code.starts_with("en") || lang_code == "eng" { "English" } else { "Unknown" };
+        let lang_iso = if lang_code.starts_with("zh") || lang_code == "chi" { "chi" } else if lang_code.starts_with("en") || lang_code == "eng" { "eng" } else { "und" };
+        let title_name = get_str("Title");
+        
+        let display_title = if title_name.is_empty() { format!("{} ({})", lang_str, codec) } else { format!("{} ({}) {}", lang_str, codec, title_name) };
+
+        let is_default = get_i("Default") == 1;
+        if is_default && default_sub == -1 { default_sub = global_index as i64; }
+
+        streams.push(json!({
+            "Type": "Subtitle", "Index": global_index, "Codec": codec.to_lowercase(),
+            "DisplayTitle": display_title, "Title": display_title, "DisplayLanguage": lang_str,
+            "Language": lang_iso, "IsDefault": is_default, "IsForced": get_i("Forced") == 1, "IsExternal": false, "IsExternalUrl": false,
+            "Protocol": "File", "SupportsExternalStream": false, "AttachmentSize": 0, "IsAnamorphic": false,
+            "DeliveryMethod": "Embed", "SubtitleLocationType": "InternalStream"
+        }));
+        global_index += 1;
+    }
+
+    if default_sub == -1 && text_count > 0 {
+        default_sub = (video_count + audio_count) as i64; 
+    }
+
+    Ok(json!({
+        "MediaStreams": streams,
+        "DefaultAudioStreamIndex": default_audio,
+        "DefaultSubtitleStreamIndex": default_sub
+    }))
 }
