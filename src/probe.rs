@@ -107,29 +107,54 @@ pub async fn probe_strm(
     };
 
     limiter.acquire().await;
-    let (size, content_type) = {
-        let resp = client.head(&direct_url)
-            .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            .send().await.map_err(|e| format!("HEAD失败: {}", e))?;
-        let len = resp.headers().get(reqwest::header::CONTENT_LENGTH)
-            .and_then(|v| v.to_str().ok()).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-        let ct = resp.headers().get(reqwest::header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-        (len, ct)
-    };
+    
+    // 直接发送带 Range 的 GET 请求，放弃不支持的 HEAD
+    let mut resp = client.get(&direct_url)
+        .header(reqwest::header::RANGE, "bytes=0-16777215")
+        .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .send().await.map_err(|e| format!("请求真实直链失败: {}", e))?;
 
-    if size < 1024 { return Err(format!("获取的文件大小异常: {} 字节", size)); }
+    let status = resp.status();
+    let content_type = resp.headers().get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+
+    // 拦截 HTML 或 JSON 报错页面
+    if content_type.contains("text/html") || content_type.contains("application/json") {
+        return Err(format!("网盘返回了错误页面 (类型: {})", content_type));
+    }
+
+    if !status.is_success() && status != reqwest::StatusCode::PARTIAL_CONTENT {
+        return Err(format!("请求直链失败, HTTP状态: {}", status));
+    }
+
+    // 提取总大小
+    let mut size = 0u64;
+    if let Some(cr) = resp.headers().get(reqwest::header::CONTENT_RANGE).and_then(|v| v.to_str().ok()) {
+        if let Some(total) = cr.split('/').last() {
+            size = total.parse::<u64>().unwrap_or(0);
+        }
+    }
+    if size == 0 {
+        size = resp.headers().get(reqwest::header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok()).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+    }
+
+    if size < 1024 * 1024 { 
+        return Err(format!("文件大小异常: {} 字节 (疑似被网盘拦截)", size)); 
+    }
 
     let container = infer_container(&content_type, &direct_url);
     
-    limiter.acquire().await;
-    let header_bytes = {
-        let resp = client.get(&direct_url)
-            .header(reqwest::header::RANGE, "bytes=0-4194303")
-            .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            .send().await.map_err(|e| format!("Range失败: {}", e))?;
-        resp.bytes().await.map_err(|e| format!("读body失败: {}", e))?.to_vec()
-    };
+    // 流式读取数据，防止网盘不支持 Range 直接把整个视频传过来撑爆内存
+    let mut header_bytes = Vec::new();
+    while let Ok(Some(chunk)) = resp.chunk().await {
+        header_bytes.extend_from_slice(&chunk);
+        if header_bytes.len() >= 16777216 { break; }
+    }
+
+    if header_bytes.len() < 1024 {
+        return Err("读取到的视频头数据太小，无法解析".to_string());
+    }
 
     let mut media_streams = Value::Null;
     let mut default_audio_index = -1;
