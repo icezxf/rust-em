@@ -17,7 +17,6 @@ static TOKENS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 static STRM_CACHE: OnceLock<Mutex<HashMap<String, (String, Instant)>>> = OnceLock::new();
 const MAX_STRM_SIZE: u64 = 16 * 1024;
 
-// ================= 基础中间件 =================
 pub async fn logger_middleware(req: Request, next: Next) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
@@ -39,7 +38,7 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     if path.contains("/Images/") || path.ends_with("/Ping") || path.ends_with("/Info/Public") || path.ends_with("/Users/Public") || path.ends_with("/AuthenticateByName") || path == "/api/login" {
         return Ok(next.run(req).await);
     }
-    if !path.starts_with("/api") && !path.starts_with("/emby") && !path.starts_with("/Items") && !path.starts_with("/Users") && !path.starts_with("/Videos") && !path.starts_with("/System") && !path.starts_with("/Auth") && !path.starts_with("/Sessions") && !path.starts_with("/DisplayPreferences") && !path.starts_with("/Persons") {
+    if !path.starts_with("/api") && !path.starts_with("/emby") && !path.starts_with("/Items") && !path.starts_with("/Users") && !path.starts_with("/Videos") && !path.starts_with("/System") && !path.starts_with("/Auth") && !path.starts_with("/Sessions") && !path.starts_with("/Persons") {
         return Ok(next.run(req).await);
     }
     
@@ -69,7 +68,6 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     Err(StatusCode::UNAUTHORIZED)
 }
 
-// ================= 辅助工具函数 =================
 fn format_iso8601(unix_secs: i64) -> String {
     if let Some(dt) = chrono::DateTime::from_timestamp(unix_secs, 0) { dt.format("%Y-%m-%dT%H:%M:%S.0000000Z").to_string() } 
     else { "2024-01-01T00:00:00.0000000Z".to_string() }
@@ -148,7 +146,7 @@ fn sanitize_media_streams(streams: &mut Value) {
     }
 }
 
-// ================= Web API =================
+// ======= Web API =======
 #[derive(Deserialize)]
 pub struct LoginReq { username: String, password: String }
 pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<LoginReq>) -> impl IntoResponse {
@@ -222,7 +220,7 @@ pub async fn rescan_library(State(pool): State<Arc<Mutex<Connection>>>, AxumPath
     Json(json!({"status": "scanning"}))
 }
 
-// ================= 扫描与解析 =================
+// ======= 扫描与解析 =======
 fn get_image_type(stem: &str) -> Option<&'static str> {
     let lower = stem.to_lowercase();
     let base = if let Some((b, suffix)) = lower.rsplit_once('-') { if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) { b } else { &lower } } else { &lower };
@@ -377,7 +375,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
     println!("✅ 扫描完成。共处理 {} 个媒体项。", count);
 }
 
-// ================= Web 接口 =================
+// ======= Web 接口 =======
 #[derive(Deserialize)]
 pub struct ItemQuery { library_id: Option<i64>, lib_type: Option<String> }
 
@@ -521,14 +519,13 @@ pub async fn probe_scan(Json(req): Json<ProbeScanReq>) -> impl IntoResponse {
     (StatusCode::OK, Json(json!({"status":"started"}))).into_response()
 }
 
-// ================= Emby API =================
+// ======= Emby API =======
 pub async fn emby_public_info() -> impl IntoResponse { Json(json!({ "ServerName": "Rust-Em", "Version": "4.8.0.0", "Id": "rust-em-server", "OperatingSystem": "Linux", "StartupWizardCompleted": true })) }
 pub async fn emby_info() -> impl IntoResponse { Json(json!({ "ServerName": "Rust-Em", "Version": "4.8.0.0", "Id": "rust-em-server", "OperatingSystem": "Linux", "OperatingSystemDisplayName": "Linux", "HasPendingRestart": false, "IsShuttingDown": false, "SupportsLibraryMonitor": false, "SupportsHttps": true, "HttpServerPortNumber": 8096 })) }
 pub async fn emby_ping() -> impl IntoResponse { "Emby Server" }
 pub async fn emby_public_users() -> impl IntoResponse { Json(json!([])) }
 pub async fn emby_auth_keys() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_display_preferences() -> impl IntoResponse { Json(json!({"Id": "default", "ViewType": "Poster", "SortBy": "SortName", "PrimaryImageHeight": 250, "PrimaryImageWidth": 250, "ScrollDirection": "Horizontal"})) }
-pub async fn emby_user() -> impl IntoResponse { Json(json!({"Id": "1", "Name": "admin", "ServerId": "rust-em-server", "HasPassword": true, "Policy": {"IsAdministrator": true, "EnableAllFolders": true}})) }
+pub async fn emby_user(_: AxumPath<String>) -> impl IntoResponse { Json(json!({"Id": "1", "Name": "admin", "ServerId": "rust-em-server", "HasPassword": true, "Policy": {"IsAdministrator": true, "EnableAllFolders": true}})) }
 
 pub async fn emby_authenticate(State(pool): State<Arc<Mutex<Connection>>>, headers: HeaderMap, body: Bytes) -> Response {
     let content_type = headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("");
@@ -571,6 +568,7 @@ pub struct EmbyItemsQuery {
 }
 
 pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
+pub async fn emby_items_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
 async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -> Response {
     let conn = pool.lock().unwrap();
     
@@ -1098,7 +1096,7 @@ pub struct ResumeVisibilityQuery { #[serde(rename = "Hide")] pub hide: Option<St
 #[serde(default)]
 pub struct ResumeVisibilityBody { #[serde(rename = "Hide")] pub hide: bool }
 
-pub async fn emby_hide_from_resume(Query(query): Query<ResumeVisibilityQuery>, body: Bytes) -> Response {
+pub async fn emby_hide_from_resume(AxumPath((_user_id, _item_id)): AxumPath<(String, String)>, Query(query): Query<ResumeVisibilityQuery>, body: Bytes) -> Response {
     let query_hide = match query.hide.as_deref().map(str::parse::<bool>).transpose() { Ok(value) => value, Err(_) => return StatusCode::BAD_REQUEST.into_response() };
     let body_hide = if body.is_empty() { None } else { match serde_json::from_slice::<ResumeVisibilityBody>(&body) { Ok(body) => Some(body.hide), Err(_) => return StatusCode::BAD_REQUEST.into_response() } };
     let hidden = match (query_hide, body_hide) { (Some(q), Some(b)) if q != b => return StatusCode::BAD_REQUEST.into_response(), (Some(h), _) | (_, Some(h)) => h, (None, None) => return StatusCode::BAD_REQUEST.into_response() };
@@ -1106,6 +1104,7 @@ pub async fn emby_hide_from_resume(Query(query): Query<ResumeVisibilityQuery>, b
 }
 
 pub async fn emby_action() -> impl IntoResponse { StatusCode::OK.into_response() }
+pub async fn emby_action_with_path(_: AxumPath<(String, String)>) -> impl IntoResponse { StatusCode::OK.into_response() }
 pub async fn emby_sessions() -> impl IntoResponse { Json(json!([])) }
 pub async fn emby_playing() -> impl IntoResponse { StatusCode::OK.into_response() }
 pub async fn emby_playing_progress() -> impl IntoResponse { StatusCode::OK.into_response() }
@@ -1188,8 +1187,8 @@ pub async fn emby_search_hints(State(pool): State<Arc<Mutex<Connection>>>, Query
 }
 
 pub async fn emby_shows_next_up() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_shows_seasons() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_shows_episodes() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
+pub async fn emby_shows_seasons(_: AxumPath<String>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
+pub async fn emby_shows_episodes(_: AxumPath<String>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 pub async fn emby_danmu() -> impl IntoResponse { Json(json!([])) }
 pub async fn emby_person_image(_: AxumPath<(String, String)>) -> impl IntoResponse {
     let png_bytes: [u8; 67] = [
@@ -1201,16 +1200,5 @@ pub async fn emby_person_image(_: AxumPath<(String, String)>) -> impl IntoRespon
     ];
     (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response()
 }
-
-pub async fn emby_subtitle_stream(_: AxumPath<(String, String)>) -> impl IntoResponse {
-    StatusCode::OK.into_response()
-}
-
-
-pub async fn emby_subtitle_stream(_: AxumPath<(String, String)>) -> impl IntoResponse {
-    StatusCode::OK.into_response()
-}
-
-pub async fn emby_subtitle_stream_with_source(_: AxumPath<(String, String, String)>) -> impl IntoResponse {
-    StatusCode::OK.into_response()
-}
+pub async fn emby_subtitle_stream(_: AxumPath<(String, String)>) -> impl IntoResponse { StatusCode::OK.into_response() }
+pub async fn emby_subtitle_stream_with_source(_: AxumPath<(String, String, String)>) -> impl IntoResponse { StatusCode::OK.into_response() }
