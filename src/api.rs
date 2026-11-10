@@ -1090,14 +1090,20 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
         } 
     }
 
-    let strm_path_opt = {
+    let (strm_path_opt, item_title) = {
         let conn = pool.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT parts FROM items WHERE id = ?1").unwrap();
-        stmt.query_row([item_id], |row| row.get::<_, String>(0)).ok()
-            .and_then(|json| serde_json::from_str::<Vec<String>>(&json).ok())
-            .and_then(|arr| arr.get(part_idx).cloned())
+        let mut stmt = conn.prepare("SELECT parts, title FROM items WHERE id = ?1").unwrap();
+        let (parts_opt, title) = stmt.query_row([item_id], |row| Ok((
+            row.get::<_, String>(0).ok(),
+            row.get::<_, String>(1).unwrap_or_else(|_| "未知影片".to_string())
+        ))).unwrap_or((None, "未知影片".to_string()));
+        
+        let path = parts_opt.and_then(|json| serde_json::from_str::<Vec<String>>(&json).ok())
+            .and_then(|arr| arr.get(part_idx).cloned());
+        (path, title)
     };
     
+    println!("🎬 [PLAY] 收到播放请求: 《{}》 (ID: {})", item_title, item_id);
     let Some(strm_path) = strm_path_opt else { return StatusCode::NOT_FOUND.into_response(); };
     let file = match tokio::fs::File::open(&strm_path).await { Ok(f) => f, Err(_) => return StatusCode::NOT_FOUND.into_response() };
     let mut contents = String::new();
@@ -1113,6 +1119,7 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
     println!("🎯 [302 REDIRECT] 真实地址: {}", final_url);
 
     { let mut cache_lock = cache.lock().unwrap(); cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(300))); }
+    println!("🎯 [302 REDIRECT] 真实网盘地址: {}", final_url);
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
 }
 
