@@ -64,31 +64,32 @@
         <!-- 右侧内容区 -->
         <div class="flex-1 flex flex-col h-full overflow-hidden bg-[#0f1115] relative w-full min-w-0">
             
-            <!-- 顶栏 -->
-            <div id="top-bar" class="px-4 py-3 md:px-6 md:py-4 flex flex-col md:flex-row md:items-center shadow-sm z-[60] shrink-0 border-b border-gray-800/50 bg-[#0f1115]/90 backdrop-blur-md">
-                <!-- 第一行：标题和 PC 侧边栏按钮 -->
-                <div class="flex items-center w-full">
-                    <button id="desktop-sidebar-btn" onclick="toggleSidebar()" class="hidden md:block text-gray-400 hover:text-white mr-4 transition">
+            <!-- 顶栏 (移动端只有标签栏，PC端有折叠按钮和标题) -->
+            <div id="top-bar" class="px-3 py-2 md:px-6 md:py-4 flex flex-col md:flex-row md:items-center shadow-sm z-[60] shrink-0 border-b border-gray-800/50 bg-[#0f1115]/90 backdrop-blur-md">
+                
+                <!-- PC 端标题和按钮 -->
+                <div class="hidden md:flex items-center w-full mb-0">
+                    <button id="desktop-sidebar-btn" onclick="toggleSidebar()" class="text-gray-400 hover:text-white mr-4 transition">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
                     </button>
                     <div id="top-bar-title" class="text-lg font-bold text-white tracking-wide truncate">媒体库</div>
                 </div>
                 
-                <!-- 第二行：移动端横向媒体库标签栏 -->
-                <div id="mobile-lib-tabs" class="md:hidden flex overflow-x-auto no-scrollbar gap-2 mt-3 w-full pb-1"></div>
+                <!-- 移动端横向媒体库标签栏 -->
+                <div id="mobile-lib-tabs" class="md:hidden flex overflow-x-auto no-scrollbar gap-2 w-full"></div>
             </div>
 
             <!-- 主页 (媒体列表) -->
-            <div id="tab-library" class="hidden flex-1 overflow-y-auto p-4 pb-24 md:px-8 md:py-6 md:pb-6">
-                <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-6"></div>
+            <div id="tab-library" class="hidden flex-1 overflow-y-auto p-3 pb-24 md:px-8 md:py-6 md:pb-6">
+                <div id="media-grid" class="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 md:gap-6"></div>
             </div>
 
-            <!-- 设置页 -->
+            <!-- 设置页 (移动端隐藏顶栏) -->
             <div id="tab-settings" class="hidden flex-1 overflow-y-auto p-4 pb-24 md:px-8 md:py-8 md:pb-8">
                 <div class="max-w-3xl mx-auto">
-                    <h2 class="text-2xl font-bold mb-6 text-white">系统设置</h2>
+                    <h2 class="text-xl md:text-2xl font-bold mb-6 text-white">系统设置</h2>
                     
-                    <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
+                    <div class="bg-[#16191f] border border-gray-800 p-4 md:p-6 rounded-2xl shadow-lg mb-6 md:mb-8">
                         <h3 class="text-lg font-bold mb-4 text-blue-400 border-b border-gray-800 pb-2">媒体库管理</h3>
                         <div id="settings-lib-list" class="flex flex-col gap-3 mb-6"></div>
                         <div class="border-t border-gray-800 pt-6">
@@ -103,7 +104,7 @@
                         </div>
                     </div>
 
-                    <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
+                    <div class="bg-[#16191f] border border-gray-800 p-4 md:p-6 rounded-2xl shadow-lg mb-6 md:mb-8">
                         <h3 class="text-lg font-bold mb-4 text-purple-400 border-b border-gray-800 pb-2">媒体信息探测 (Probe)</h3>
                         <p class="text-sm text-gray-400 mb-4">探测指定目录下 .strm 的真实媒体参数，生成合规的 JSON 缓存文件。</p>
                         <div class="flex gap-3 mb-4">
@@ -113,7 +114,7 @@
                         <button onclick="startProbe()" class="w-full bg-purple-600 hover:bg-purple-500 px-4 py-3 rounded-lg font-bold transition text-white shadow-lg shadow-purple-500/20">开始探测</button>
                     </div>
 
-                    <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
+                    <div class="bg-[#16191f] border border-gray-800 p-4 md:p-6 rounded-2xl shadow-lg mb-6 md:mb-8">
                         <h3 class="text-lg font-bold mb-4 text-green-400 border-b border-gray-800 pb-2">播放体验设置</h3>
                         <div class="flex items-center justify-between">
                             <div>
@@ -127,7 +128,7 @@
                         </div>
                     </div>
 
-                    <div class="bg-[#16191f] border border-gray-800 p-6 rounded-2xl shadow-lg mb-8">
+                    <div class="bg-[#16191f] border border-gray-800 p-4 md:p-6 rounded-2xl shadow-lg mb-6 md:mb-8">
                         <h3 class="text-lg font-bold mb-4 text-yellow-400 border-b border-gray-800 pb-2">修改管理员账号</h3>
                         <input id="old-pwd" type="password" placeholder="当前密码" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none text-white">
                         <input id="new-user" type="text" placeholder="新用户名" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none text-white">
@@ -137,7 +138,7 @@
                 </div>
             </div>
 
-            <!-- 详情页 (绝对定位在右侧区域，实现挤压效果) -->
+            <!-- 详情页 (绝对定位在右侧区域) -->
             <div id="detail-modal" class="hidden absolute inset-0 z-[70] overflow-y-auto bg-[#0b0e14]">
                 <div id="detail-fanart" class="fixed top-0 bottom-0 right-0 left-0 bg-cover bg-top backdrop-blur-heavy opacity-20 pointer-events-none"></div>
                 <div class="fixed top-0 bottom-0 right-0 left-0 bg-gradient-to-b from-black/80 via-black/60 to-[#0b0e14] z-[1] pointer-events-none"></div>
@@ -330,21 +331,21 @@
             document.getElementById('tab-library').classList.add('hidden');
             document.getElementById('tab-settings').classList.add('hidden');
             
-            // 底部导航高亮
             const btnLib = document.getElementById('nav-btn-library');
             const btnSet = document.getElementById('nav-btn-settings');
+            const mobileTabs = document.getElementById('mobile-lib-tabs');
             
             if (tab === 'library') {
                 document.getElementById('tab-library').classList.remove('hidden');
-                document.getElementById('top-bar-title').innerText = '媒体库';
                 if(btnLib) btnLib.className = 'flex flex-col items-center justify-center w-1/2 text-blue-500 transition';
                 if(btnSet) btnSet.className = 'flex flex-col items-center justify-center w-1/2 text-gray-400 hover:text-white transition';
+                if(mobileTabs) mobileTabs.classList.remove('hidden');
                 loadMedia();
             } else if (tab === 'settings') {
                 document.getElementById('tab-settings').classList.remove('hidden');
-                document.getElementById('top-bar-title').innerText = '系统设置';
                 if(btnLib) btnLib.className = 'flex flex-col items-center justify-center w-1/2 text-gray-400 hover:text-white transition';
                 if(btnSet) btnSet.className = 'flex flex-col items-center justify-center w-1/2 text-blue-500 transition';
+                if(mobileTabs) mobileTabs.classList.add('hidden');
                 renderSettingsLibraries();
                 loadSettings();
             }
@@ -372,10 +373,10 @@
             const container = document.getElementById('mobile-lib-tabs');
             if (!container) return;
             
-            let html = `<button onclick="setLibraryFilter('all')" class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium transition ${currentLibId === 'all' ? 'bg-blue-600 text-white' : 'bg-[#16191f] text-gray-400 border border-gray-800'}">全部</button>`;
+            let html = `<button onclick="setLibraryFilter('all')" class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium transition ${currentLibId === 'all' ? 'bg-blue-600 text-white shadow-sm' : 'bg-[#16191f] text-gray-400 border border-gray-800'}">全部</button>`;
             
             allLibraries.forEach(lib => {
-                const cls = currentLibId === lib.id ? 'bg-blue-600 text-white' : 'bg-[#16191f] text-gray-400 border border-gray-800';
+                const cls = currentLibId === lib.id ? 'bg-blue-600 text-white shadow-sm' : 'bg-[#16191f] text-gray-400 border border-gray-800';
                 html += `<button onclick="setLibraryFilter(${lib.id})" class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium transition ${cls}">${lib.name}</button>`;
             });
             container.innerHTML = html;
@@ -386,16 +387,7 @@
             currentLibId = libId; 
             renderSidebarLibraries(); 
             renderMobileLibTabs();
-            if (window.innerWidth < 768) {
-                // 移动端切换库后保证在主页
-                if (document.getElementById('tab-library').classList.contains('hidden')) {
-                    switchTab('library');
-                } else {
-                    loadMedia();
-                }
-            } else {
-                switchTab('library');
-            }
+            loadMedia();
         }
 
         async function loadMedia() {
@@ -410,17 +402,17 @@
                 grid.innerHTML = data.items.map(item => {
                     const imgUrl = item.has_poster ? `/api/images/${item.id}/poster?token=${token}&t=${Date.now()}` : defaultPosterSvg;
                     const ratingVal = Number(item.rating) || 0;
-                    const ratingHtml = ratingVal > 0 ? `<div class="absolute bottom-2 right-2 bg-yellow-500 text-black font-bold text-xs px-2 py-0.5 rounded shadow-lg border border-yellow-400">${ratingVal.toFixed(1)}</div>` : '';
+                    const ratingHtml = ratingVal > 0 ? `<div class="absolute bottom-1.5 right-1.5 md:bottom-2 md:right-2 bg-yellow-500 text-black font-bold text-[10px] md:text-xs px-1.5 py-0.5 rounded shadow-lg border border-yellow-400">${ratingVal.toFixed(1)}</div>` : '';
                     return `
                     <div onclick="openDetail('${item.id}')" class="media-card flex flex-col cursor-pointer transition-all duration-300 group">
-                        <div class="bg-[#16191f] rounded-xl overflow-hidden aspect-[2/3] relative border border-gray-800/50">
+                        <div class="bg-[#16191f] rounded-lg md:rounded-xl overflow-hidden aspect-[2/3] relative border border-gray-800/50">
                             <img src="${imgUrl}" class="media-poster w-full h-full object-cover transition-transform duration-500" onerror="this.src='${defaultPosterSvg}'">
                             ${ratingHtml}
                             <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                         </div>
-                        <div class="p-2">
-                            <div class="font-bold text-white text-sm truncate drop-shadow-md group-hover:text-blue-400 transition-colors">${item.title || '未知'}</div>
-                            <div class="text-xs text-gray-400 mt-1">${item.year || (item.type === 'movies' ? '电影' : '剧集')}</div>
+                        <div class="p-1 md:p-2">
+                            <div class="font-bold text-white text-xs md:text-sm truncate drop-shadow-md group-hover:text-blue-400 transition-colors">${item.title || '未知'}</div>
+                            <div class="text-[10px] md:text-xs text-gray-400 mt-0.5 md:mt-1">${item.year || (item.type === 'movies' ? '电影' : '剧集')}</div>
                         </div>
                     </div>`;
                 }).join('');
