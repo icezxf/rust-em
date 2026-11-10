@@ -106,18 +106,35 @@ fn extract_extension_from_url(url: &str) -> String {
 }
 
 async fn resolve_qmediasync_url(client: &reqwest::Client, url: &str, ua: &str) -> Option<String> {
+    // 带上 Range 请求头，强制 OpenList 吐出 302 真实地址
     let resp = client.get(url)
         .header(USER_AGENT, ua)
-        .header(reqwest::header::RANGE, "bytes=0-0") // 终极杀招：只要 1 字节，骗 OpenList 吐 302
+        .header(reqwest::header::RANGE, "bytes=0-0")
         .send().await.ok()?;
-    if resp.status().is_redirection() {
+        
+    let status = resp.status();
+    
+    if status.is_redirection() {
+        println!("🎯 [RESOLVE] 成功获取 302 跳转！");
         resp.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok()).map(|s| s.to_string())
     } else {
         let text = resp.text().await.unwrap_or_default();
         if let Some(start) = text.find("href=\"") {
             let rest = &text[start + 6..];
-            if let Some(end) = rest.find('\"') { Some(rest[..end].replace("&amp;", "&")) } else { None }
-        } else if text.starts_with("http") { Some(text.trim().to_string()) } else { None }
+            if let Some(end) = rest.find('\"') {
+                println!("🎯 [RESOLVE] 成功从 HTML 中提取 href！");
+                Some(rest[..end].replace("&amp;", "&"))
+            } else { 
+                println!("❌ [RESOLVE] 找到了 href= 但没找到闭合引号");
+                None 
+            }
+        } else if text.starts_with("http") { 
+            println!("🎯 [RESOLVE] 成功提取纯文本 http 链接");
+            Some(text.trim().to_string()) 
+        } else { 
+            println!("❌ [RESOLVE] 解析失败！状态码: {}, 返回内容前 100 字: {}", status, text.chars().take(100).collect::<String>().replace("\n", ""));
+            None 
+        }
     }
 }
 
@@ -141,7 +158,6 @@ fn sanitize_media_streams(streams: &mut Value) {
                 if stream_type == "Video" {
                     let depth = obj.get("BitDepth").and_then(|v| v.as_i64()).unwrap_or(0);
                     
-                    // 彻底相信 QMS 传来的 DisplayTitle，只有在完全为空时才兜底生成
                     if display_title.is_empty() {
                         let w = obj.get("Width").and_then(|v| v.as_i64()).unwrap_or(0);
                         let h = obj.get("Height").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -162,7 +178,7 @@ fn sanitize_media_streams(streams: &mut Value) {
                 }
 
                 obj.insert("DisplayTitle".to_string(), json!(display_title));
-                obj.remove("Title"); // 移除多余的 Title 防止 Yamby 双倍渲染
+                obj.remove("Title");
 
                 for k in &["AverageFrameRate", "RealFrameRate"] {
                     if let Some(v) = obj.get_mut(*k) {
@@ -542,7 +558,7 @@ pub async fn update_settings(State(pool): State<Arc<Mutex<Connection>>>, Json(re
 
 #[derive(Deserialize)]
 pub struct ProbeScanReq { pub path: String, pub interval_ms: Option<u64> }
-pub async fn probe_scan(Json(req): Json<ProbeScanReq>) -> impl IntoResponse {
+pub async fn probe_scan(State(pool): State<Arc<Mutex<Connection>>>, Json(req): Json<ProbeScanReq>) -> impl IntoResponse {
     let root = PathBuf::from(&req.path);
     if !root.is_dir() { return (StatusCode::BAD_REQUEST, Json(json!({"error":"路径不存在"}))).into_response(); }
     let limiter = crate::probe::ProbeLimiter::new(req.interval_ms.unwrap_or(1000));
@@ -676,6 +692,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
             else { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
         }
     }
+
     let from_idx = sql.find(" FROM items").unwrap_or(0);
     let count_sql = format!("SELECT COUNT(*){}", &sql[from_idx..]);
     let total: i64 = conn.query_row(&count_sql, [], |r| r.get(0)).unwrap_or(0);
@@ -758,7 +775,6 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let year_str: String = row.get(3).unwrap_or_default();
             let plot: String = row.get(4).unwrap_or_default();
             let poster_path: String = row.get(5).unwrap_or_default();
-            let file_path: String = row.get(6).unwrap_or_default();
             let studios_str: String = row.get(7).unwrap_or_default();
             let parts_json: String = row.get(8).unwrap_or_default();
             let runtime: i32 = row.get(9).unwrap_or(0);
@@ -821,8 +837,6 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             }).collect();
 
             let mut people: Vec<Value> = Vec::new();
-            
-            // 将多个导演合并为一条记录，确保 Yamby 顶部能把所有导演都显示出来
             let dir_names: Vec<&str> = directors_str.split(" / ").filter(|s| !s.is_empty()).collect();
             let director_str = dir_names.join(", ");
             if !director_str.is_empty() {
@@ -834,7 +848,6 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 }));
             }
             
-            // 接着加入演员
             for a in actors.iter() {
                 people.push(json!({
                     "Name": a["name"].as_str().unwrap_or_default(),
@@ -855,9 +868,15 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             if !thumb_path.is_empty() { image_tags.insert("Thumb".to_string(), json!(format!("thumb_{}", id))); }
             if !banner_path.is_empty() { image_tags.insert("Banner".to_string(), json!(format!("banner_{}", id))); }
 
+            let mut backdrops: Vec<String> = Vec::new();
+            if !fanart_path.is_empty() { backdrops.push(fanart_path.clone()); }
+            backdrops.extend(stills_vec.iter().cloned());
             let mut backdrop_tags: Vec<Value> = Vec::new();
-            if !fanart_path.is_empty() { backdrop_tags.push(json!(format!("backdrop_{}_0", id))); }
-            for i in 0..stills_vec.len() { backdrop_tags.push(json!(format!("backdrop_{}_{}", id, i + 1))); }
+            for (i, p) in backdrops.iter().enumerate() {
+                let mut h = Sha256::new(); h.update(p.as_bytes()); let hash = h.finalize();
+                let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+                backdrop_tags.push(json!(format!("backdrop_{}_{}_{}", id, i, &hash_hex[..8])));
+            }
 
             let date_created_ts = if date_created > 0 { date_created } else { mtime };
             let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
@@ -868,7 +887,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                     let stream_url = format!("/Videos/{}/original.mp4?MediaSourceId={}_cd{}", id, id, i);
                     json!({
                         "Id": format!("{}_cd{}", id, i), "ItemId": id.to_string(),
-                        "Path": stream_url.clone(), "DirectStreamUrl": stream_url,
+                        "Path": real_path.clone(), "DirectStreamUrl": stream_url,
                         "Protocol": "Http", "Container": "mp4", "Name": title.clone(),
                         "Type": "Default", "VideoType": "VideoFile", "IsRemote": true,
                         "Bitrate": est_bitrate, "RunTimeTicks": run_time_ticks, "Size": size,
@@ -881,22 +900,21 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 }).collect()
             };
 
-            let mut item_value = json!({
+            Ok(json!({
                 "Id": id.to_string(), "ServerId": "rust-em-server", "Name": title.clone(),
-                "OriginalTitle": if original_title.is_empty() { Value::Null } else { json!(original_title) },
-                "SortName": if sort_title.is_empty() { title.clone() } else { sort_title.clone() },
-                "ForcedSortName": if sort_title.is_empty() { title.clone() } else { sort_title },
+                "OriginalTitle": Value::Null,
+                "SortName": title.clone(),
+                "ForcedSortName": title.clone(),
                 "Type": if typ == "movies" { "Movie" } else { "Series" },
                 "MediaType": "Video", "IsFolder": false, "Overview": plot,
                 "ProductionYear": year_str.parse::<i32>().unwrap_or(0), "PremiereDate": premiered, "ReleaseDate": releasedate,
                 "DateCreated": format_iso8601(date_created_ts), "CommunityRating": rating, "OfficialRating": mpaa,
                 "RunTimeTicks": run_time_ticks, "Size": size, "Bitrate": est_bitrate,
-                "Director": director_str,
                 "Genres": genres_vec, "GenreItems": genre_items, "Tags": tags_vec, "TagItems": tag_items,
                 "Taglines": if tagline.is_empty() { json!([]) } else { json!([tagline]) },
                 "Studios": studios, "People": people,
-                "ProviderIds": {
-                    "Tmdb": if tmdb_id.is_empty() { Value::Null } else { json!(tmdb_id) },
+                "ProviderIds": { 
+                    "Tmdb": if tmdb_id.is_empty() { Value::Null } else { json!(tmdb_id) }, 
                     "Imdb": if imdb_id.is_empty() { Value::Null } else { json!(imdb_id) },
                     "num": if num.is_empty() { Value::Null } else { json!(num) }
                 },
@@ -905,19 +923,13 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(),
                 "OriginalLanguage": if !original_language.is_empty() { json!(original_language) } else if !language.is_empty() { json!(language) } else { Value::Null },
                 "SetName": if set_name.is_empty() { Value::Null } else { json!(set_name) },
-                "SeriesName": if series.is_empty() { Value::Null } else { json!(series) },
-                "Path": file_path, "Container": "mp4", "MediaSourceCount": media_sources.len(),
-                "MediaSources": media_sources, "MediaStreams": media_streams,
+                "SeriesName": Value::Null,
+                "Path": real_path, "Container": "mp4", "MediaSourceCount": media_sources.len(),
+                "MediaSources": media_sources,
                 "ProbeEngine": "rust-native", "LocationType": "FileSystem",
                 "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
                 "UserData": { "ItemId": id.to_string(), "Key": id.to_string(), "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 }
-            });
-            if typ == "movies" {
-                if let Some(obj) = item_value.as_object_mut() {
-                    obj.remove("SeriesName");
-                }
-            }
-            Ok(item_value)
+            }))
         }
     ).ok();
     
@@ -976,59 +988,7 @@ pub async fn emby_playback_info(
 
     let mut parsed_streams: Value = serde_json::from_str(&media_streams_json).unwrap_or(json!([]));
     sanitize_media_streams(&mut parsed_streams);
-    let final_streams = parsed_streams; // 绝不造假，原样透传
-
-    let prefetch = {
-        let conn = pool.lock().unwrap();
-        conn.query_row("SELECT value FROM settings WHERE key = 'prefetch_playback'", [], |r| r.get::<_, String>(0)).unwrap_or_else(|_| "false".to_string()) == "true"
-    };
-    if prefetch {
-        let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("unknown").to_string();
-        let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown").to_string();
-        let part_idx = if let Some(msid) = query.get("MediaSourceId") {
-            msid.split('_').last().and_then(|s| s.replace("cd", "").parse::<usize>().ok()).unwrap_or(0)
-        } else { 0 };
-
-        let cache_key = format!("{}|{}|{}|{}", item_id, part_idx, ip, ua);
-        let needs = {
-            let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-            let lock = cache.lock().unwrap();
-            !lock.contains_key(&cache_key) || lock.get(&cache_key).map(|(_, exp)| Instant::now() >= *exp).unwrap_or(true)
-        };
-
-        if needs {
-            let pool_clone = pool.clone();
-            let ua_clone = ua.clone();
-            tokio::spawn(async move {
-                let (strm_path, item_name) = {
-                    let conn = pool_clone.lock().unwrap();
-                    let mut stmt = conn.prepare("SELECT parts, num, title FROM items WHERE id = ?1").unwrap();
-                    stmt.query_row([item_id], |r| {
-                        let parts_json: String = r.get(0).unwrap_or_default();
-                        let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
-                        let num: String = r.get(1).unwrap_or_default();
-                        let title: String = r.get(2).unwrap_or_default();
-                        let name = if !num.is_empty() { num } else { title };
-                        Ok((parts.get(part_idx).cloned(), name))
-                    }).unwrap_or((None, String::new()))
-                };
-                if let Some(path) = strm_path {
-                    if let Ok(content) = tokio::fs::read_to_string(&path).await {
-                        let url = content.lines().map(str::trim).find(|s| !s.is_empty()).unwrap_or("");
-                        if url.starts_with("http") {
-                            let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(15)).build().unwrap();
-                            if let Some(final_url) = resolve_qmediasync_url(&client, url, &ua_clone).await {
-                                let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-                                let mut lock = cache.lock().unwrap();
-                                lock.insert(cache_key, (final_url, Instant::now() + Duration::from_secs(300)));
-                                println!("🔥 [PREFETCH] {} ({}) 预热成功", item_name, item_id);
-                            }
-                        }
-                    }
-                }
-            });
-        }
-    }
+    let final_streams = parsed_streams;
 
     let media_sources: Vec<Value> = parts.iter().enumerate().map(|(i, _path)| {
         let ext = &exts[i];
@@ -1066,13 +1026,6 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
     let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     
-    let item_title = {
-        let conn = pool.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT title FROM items WHERE id = ?1").unwrap();
-        stmt.query_row([item_id], |r| r.get::<_, String>(0)).unwrap_or_else(|_| "未知影片".to_string())
-    };
-    println!("🎬 [PLAY] 收到播放请求: 《{}》 (ID: {})", item_title, item_id);
-    
     let part_idx = if let Some(p) = query.get("part") { p.parse::<usize>().unwrap_or(0) }
     else if let Some(msid) = query.get("MediaSourceId").or_else(|| query.get("mediaSourceId")) {
         msid.split('_').last().and_then(|s| s.replace("cd", "").parse::<usize>().ok()).unwrap_or(0)
@@ -1087,24 +1040,28 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
                 println!("⚡ [PLAY] 命中缓存，直接 302 到: {}", cached_url);
                 return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); 
             } 
-        } 
+        }
     }
 
     let (strm_path_opt, item_title) = {
         let conn = pool.lock().unwrap();
         let mut stmt = conn.prepare("SELECT parts, title FROM items WHERE id = ?1").unwrap();
-        let (parts_opt, title) = stmt.query_row([item_id], |row| Ok((
+        let row_res = stmt.query_row([item_id], |row| Ok((
             row.get::<_, String>(0).ok(),
             row.get::<_, String>(1).unwrap_or_else(|_| "未知影片".to_string())
-        ))).unwrap_or((None, "未知影片".to_string()));
-        
-        let path = parts_opt.and_then(|json| serde_json::from_str::<Vec<String>>(&json).ok())
-            .and_then(|arr| arr.get(part_idx).cloned());
-        (path, title)
+        )));
+        match row_res {
+            Ok((Some(json), title)) => {
+                let path = serde_json::from_str::<Vec<String>>(&json).ok().and_then(|arr| arr.get(part_idx).cloned());
+                (path, title)
+            }
+            _ => (None, "未知影片".to_string())
+        }
     };
     
+    let Some(strm_path) = strm_path_opt else { return StatusCode::NOT_FOUND.into_response() };
     println!("🎬 [PLAY] 收到播放请求: 《{}》 (ID: {})", item_title, item_id);
-    let Some(strm_path) = strm_path_opt else { return StatusCode::NOT_FOUND.into_response(); };
+
     let file = match tokio::fs::File::open(&strm_path).await { Ok(f) => f, Err(_) => return StatusCode::NOT_FOUND.into_response() };
     let mut contents = String::new();
     if file.take(MAX_STRM_SIZE).read_to_string(&mut contents).await.is_err() { return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
@@ -1114,12 +1071,14 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
     let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(15)).build().unwrap();
     let final_url = resolve_qmediasync_url(&client, url, ua).await.unwrap_or_else(|| url.to_string());
     
-    println!("🎯 [302 REDIRECT] 真实网盘地址: {}", final_url);
-    println!("🎬 [PLAY] ID: {} | 拿到直链准备 302", item_id);
-    println!("🎯 [302 REDIRECT] 真实地址: {}", final_url);
+    if final_url.contains("openlist") || final_url.contains("127.0.0.1") {
+        println!("⚠️ [PLAY] 解析失败，最终地址仍是内网/OpenList 代理，拒绝重定向并跳过缓存。");
+        return StatusCode::BAD_GATEWAY.into_response();
+    }
+
+    println!("🎯 [302 REDIRECT] 成功解析真实 CDN 地址: {}", &final_url[..std::cmp::min(final_url.len(), 100)]);
 
     { let mut cache_lock = cache.lock().unwrap(); cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(300))); }
-    println!("🎯 [302 REDIRECT] 真实网盘地址: {}", final_url);
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
 }
 
@@ -1256,8 +1215,6 @@ pub async fn emby_item_image_user_only(_: AxumPath<(String, String)>) -> Respons
     StatusCode::NOT_FOUND.into_response()
 }
 
-
-
 async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
     let path_opt = {
         let conn = pool.lock().unwrap();
@@ -1295,12 +1252,11 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
                         row.get::<_, String>(0).unwrap_or_default(),
                         row.get::<_, String>(1).unwrap_or_default()
                     ))).map(|(stills_json, fanart_path)| {
-                        if index == 0 {
-                            if !fanart_path.is_empty() { Some(fanart_path) } else { None }
-                        } else {
-                            let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
-                            stills.get(index - 1).cloned()
-                        }
+                        let mut backdrops: Vec<String> = Vec::new();
+                        if !fanart_path.is_empty() { backdrops.push(fanart_path); }
+                        let stills: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
+                        backdrops.extend(stills);
+                        backdrops.get(index).cloned()
                     }).unwrap_or(None)
                 },
                 _ => None,
