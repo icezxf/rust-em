@@ -227,16 +227,26 @@
             </div>
         </div>
 
-        <div id="video-player-modal" class="hidden fixed inset-0 z-[100] bg-black flex flex-col">
-            <div class="flex justify-between items-center p-4 bg-gradient-to-b from-black/80 to-transparent absolute top-0 w-full z-10">
-                <h2 id="player-title" class="text-white text-lg font-bold drop-shadow-md">正在播放</h2>
-                <button onclick="closePlayer()" class="text-white bg-white/20 hover:bg-white/40 p-2 rounded-full backdrop-blur-md transition">
+        <div id="video-player-modal" class="hidden fixed inset-0 z-[100] bg-[#0b0e14] flex flex-col">
+            <!-- 顶部独立导航栏 -->
+            <div class="flex justify-between items-center px-4 py-3 bg-[#16191f] border-b border-gray-800 shrink-0 shadow-md z-20">
+                <div class="flex flex-col overflow-hidden">
+                    <h2 id="player-title" class="text-white text-lg font-bold truncate">正在播放</h2>
+                    <div id="player-media-info" class="text-xs text-blue-400 mt-1 flex gap-3 font-mono truncate">
+                        <!-- 媒体信息由 JS 动态插入 -->
+                    </div>
+                </div>
+                <button onclick="closePlayer()" class="text-gray-400 hover:text-white bg-gray-800/50 hover:bg-gray-700 p-2 rounded-lg transition shrink-0 ml-4">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
-            <div class="flex-1 flex items-center justify-center relative">
-                <video id="main-video" class="w-full h-full max-h-screen outline-none" controls autoplay playsinline>您的浏览器不支持 HTML5 视频播放。</video>
-                <div id="player-loading" class="absolute inset-0 flex items-center justify-center text-white text-lg bg-black/50 hidden">正在解析直链并加载...</div>
+            <!-- 视频画面区域 -->
+            <div class="flex-1 relative flex items-center justify-center overflow-hidden bg-black">
+                <video id="main-video" class="w-full max-w-6xl max-h-full outline-none" controls autoplay playsinline>您的浏览器不支持 HTML5 视频播放。</video>
+                <div id="player-loading" class="absolute inset-0 flex flex-col items-center justify-center text-white bg-black/60 backdrop-blur-sm hidden z-10">
+                    <div class="w-10 h-10 border-4 border-gray-600 border-t-blue-500 rounded-full animate-spin mb-4"></div>
+                    <div class="text-sm text-gray-300">正在解析网盘直链...</div>
+                </div>
             </div>
         </div>
     </div>
@@ -432,13 +442,34 @@
             const playerModal = document.getElementById('video-player-modal');
             const video = document.getElementById('main-video');
             const loading = document.getElementById('player-loading');
-            const title = document.getElementById('player-title');
+            const titleEl = document.getElementById('player-title');
+            const infoEl = document.getElementById('player-media-info');
+            
             const item = cachedItems.find(i => String(i.id) === String(currentPlayingItemId));
-            if(item) title.innerText = item.title;
-            playerModal.classList.remove('hidden'); loading.classList.remove('hidden'); loading.innerHTML = "正在解析直链并加载...";
+            if(item) {
+                titleEl.innerText = item.title;
+                // 拼接媒体信息 (视频 + 音频)
+                if (item.media_streams && item.media_streams.length > 0) {
+                    let vInfo = '', aInfo = '';
+                    item.media_streams.forEach(s => {
+                        if (s.Type === 'Video' && !vInfo) vInfo = s.DisplayTitle || `${s.Height}p ${s.Codec.toUpperCase()}`;
+                        if (s.Type === 'Audio' && !aInfo) aInfo = s.DisplayTitle || `${s.Codec.toUpperCase()} ${s.Channels}ch`;
+                    });
+                    infoEl.innerHTML = `<span>🎬 ${vInfo}</span> <span>🎵 ${aInfo}</span>`;
+                } else {
+                    infoEl.innerHTML = `<span class="text-gray-500">暂无详细媒体参数</span>`;
+                }
+            }
+            
+            playerModal.classList.remove('hidden');
+            loading.classList.remove('hidden');
+            loading.innerHTML = `<div class="w-10 h-10 border-4 border-gray-600 border-t-blue-500 rounded-full animate-spin mb-4"></div><div class="text-sm text-gray-300">正在解析网盘直链...</div>`;
+            
             video.src = `/Videos/${currentPlayingItemId}/stream?token=${token}&part=${partIndex}`;
-            video.play().then(() => { loading.classList.add('hidden'); }).catch(e => {
-                loading.innerHTML = `<span class="text-red-400">播放失败: 浏览器可能不支持该视频格式。</span>`;
+            video.play().then(() => { 
+                loading.classList.add('hidden'); 
+            }).catch(e => {
+                loading.innerHTML = `<div class="text-red-400 font-bold">播放失败</div><div class="text-sm text-gray-300 mt-2">浏览器可能不支持该格式，或网盘风控拦截。</div>`;
             });
         }
 
