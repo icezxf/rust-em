@@ -105,9 +105,8 @@ fn extract_extension_from_url(url: &str) -> String {
     "mp4".to_string()
 }
 
-pub async fn resolve_qmediasync_url(client: &reqwest::Client, url: &str, _ua: &str) -> Option<String> {
-    let browser_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-    let resp = client.get(url).header(USER_AGENT, browser_ua).header(reqwest::header::RANGE, "bytes=0-0").send().await.ok()?;
+pub async fn resolve_qmediasync_url(client: &reqwest::Client, url: &str, ua: &str) -> Option<String> {
+    let resp = client.get(url).header(USER_AGENT, ua).send().await.ok()?;
     let status = resp.status();
     if status.is_redirection() {
         println!("🎯 [RESOLVE] 成功获取 302 跳转！");
