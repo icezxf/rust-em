@@ -10,7 +10,7 @@ pub struct NfoMovie {
     pub title: Option<String>, pub original_title: Option<String>, pub sort_title: Option<String>,
     pub num: Option<String>, pub plot: Option<String>, pub year: Option<String>,
     pub premiered: Option<String>, pub releasedate: Option<String>, pub runtime: Option<i32>,
-    pub rating: Option<f64>, pub mpaa: Option<String>, pub tagline: Option<String>,
+    pub rating: Option<f64>, pub user_rating: Option<f64>, pub mpaa: Option<String>, pub tagline: Option<String>,
     pub series: Option<String>, pub label: Option<String>, pub sets: Vec<String>,
     pub poster: Option<String>, pub fanart: Option<String>, pub trailer: Option<String>,
     pub genres: Vec<String>, pub tags: Vec<String>, pub directors: Vec<String>,
@@ -76,6 +76,13 @@ fn process_text(text: &str, tag: &str, movie: &mut NfoMovie, current_actor: &mut
         "releasedate" => movie.releasedate = Some(text.to_string()),
         "runtime" => movie.runtime = text.parse::<i32>().ok(),
         "rating" => movie.rating = text.parse::<f64>().ok(),
+        "userrating" => movie.user_rating = text.parse::<f64>().ok(),
+        "value" => {
+            // 防止覆盖掉已有的 rating
+            if movie.rating.is_none() {
+                movie.rating = text.parse::<f64>().ok();
+            }
+        }
         "mpaa" => movie.mpaa = Some(text.to_string()),
         "tagline" => movie.tagline = Some(text.to_string()),
         "series" => movie.series = Some(text.to_string()),
