@@ -902,7 +902,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
 
             Ok(json!({
                 "Id": id.to_string(), "ServerId": "rust-em-server", "Name": title.clone(),
-                "OriginalTitle": Value::Null,
+                "OriginalTitle": "",
                 "SortName": title.clone(),
                 "ForcedSortName": title.clone(),
                 "Type": if typ == "movies" { "Movie" } else { "Series" },
@@ -914,17 +914,17 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 "Taglines": if tagline.is_empty() { json!([]) } else { json!([tagline]) },
                 "Studios": studios, "People": people,
                 "ProviderIds": { 
-                    "Tmdb": if tmdb_id.is_empty() { Value::Null } else { json!(tmdb_id) }, 
-                    "Imdb": if imdb_id.is_empty() { Value::Null } else { json!(imdb_id) },
-                    "num": if num.is_empty() { Value::Null } else { json!(num) }
+                    "Tmdb": if tmdb_id.is_empty() { "" } else { json!(tmdb_id) }, 
+                    "Imdb": if imdb_id.is_empty() { "" } else { json!(imdb_id) },
+                    "num": if num.is_empty() { "" } else { json!(num) }
                 },
                 "ImageTags": image_tags, "BackdropImageTags": backdrop_tags,
                 "PrimaryImageAspectRatio": if aspect_ratio > 0.0 { json!(aspect_ratio) } else { json!(0.6666666666666666) },
                 "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(),
                 "OriginalLanguage": if !original_language.is_empty() { original_language } else { language },
                 "SetName": set_name,
-                "SeriesName": Value::Null,
-                "Path": real_path, "Container": "mp4", "MediaSourceCount": media_sources.len(),
+                "SeriesName": "",
+                "Path": decode_url(&real_path), "Container": "mp4", "MediaSourceCount": media_sources.len(),
                 "MediaSources": media_sources,
                 "ProbeEngine": "rust-native", "LocationType": "FileSystem",
                 "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
@@ -1148,7 +1148,7 @@ pub async fn emby_virtual_folders(State(pool): State<Arc<Mutex<Connection>>>) ->
             "Name": name, "Id": format!("lib_{}", id), "Guid": format!("lib_{}", id),
             "Path": format!("/media/lib_{}", id), "CollectionType": lib_type,
             "LibraryOptions": { "PathInfos": [], "EnablePhotos": true, "EnableRealtimeMonitor": false, "SaveLocalMetadata": true },
-            "ItemId": format!("lib_{}", id), "PrimaryImageItemId": Value::Null, "RefreshStatus": "Idle"
+            "ItemId": format!("lib_{}", id), "PrimaryImageItemId": "", "RefreshStatus": "Idle"
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(folders)
@@ -1184,7 +1184,7 @@ pub async fn emby_search_hints(State(pool): State<Arc<Mutex<Connection>>>, Query
             "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
             "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) },
             "MatchedTerm": term,
-            "PrimaryImageTag": if has_poster { json!(format!("tag_{}", id)) } else { Value::Null }
+            "PrimaryImageTag": if has_poster { json!(format!("tag_{}", id)) } else { "" }
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "SearchHints": hints, "TotalRecordCount": hints.len() }))
