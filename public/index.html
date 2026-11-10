@@ -523,7 +523,8 @@
                 item.media_streams.forEach(s => {
                     if (s.Type === 'VIDEO' || s.Type === 'Video') {
                         const title = s.DisplayTitle || `${s.Height}p ${s.Codec.toUpperCase()}`;
-                        const extra = [s.Profile, `${s.Width}x${s.Height}`, s.BitDepth ? `${s.BitDepth}bit` : '', s.VideoRange && s.VideoRange !== 'SDR' ? s.VideoRange : ''].filter(Boolean).join(' ');
+                        const res = s.Width && s.Height ? `${s.Width}x${s.Height}` : '';
+                        const extra = [s.Profile, res, s.VideoRange && s.VideoRange !== 'SDR' ? s.VideoRange : ''].filter(Boolean).join(' @ ');
                         html += `<div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
                             <div class="text-xs text-blue-400 font-bold mb-1 uppercase tracking-wider">视频流 VIDEO</div>
                             <div class="text-sm text-gray-200 mb-0.5 font-medium">${title}</div>
@@ -534,7 +535,7 @@
                         html += `<div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3">
                             <div class="text-xs text-green-400 font-bold mb-1 uppercase tracking-wider">音频流 AUDIO</div>
                             <div class="text-sm text-gray-200 mb-0.5 font-medium">${title}</div>
-                            <div class="text-xs text-gray-500">${s.Codec.toUpperCase()} ${s.Language || 'und'}</div>
+                            <div class="text-xs text-gray-500">语言: ${s.Language || 'und'}</div>
                         </div>`;
                     }
                 });
