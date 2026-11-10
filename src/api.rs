@@ -106,7 +106,10 @@ fn extract_extension_from_url(url: &str) -> String {
 }
 
 async fn resolve_qmediasync_url(client: &reqwest::Client, url: &str, ua: &str) -> Option<String> {
-    let resp = client.get(url).header(USER_AGENT, ua).send().await.ok()?;
+    let resp = client.get(url)
+        .header(USER_AGENT, ua)
+        .header(reqwest::header::RANGE, "bytes=0-0") // 终极杀招：只要 1 字节，骗 OpenList 吐 302
+        .send().await.ok()?;
     if resp.status().is_redirection() {
         resp.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok()).map(|s| s.to_string())
     } else {
@@ -865,7 +868,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                     let stream_url = format!("/Videos/{}/original.mp4?MediaSourceId={}_cd{}", id, id, i);
                     json!({
                         "Id": format!("{}_cd{}", id, i), "ItemId": id.to_string(),
-                        "Path": decode_url(&real_path), "DirectStreamUrl": stream_url,
+                        "Path": stream_url.clone(), "DirectStreamUrl": stream_url,
                         "Protocol": "Http", "Container": "mp4", "Name": title.clone(),
                         "Type": "Default", "VideoType": "VideoFile", "IsRemote": true,
                         "Bitrate": est_bitrate, "RunTimeTicks": run_time_ticks, "Size": size,
