@@ -88,75 +88,73 @@ pub async fn probe_strm(
     if !url.starts_with("http") { return Err("strm不是http链接".to_string()); }
 
     limiter.acquire().await;
+    let direct_url = {
+        let resp = client.get(&url)
+            .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .send().await.map_err(|e| format!("请求解析器失败: {}", e))?;
+        if resp.status().is_redirection() {
+            resp.headers().get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok()).map(|s| s.to_string())
+                .ok_or_else(|| "302缺少Location".to_string())?
+        } else {
+            let text = resp.text().await.unwrap_or_default();
+            if let Some(start) = text.find("href=\"") {
+                let rest = &text[start + 6..];
+                if let Some(end) = rest.find('\"') {
+                    rest[..end].replace("&amp;", "&")
+                } else { return Err("HTML中未找到完整的href".into()); }
+            } else if text.starts_with("http") { text.trim().to_string() } else { return Err("无法解析直链地址".into()); }
+        }
+    };
+
+    limiter.acquire().await;
     
-    // ===== 核心优化：下载头部 2MB + 尾部 2MB 拼接，专治 moov 在尾部的 MP4 =====
-    const CHUNK_SIZE: u64 = 2 * 1024 * 1024;
-    
-    // 1. 请求头部 2MB
-    let resp = client.get(&direct_url)
-        .header(reqwest::header::RANGE, format!("bytes=0-{}", CHUNK_SIZE - 1))
+    // 直接发带 Range 的 GET 请求，放弃不支持的 HEAD
+    let mut resp = client.get(&direct_url)
+        .header(reqwest::header::RANGE, "bytes=0-16777215")
         .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        .send().await.map_err(|e| format!("请求头部失败: {}", e))?;
+        .send().await.map_err(|e| format!("请求真实直链失败: {}", e))?;
 
-    if !resp.status().is_success() && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-        return Err(format!("HTTP状态异常: {}", resp.status()));
-    }
-
+    let status = resp.status();
     let content_type = resp.headers().get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+
     if content_type.contains("text/html") || content_type.contains("application/json") {
-        return Err("网盘返回了错误页面".to_string());
+        return Err(format!("网盘返回了错误页面 (类型: {})", content_type));
     }
 
-    // 获取总文件大小 (从 Content-Range 提取)
-    let mut total_size = 0u64;
+    if !status.is_success() && status != reqwest::StatusCode::PARTIAL_CONTENT {
+        return Err(format!("请求直链失败, HTTP状态: {}", status));
+    }
+
+    let mut size = 0u64;
     if let Some(cr) = resp.headers().get(reqwest::header::CONTENT_RANGE).and_then(|v| v.to_str().ok()) {
         if let Some(total) = cr.split('/').last() {
-            total_size = total.parse::<u64>().unwrap_or(0);
+            size = total.parse::<u64>().unwrap_or(0);
         }
     }
-    if total_size == 0 {
-        total_size = resp.headers().get(reqwest::header::CONTENT_LENGTH)
+    if size == 0 {
+        size = resp.headers().get(reqwest::header::CONTENT_LENGTH)
             .and_then(|v| v.to_str().ok()).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
     }
 
-    // 限制读取，防止网盘无视 Range 直接吐几十GB
-    let mut header_bytes = Vec::new();
-    let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        if let Ok(c) = chunk {
-            header_bytes.extend_from_slice(&c);
-            if header_bytes.len() as u64 >= CHUNK_SIZE { break; }
-        }
-    }
-
-    // 2. 如果文件足够大，请求尾部 2MB
-    let mut tail_bytes = Vec::new();
-    if total_size > CHUNK_SIZE * 2 {
-        let start = total_size - CHUNK_SIZE;
-        if let Ok(tail_resp) = client.get(&direct_url)
-            .header(reqwest::header::RANGE, format!("bytes={}-{}", start, total_size - 1))
-            .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            .send().await 
-        {
-            if tail_resp.status().is_success() || tail_resp.status() == reqwest::StatusCode::PARTIAL_CONTENT {
-                let mut t_stream = tail_resp.bytes_stream();
-                while let Some(chunk) = t_stream.next().await {
-                    if let Ok(c) = chunk {
-                        tail_bytes.extend_from_slice(&c);
-                        if tail_bytes.len() as u64 >= CHUNK_SIZE { break; }
-                    }
-                }
-            }
-        }
-    }
-
-    if header_bytes.is_empty() {
-        return Err("读取到的视频头数据为空".to_string());
+    if size < 1024 * 1024 { 
+        return Err(format!("文件大小异常: {} 字节", size)); 
     }
 
     let container = infer_container(&content_type, &direct_url);
     
+    // 流式读取前 16MB
+    let mut header_bytes = Vec::new();
+    while let Ok(Some(chunk)) = resp.chunk().await {
+        header_bytes.extend_from_slice(&chunk);
+        if header_bytes.len() >= 16777216 { break; }
+    }
+
+    if header_bytes.len() < 1024 {
+        return Err("读取到的视频头数据太小，无法解析".to_string());
+    }
+
     let mut media_streams = Value::Null;
     let mut default_audio_index = -1;
     let mut default_sub_index = -1;
@@ -164,11 +162,6 @@ pub async fn probe_strm(
     if header_bytes.len() > 1024 {
         if let Ok(mut temp_file) = NamedTempFile::new() {
             if temp_file.write_all(&header_bytes).is_ok() {
-                // 如果有尾部数据，使用 Seek 写到对应的文件偏移量
-                if !tail_bytes.is_empty() {
-                    let _ = temp_file.seek(SeekFrom::Start(total_size - tail_bytes.len() as u64));
-                    let _ = temp_file.write_all(&tail_bytes);
-                }
                 let temp_path = temp_file.path().to_owned();
                 if let Ok(Ok(parsed)) = tokio::task::spawn_blocking(move || parse_mediainfo(&temp_path)).await {
                     if let Some(ms) = parsed.get("MediaStreams") { media_streams = ms.clone(); }
@@ -179,7 +172,6 @@ pub async fn probe_strm(
         }
     }
 
-    // 如果解析失败，绝不伪造数据，直接返回空数组，让前端明显看出未探测到
     if media_streams.is_null() || media_streams.as_array().map_or(true, |a| a.is_empty()) {
         media_streams = json!([]);
     }
