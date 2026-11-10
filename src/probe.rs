@@ -86,20 +86,18 @@ pub async fn probe_strm(
 
     limiter.acquire().await;
     
-    // ===== 第一步：强制带上 Range 请求原 URL，骗过 OpenList 获取 302 =====
-    let mut req = client.get(&url)
+    // ===== 第一步：向原 URL 发起带 Range 的请求，强制获取真实直链 =====
+    let req = client.get(&url)
         .header(reqwest::header::RANGE, "bytes=0-16777215")
         .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
-
+    
     let resp = req.send().await.map_err(|e| format!("请求解析器失败: {}", e))?;
 
     let direct_url = if resp.status().is_redirection() {
-        // 完美拿到 302 跳转的真实 CDN 地址
         resp.headers().get(reqwest::header::LOCATION)
             .and_then(|v| v.to_str().ok()).map(|s| s.to_string())
             .unwrap_or_else(|| url.clone())
     } else {
-        // 如果是 200 OK，尝试从 HTML 中寻找 href
         let text = resp.text().await.unwrap_or_default();
         if let Some(start) = text.find("href=\"") {
             let rest = &text[start + 6..];
@@ -109,16 +107,16 @@ pub async fn probe_strm(
         } else if text.starts_with("http") {
             text.trim().to_string()
         } else {
-            // 既不是 302，也没有 href，说明原 URL 可能就是直链（比如 qmediasync）
             url.clone()
         }
     };
 
     limiter.acquire().await;
     
-    // ===== 第二步：请求真实直链获取数据 =====
-    let mut fetch_req = client.get(&direct_url)
-        .header(reqwest::header::RANGE, "bytes=0-16777215")
+    // ===== 第二步：请求真实直链，拉取头部 2MB =====
+    const CHUNK_SIZE: u64 = 2 * 1024 * 1024;
+    let fetch_req = client.get(&direct_url)
+        .header(reqwest::header::RANGE, format!("bytes=0-{}", CHUNK_SIZE - 1))
         .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
 
     let mut resp = fetch_req.send().await.map_err(|e| format!("请求真实直链失败: {}", e))?;
@@ -130,28 +128,54 @@ pub async fn probe_strm(
     if status == reqwest::StatusCode::FORBIDDEN {
         return Err("网盘 403 拦截 (链接可能过期)".to_string());
     }
-
     if content_type.contains("text/html") || content_type.contains("application/json") || content_type.contains("application/xml") {
         return Err(format!("网盘返回了错误页面 (类型: {})", content_type));
     }
-
     if !status.is_success() && status != reqwest::StatusCode::PARTIAL_CONTENT {
         return Err(format!("请求直链失败, HTTP状态: {}", status));
     }
 
-    let mut size = 0u64;
+    let mut total_size = 0u64;
     if let Some(cr) = resp.headers().get(reqwest::header::CONTENT_RANGE).and_then(|v| v.to_str().ok()) {
         if let Some(total) = cr.split('/').last() {
-            size = total.parse::<u64>().unwrap_or(0);
+            total_size = total.parse::<u64>().unwrap_or(0);
         }
     }
-    if size == 0 {
-        size = resp.headers().get(reqwest::header::CONTENT_LENGTH)
+    if total_size == 0 {
+        total_size = resp.headers().get(reqwest::header::CONTENT_LENGTH)
             .and_then(|v| v.to_str().ok()).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
     }
 
-    if size < 1024 * 1024 { 
-        return Err(format!("文件大小异常: {} 字节", size)); 
+    if total_size < 1024 * 1024 { 
+        return Err(format!("文件大小异常: {} 字节", total_size)); 
+    }
+
+    // 流式读取头部，防 OOM
+    let mut header_bytes = Vec::new();
+    while let Ok(Some(chunk)) = resp.chunk().await {
+        header_bytes.extend_from_slice(&chunk);
+        if header_bytes.len() as u64 >= CHUNK_SIZE { break; }
+    }
+
+    if header_bytes.is_empty() {
+        return Err("读取到的视频头数据为空".to_string());
+    }
+
+    // ===== 第三步：请求尾部 2MB =====
+    let mut tail_bytes = Vec::new();
+    if total_size > CHUNK_SIZE * 2 {
+        limiter.acquire().await;
+        let start = total_size - CHUNK_SIZE;
+        if let Ok(mut tail_resp) = client.get(&direct_url)
+            .header(reqwest::header::RANGE, format!("bytes={}-{}", start, total_size - 1))
+            .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .send().await 
+        {
+            while let Ok(Some(chunk)) = tail_resp.chunk().await {
+                tail_bytes.extend_from_slice(&chunk);
+                if tail_bytes.len() as u64 >= CHUNK_SIZE { break; }
+            }
+        }
     }
 
     let container = infer_container(&content_type, &direct_url);
@@ -160,25 +184,22 @@ pub async fn probe_strm(
     let mut default_audio_index = -1;
     let mut default_sub_index = -1;
 
-    // 3. 将头尾数据拼接到本地临时文件（使用标准库，零依赖）
+    // ===== 第四步：文件拼接解析 =====
     let temp_path = std::env::temp_dir().join(format!("rust_em_probe_{}.tmp", std::process::id()));
     if let Ok(mut file) = std::fs::File::create(&temp_path) {
-        use std::io::Write; // 仅在这里作用域引入
+        use std::io::Write;
+        use std::io::Seek;
         
-        // 先写入头部
         let _ = file.write_all(&header_bytes);
         
-        // 如果有尾部数据，并且文件确实很大，用标准库的 set_len 和 seek
         if !tail_bytes.is_empty() && total_size > (header_bytes.len() + tail_bytes.len()) as u64 {
             if file.set_len(total_size).is_ok() {
-                use std::io::Seek;
                 let _ = file.seek(std::io::SeekFrom::Start(total_size - tail_bytes.len() as u64));
                 let _ = file.write_all(&tail_bytes);
             }
         }
-        drop(file); // 关闭文件，确保数据落盘
+        drop(file);
 
-        // 4. 调用 mediainfo 解析拼接后的临时文件
         let path_clone = temp_path.clone();
         if let Ok(Ok(parsed)) = tokio::task::spawn_blocking(move || parse_mediainfo(&path_clone)).await {
             if let Some(ms) = parsed.get("MediaStreams") { media_streams = ms.clone(); }
