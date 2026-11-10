@@ -105,15 +105,10 @@ fn extract_extension_from_url(url: &str) -> String {
     "mp4".to_string()
 }
 
-pub async fn resolve_qmediasync_url(client: &reqwest::Client, url: &str, ua: &str) -> Option<String> {
-    // 带上 Range 请求头，强制 OpenList 吐出 302 真实地址
-    let resp = client.get(url)
-        .header(USER_AGENT, ua)
-        .header(reqwest::header::RANGE, "bytes=0-0")
-        .send().await.ok()?;
-        
+pub async fn resolve_qmediasync_url(client: &reqwest::Client, url: &str, _ua: &str) -> Option<String> {
+    let browser_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+    let resp = client.get(url).header(USER_AGENT, browser_ua).header(reqwest::header::RANGE, "bytes=0-0").send().await.ok()?;
     let status = resp.status();
-    
     if status.is_redirection() {
         println!("🎯 [RESOLVE] 成功获取 302 跳转！");
         resp.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok()).map(|s| s.to_string())
@@ -121,18 +116,10 @@ pub async fn resolve_qmediasync_url(client: &reqwest::Client, url: &str, ua: &st
         let text = resp.text().await.unwrap_or_default();
         if let Some(start) = text.find("href=\"") {
             let rest = &text[start + 6..];
-            if let Some(end) = rest.find('\"') {
-                println!("🎯 [RESOLVE] 成功从 HTML 中提取 href！");
-                Some(rest[..end].replace("&amp;", "&"))
-            } else { 
-                println!("❌ [RESOLVE] 找到了 href= 但没找到闭合引号");
-                None 
-            }
-        } else if text.starts_with("http") { 
-            println!("🎯 [RESOLVE] 成功提取纯文本 http 链接");
-            Some(text.trim().to_string()) 
-        } else { 
-            println!("❌ [RESOLVE] 解析失败！状态码: {}, 返回内容前 100 字: {}", status, text.chars().take(100).collect::<String>().replace("\n", ""));
+            if let Some(end) = rest.find('\"') { Some(rest[..end].replace("&amp;", "&")) } else { None }
+        } else if text.starts_with("http") { Some(text.trim().to_string()) } 
+        else { 
+            println!("❌ [RESOLVE] 解析失败！状态码: {}", status);
             None 
         }
     }
@@ -143,21 +130,17 @@ fn sanitize_media_streams(streams: &mut Value) {
         for (idx, stream) in arr.iter_mut().enumerate() {
             if let Some(obj) = stream.as_object_mut() {
                 obj.insert("Index".to_string(), json!(idx));
-
                 if let Some(Value::String(t)) = obj.get_mut("Type") {
                     *t = if t.eq_ignore_ascii_case("video") { "Video".to_string() }
                          else if t.eq_ignore_ascii_case("audio") { "Audio".to_string() }
                          else if t.eq_ignore_ascii_case("subtitle") { "Subtitle".to_string() }
                          else { t.clone() };
                 }
-
                 let stream_type = obj.get("Type").and_then(|v| v.as_str()).unwrap_or("");
                 let codec = obj.get("Codec").and_then(|v| v.as_str()).unwrap_or("unknown").to_uppercase();
                 let mut display_title = obj.get("DisplayTitle").and_then(|v| v.as_str()).unwrap_or("").to_string();
-
                 if stream_type == "Video" {
                     let depth = obj.get("BitDepth").and_then(|v| v.as_i64()).unwrap_or(0);
-                    
                     if display_title.is_empty() {
                         let w = obj.get("Width").and_then(|v| v.as_i64()).unwrap_or(0);
                         let h = obj.get("Height").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -165,10 +148,7 @@ fn sanitize_media_streams(streams: &mut Value) {
                         let p = if base >= 2160 { "2160p" } else if base >= 1080 { "1080p" } else if base >= 720 { "720p" } else { "SD" };
                         display_title = format!("{} {}", p, codec);
                     }
-                    
-                    if !display_title.contains("bit") && depth > 0 {
-                        display_title = format!("{} {}bit", display_title, depth);
-                    }
+                    if !display_title.contains("bit") && depth > 0 { display_title = format!("{} {}bit", display_title, depth); }
                 } else if stream_type == "Audio" {
                     if display_title.is_empty() || display_title.contains("Unknown") {
                         let ch = obj.get("Channels").and_then(|v| v.as_i64()).unwrap_or(2);
@@ -176,22 +156,12 @@ fn sanitize_media_streams(streams: &mut Value) {
                         display_title = format!("{} {}", codec, layout).trim().to_string();
                     }
                 }
-
                 obj.insert("DisplayTitle".to_string(), json!(display_title));
                 obj.remove("Title");
-
                 for k in &["AverageFrameRate", "RealFrameRate"] {
                     if let Some(v) = obj.get_mut(*k) {
                         let f = match v {
-                            Value::String(s) => {
-                                let s = s.trim();
-                                if s.is_empty() || s == "0/0" { 0.0 }
-                                else if let Some((num, den)) = s.split_once('/') {
-                                    let n = num.parse::<f64>().unwrap_or(0.0);
-                                    let d = den.parse::<f64>().unwrap_or(1.0);
-                                    if d > 0.0 { n / d } else { 0.0 }
-                                } else { s.parse::<f64>().unwrap_or(0.0) }
-                            }
+                            Value::String(s) => { let s = s.trim(); if s.is_empty() || s == "0/0" { 0.0 } else if let Some((num, den)) = s.split_once('/') { num.parse::<f64>().unwrap_or(0.0) / den.parse::<f64>().unwrap_or(1.0) } else { s.parse::<f64>().unwrap_or(0.0) } },
                             Value::Number(n) => n.as_f64().unwrap_or(0.0),
                             _ => 0.0,
                         };
@@ -200,37 +170,22 @@ fn sanitize_media_streams(streams: &mut Value) {
                 }
                 for k in &["BitRate", "BitDepth", "Width", "Height", "Level", "Channels", "SampleRate", "Index"] {
                     if let Some(v) = obj.get_mut(*k) {
-                        let i = match v {
-                            Value::String(s) => s.trim().parse::<i64>().unwrap_or(0),
-                            Value::Number(n) => n.as_i64().unwrap_or(0),
-                            _ => 0,
-                        };
+                        let i = match v { Value::String(s) => s.trim().parse::<i64>().unwrap_or(0), Value::Number(n) => n.as_i64().unwrap_or(0), _ => 0 };
                         *v = json!(i);
                     }
                 }
                 for k in &["IsDefault", "IsForced", "IsExternal"] {
-                    let b = match obj.get(*k) {
-                        Some(Value::Bool(b)) => *b,
-                        Some(Value::String(s)) => s.to_lowercase() == "true",
-                        _ => false,
-                    };
+                    let b = match obj.get(*k) { Some(Value::Bool(b)) => *b, Some(Value::String(s)) => s.to_lowercase() == "true", _ => false };
                     obj.insert(k.to_string(), json!(b));
                 }
             }
         }
     }
-    // 核心防线：递归清理所有的 null，全部替换为 ""，防止强类型客户端崩溃
     fn replace_null(v: &mut Value) {
         match v {
-            Value::Object(map) => {
-                for (_, val) in map.iter_mut() { replace_null(val); }
-            }
-            Value::Array(arr) => {
-                for val in arr.iter_mut() { replace_null(val); }
-            }
-            Value::Null => {
-                *v = Value::String("".to_string());
-            }
+            Value::Object(map) => { for (_, val) in map.iter_mut() { replace_null(val); } }
+            Value::Array(arr) => { for val in arr.iter_mut() { replace_null(val); } }
+            Value::Null => { *v = Value::String("".to_string()); }
             _ => {}
         }
     }
@@ -276,11 +231,7 @@ pub struct AddLibReq { name: String, paths: Vec<String>, #[serde(rename = "type"
 pub async fn add_library(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<AddLibReq>) -> impl IntoResponse {
     let pool_clone = pool.clone();
     tokio::task::spawn_blocking(move || {
-        let lib_id = {
-            let conn = pool_clone.lock().unwrap();
-            conn.execute("INSERT INTO libraries (name, path, type) VALUES (?1, ?2, ?3)", [&payload.name, &serde_json::to_string(&payload.paths).unwrap(), &payload.lib_type]).unwrap();
-            conn.last_insert_rowid()
-        };
+        let lib_id = { let conn = pool_clone.lock().unwrap(); conn.execute("INSERT INTO libraries (name, path, type) VALUES (?1, ?2, ?3)", [&payload.name, &serde_json::to_string(&payload.paths).unwrap(), &payload.lib_type]).unwrap(); conn.last_insert_rowid() };
         for path_str in payload.paths { scan_directory(pool_clone.clone(), lib_id, payload.lib_type.clone(), path_str); }
     }).await.unwrap();
     Json(json!({"status": "scanning"}))
@@ -440,6 +391,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         stills.sort();
         let stills_json = serde_json::to_string(&stills).unwrap_or_default();
         
+        // === 核心逻辑：JSON 绝对优先 ===
         let mediainfo_json_path = crate::probe::get_mediainfo_json_path(first_path);
         let (probe_size, probe_runtime_ticks, media_streams_json_str) = if mediainfo_json_path.exists() {
             if let Some(src) = crate::probe::load_cached_source(&mediainfo_json_path) {
@@ -456,10 +408,10 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         {
             let conn = match pool.lock() { Ok(c) => c, Err(_) => continue };
             let _ = conn.execute(
-                "INSERT INTO items (library_id, title, num, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name, strm_content, stills, parts, original_title, sort_title, country, language, writers, trailer, releasedate, media_streams) 
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40)
-                 ON CONFLICT(file_path) DO UPDATE SET title=excluded.title, num=excluded.num, size=excluded.size, mtime=excluded.mtime, plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, thumb_path=excluded.thumb_path, banner_path=excluded.banner_path, rating=excluded.rating, mpaa=excluded.mpaa, genres=excluded.genres, tags=excluded.tags, directors=excluded.directors, actors=excluded.actors, runtime=excluded.runtime, premiered=excluded.premiered, tagline=excluded.tagline, studios=excluded.studios, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, series=excluded.series, label=excluded.label, set_name=excluded.set_name, strm_content=excluded.strm_content, stills=excluded.stills, parts=excluded.parts, original_title=excluded.original_title, sort_title=excluded.sort_title, country=excluded.country, language=excluded.language, writers=excluded.writers, trailer=excluded.trailer, releasedate=excluded.releasedate, media_streams=excluded.media_streams",
-                rusqlite::params![lib_id, title, num, virtual_path, lib_type, plot, year, final_poster, final_fanart, logo, thumb, banner, final_size, mtime, rating, mpaa, genres, tags, directors, actors_json, final_runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name, strm_content, stills_json, parts_json, original_title, sort_title, country, language, writers, trailer, releasedate, media_streams_json_str]
+                "INSERT INTO items (library_id, title, num, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name, strm_content, stills, parts, original_title, sort_title, country, language, writers, trailer, releasedate, media_streams, run_time_ticks) 
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41)
+                 ON CONFLICT(file_path) DO UPDATE SET title=excluded.title, num=excluded.num, size=excluded.size, mtime=excluded.mtime, plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, thumb_path=excluded.thumb_path, banner_path=excluded.banner_path, rating=excluded.rating, mpaa=excluded.mpaa, genres=excluded.genres, tags=excluded.tags, directors=excluded.directors, actors=excluded.actors, runtime=excluded.runtime, premiered=excluded.premiered, tagline=excluded.tagline, studios=excluded.studios, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, series=excluded.series, label=excluded.label, set_name=excluded.set_name, strm_content=excluded.strm_content, stills=excluded.stills, parts=excluded.parts, original_title=excluded.original_title, sort_title=excluded.sort_title, country=excluded.country, language=excluded.language, writers=excluded.writers, trailer=excluded.trailer, releasedate=excluded.releasedate, media_streams=excluded.media_streams, run_time_ticks=excluded.run_time_ticks",
+                rusqlite::params![lib_id, title, num, virtual_path, lib_type, plot, year, final_poster, final_fanart, logo, thumb, banner, final_size, mtime, rating, mpaa, genres, tags, directors, actors_json, final_runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name, strm_content, stills_json, parts_json, original_title, sort_title, country, language, writers, trailer, releasedate, media_streams_json_str, probe_runtime_ticks]
             );
         }
     }
@@ -487,7 +439,8 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
         let mut media_streams: Value = serde_json::from_str(&row.get::<_, String>(27).unwrap_or_else(|_| "[]".to_string())).unwrap_or(json!([]));
         sanitize_media_streams(&mut media_streams);
         Ok(json!({
-            "id": row.get::<_, i64>(0).unwrap_or_default(), "title": row.get::<_, String>(1).unwrap_or_default(),
+            "id": row.get::<_, i64>(0).unwrap_or_default().to_string(), 
+            "title": row.get::<_, String>(1).unwrap_or_default(),
             "num": row.get::<_, String>(2).unwrap_or_default(), "type": row.get::<_, String>(3).unwrap_or_default(),
             "year": row.get::<_, String>(4).unwrap_or_default(), "plot": row.get::<_, String>(5).unwrap_or_default(),
             "has_poster": !row.get::<_, String>(6).unwrap_or_default().is_empty(), "rating": row.get::<_, f64>(7).unwrap_or(0.0),
@@ -783,7 +736,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
 
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let item_opt = conn.query_row(
-        "SELECT id, title, type, year, plot, poster_path, file_path, studios, parts, runtime, actors, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, series, label, set_name, tagline, tags, directors, num, stills, releasedate, original_title, sort_title, country, language, writers, trailer, media_streams, date_created, primary_image_aspect_ratio, original_language, fanart_path, logo_path, thumb_path, banner_path, strm_content FROM items WHERE id = ?1",
+        "SELECT id, title, type, year, plot, poster_path, file_path, studios, parts, runtime, actors, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, series, label, set_name, tagline, tags, directors, num, stills, releasedate, original_title, sort_title, country, language, writers, trailer, media_streams, date_created, primary_image_aspect_ratio, original_language, fanart_path, logo_path, thumb_path, banner_path, strm_content, run_time_ticks FROM items WHERE id = ?1",
         [id],
         |row| {
             let title: String = row.get(1).unwrap_or_default();
@@ -814,6 +767,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let releasedate: String = row.get(27).unwrap_or_default();
             let original_title: String = row.get(28).unwrap_or_default();
             let sort_title: String = row.get(29).unwrap_or_default();
+            let sort_title = if sort_title.is_empty() { title.clone() } else { sort_title };
             let country: String = row.get(30).unwrap_or_default();
             let language: String = row.get(31).unwrap_or_default();
             let _writers_str: String = row.get(32).unwrap_or_default();
@@ -826,6 +780,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let thumb_path: String = row.get(40).unwrap_or_default();
             let banner_path: String = row.get(41).unwrap_or_default();
             let strm_content: String = row.get(42).unwrap_or_default();
+            let exact_ticks: i64 = row.get(43).unwrap_or(0);
 
             let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
             let actors: Vec<Value> = serde_json::from_str(&actors_json).unwrap_or_default();
@@ -895,7 +850,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             }
 
             let date_created_ts = if date_created > 0 { date_created } else { mtime };
-            let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
+            let run_time_ticks = if exact_ticks > 0 { exact_ticks } else { (runtime as i64) * 60 * 10_000_000 };
             let est_bitrate = if size > 0 && run_time_ticks > 0 { (size * 8) / (run_time_ticks / 10_000_000) } else { 0 };
 
             let media_sources: Vec<Value> = if parts.is_empty() { vec![] } else {
@@ -918,9 +873,9 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
 
             Ok(json!({
                 "Id": id.to_string(), "ServerId": "rust-em-server", "Name": title.clone(),
-                "OriginalTitle": original_title,
-                "SortName": title.clone(),
-                "ForcedSortName": title.clone(),
+                "OriginalTitle": json!(original_title),
+                "SortName": json!(sort_title.clone()),
+                "ForcedSortName": json!(sort_title.clone()),
                 "Type": if typ == "movies" { "Movie" } else { "Series" },
                 "MediaType": "Video", "IsFolder": false, "Overview": plot,
                 "ProductionYear": year_str.parse::<i32>().unwrap_or(0), "PremiereDate": premiered, "ReleaseDate": releasedate,
@@ -929,17 +884,17 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 "Genres": genres_vec, "GenreItems": genre_items, "Tags": tags_vec, "TagItems": tag_items,
                 "Taglines": if tagline.is_empty() { json!([]) } else { json!([tagline]) },
                 "Studios": studios, "People": people,
-                "ProviderIds": { 
+                "ProviderIds": json!({ 
                     "Tmdb": tmdb_id, 
                     "Imdb": imdb_id,
                     "num": num
-                },
+                }),
                 "ImageTags": image_tags, "BackdropImageTags": backdrop_tags,
                 "PrimaryImageAspectRatio": if aspect_ratio > 0.0 { json!(aspect_ratio) } else { json!(0.6666666666666666) },
                 "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(),
-                "OriginalLanguage": if !original_language.is_empty() { original_language } else { language },
-                "SetName": set_name,
-                "SeriesName": if typ == "tvshows" { series } else { "".to_string() },
+                "OriginalLanguage": json!(if !original_language.is_empty() { original_language } else { language }),
+                "SetName": json!(set_name),
+                "SeriesName": json!(if typ == "tvshows" { series } else { "".to_string() }),
                 "Path": decode_url(&real_path), "Container": "mp4", "MediaSourceCount": media_sources.len(),
                 "MediaSources": media_sources,
                 "ProbeEngine": "rust-native", "LocationType": "FileSystem",
@@ -963,7 +918,6 @@ pub async fn emby_item_image_with_user(State(pool): State<Arc<Mutex<Connection>>
     emby_item_image_inner(pool, item_id, image_type, 0).await
 }
 
-
 pub async fn emby_playback_info(
     State(pool): State<Arc<Mutex<Connection>>>,
     AxumPath(item_id): AxumPath<i64>,
@@ -980,14 +934,16 @@ pub async fn emby_playback_info(
         }))
         .unwrap_or_default();
     
-    let (parts_json_opt, runtime, media_streams_json) = {
+    let (parts_json_opt, runtime, media_streams_json, size, exact_ticks) = {
         let conn = pool.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT parts, runtime, media_streams FROM items WHERE id = ?1").unwrap();
+        let mut stmt = conn.prepare("SELECT parts, runtime, media_streams, size, run_time_ticks FROM items WHERE id = ?1").unwrap();
         stmt.query_row([item_id], |row| Ok((
             row.get::<_, String>(0).ok(),
             row.get::<_, i32>(1).unwrap_or(0),
             row.get::<_, String>(2).unwrap_or_else(|_| "[]".to_string()),
-        ))).unwrap_or((None, 0, "[]".to_string()))
+            row.get::<_, i64>(3).unwrap_or(0),
+            row.get::<_, i64>(4).unwrap_or(0),
+        ))).unwrap_or((None, 0, "[]".to_string(), 0, 0))
     };
     let parts: Vec<String> = parts_json_opt.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default();
     let mut exts: Vec<String> = Vec::new();
@@ -999,9 +955,8 @@ pub async fn emby_playback_info(
         exts.push(ext);
     }
     let play_session_id = uuid::Uuid::new_v4().to_string();
-    let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
-    let estimated_size = if run_time_ticks > 0 { (run_time_ticks / 10_000_000) * 8_000_000 / 8 } else { 0 };
-
+    let run_time_ticks = if exact_ticks > 0 { exact_ticks } else { (runtime as i64) * 60 * 10_000_000 };
+    
     let mut parsed_streams: Value = serde_json::from_str(&media_streams_json).unwrap_or(json!([]));
     sanitize_media_streams(&mut parsed_streams);
     let final_streams = parsed_streams;
@@ -1013,7 +968,7 @@ pub async fn emby_playback_info(
             "Id": format!("{}_cd{}", item_id, i), "PlaySessionId": play_session_id.clone(),
             "Path": stream_url.clone(), "DirectStreamUrl": stream_url,
             "Protocol": "Http", "Container": ext, "Name": "Direct Play", "Type": "Default", "VideoType": "VideoFile",
-            "IsRemote": true, "RunTimeTicks": run_time_ticks, "Size": estimated_size, "Bitrate": 8000000,
+            "IsRemote": true, "RunTimeTicks": run_time_ticks, "Size": size, "Bitrate": 0,
             "DefaultAudioStreamIndex": 1, "DefaultSubtitleStreamIndex": -1,
             "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsProbing": true, "SupportsTranscoding": false,
             "SupportsExternalStream": false, "IsInfiniteStream": false,
