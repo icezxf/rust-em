@@ -85,79 +85,73 @@ pub async fn probe_strm(
     if !url.starts_with("http") { return Err("strm不是http链接".to_string()); }
 
     limiter.acquire().await;
-    let direct_url = {
-        let resp = client.get(&url)
-            .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            .send().await.map_err(|e| format!("请求解析器失败: {}", e))?;
-        if resp.status().is_redirection() {
-            resp.headers().get(reqwest::header::LOCATION)
-                .and_then(|v| v.to_str().ok()).map(|s| s.to_string())
-                .ok_or_else(|| "302缺少Location".to_string())?
+    
+    // ===== 第一步：强制带上 Range 请求原 URL，骗过 OpenList 获取 302 =====
+    let mut req = client.get(&url)
+        .header(reqwest::header::RANGE, "bytes=0-16777215")
+        .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+
+    let resp = req.send().await.map_err(|e| format!("请求解析器失败: {}", e))?;
+
+    let direct_url = if resp.status().is_redirection() {
+        // 完美拿到 302 跳转的真实 CDN 地址
+        resp.headers().get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok()).map(|s| s.to_string())
+            .unwrap_or_else(|| url.clone())
+    } else {
+        // 如果是 200 OK，尝试从 HTML 中寻找 href
+        let text = resp.text().await.unwrap_or_default();
+        if let Some(start) = text.find("href=\"") {
+            let rest = &text[start + 6..];
+            if let Some(end) = rest.find('\"') {
+                rest[..end].replace("&amp;", "&")
+            } else { url.clone() }
+        } else if text.starts_with("http") {
+            text.trim().to_string()
         } else {
-            let text = resp.text().await.unwrap_or_default();
-            if let Some(start) = text.find("href=\"") {
-                let rest = &text[start + 6..];
-                if let Some(end) = rest.find('\"') {
-                    rest[..end].replace("&amp;", "&")
-                } else { return Err("HTML中未找到完整的href".into()); }
-            } else if text.starts_with("http") { text.trim().to_string() } else { return Err("无法解析直链地址".into()); }
+            // 既不是 302，也没有 href，说明原 URL 可能就是直链（比如 qmediasync）
+            url.clone()
         }
     };
 
     limiter.acquire().await;
     
-    // ===== 核心优化：下载头部 2MB + 尾部 2MB =====
-    const CHUNK_SIZE: u64 = 2 * 1024 * 1024; // 2MB
-    
-    // 1. 请求头部
-    let mut resp = client.get(&direct_url)
-        .header(reqwest::header::RANGE, format!("bytes=0-{}", CHUNK_SIZE - 1))
-        .header(reqwest::header::USER_AGENT, "Mozilla/5.0")
-        .send().await.map_err(|e| format!("请求头部失败: {}", e))?;
+    // ===== 第二步：请求真实直链获取数据 =====
+    let mut fetch_req = client.get(&direct_url)
+        .header(reqwest::header::RANGE, "bytes=0-16777215")
+        .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
 
+    let mut resp = fetch_req.send().await.map_err(|e| format!("请求真实直链失败: {}", e))?;
+
+    let status = resp.status();
     let content_type = resp.headers().get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-    if content_type.contains("text/html") || content_type.contains("application/json") {
-        return Err("网盘返回了错误页面".to_string());
+
+    if status == reqwest::StatusCode::FORBIDDEN {
+        return Err("网盘 403 拦截 (链接可能过期)".to_string());
     }
 
-    // 获取文件总大小
-    let mut total_size = 0u64;
+    if content_type.contains("text/html") || content_type.contains("application/json") || content_type.contains("application/xml") {
+        return Err(format!("网盘返回了错误页面 (类型: {})", content_type));
+    }
+
+    if !status.is_success() && status != reqwest::StatusCode::PARTIAL_CONTENT {
+        return Err(format!("请求直链失败, HTTP状态: {}", status));
+    }
+
+    let mut size = 0u64;
     if let Some(cr) = resp.headers().get(reqwest::header::CONTENT_RANGE).and_then(|v| v.to_str().ok()) {
         if let Some(total) = cr.split('/').last() {
-            total_size = total.parse::<u64>().unwrap_or(0);
+            size = total.parse::<u64>().unwrap_or(0);
         }
     }
-    if total_size == 0 {
-        total_size = resp.headers().get(reqwest::header::CONTENT_LENGTH)
+    if size == 0 {
+        size = resp.headers().get(reqwest::header::CONTENT_LENGTH)
             .and_then(|v| v.to_str().ok()).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
     }
 
-    // 流式读取头部，强行掐断防 OOM
-    let mut header_bytes = Vec::new();
-    while let Ok(Some(chunk)) = resp.chunk().await {
-        header_bytes.extend_from_slice(&chunk);
-        if header_bytes.len() as u64 >= CHUNK_SIZE { break; }
-    }
-
-    // 2. 请求尾部
-    let mut tail_bytes = Vec::new();
-    if total_size > CHUNK_SIZE * 2 {
-        let start = total_size - CHUNK_SIZE;
-        if let Ok(mut tail_resp) = client.get(&direct_url)
-            .header(reqwest::header::RANGE, format!("bytes={}-{}", start, total_size - 1))
-            .header(reqwest::header::USER_AGENT, "Mozilla/5.0")
-            .send().await 
-        {
-            while let Ok(Some(chunk)) = tail_resp.chunk().await {
-                tail_bytes.extend_from_slice(&chunk);
-                if tail_bytes.len() as u64 >= CHUNK_SIZE { break; }
-            }
-        }
-    }
-
-    if header_bytes.is_empty() {
-        return Err("读取到的视频头数据为空".to_string());
+    if size < 1024 * 1024 { 
+        return Err(format!("文件大小异常: {} 字节", size)); 
     }
 
     let container = infer_container(&content_type, &direct_url);
