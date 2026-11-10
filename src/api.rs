@@ -603,16 +603,45 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
 }
 
 pub async fn emby_items_latest(State(_pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_items_resume(_: AxumPath<String>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_items_next_up(_: AxumPath<String>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-pub struct EmbyItemsQuery { 
-    #[serde(rename = "ParentId")] parent_id: Option<String>,
-    #[serde(rename = "ListItemIds")] list_item_ids: Option<String>,
-    #[serde(rename = "StartIndex")] start_index: Option<i64>,
-    #[serde(rename = "Limit")] limit: Option<i64>,
+pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks FROM items WHERE playback_ticks > 0 ORDER BY updated_at DESC LIMIT 30").unwrap();
+    
+    let items: Vec<Value> = stmt.query_map([], |row| {
+        let id: i64 = row.get(0).unwrap_or_default();
+        let poster_path: String = row.get(5).unwrap_or_default();
+        let has_poster = !poster_path.is_empty();
+        let poster_tag = if has_poster {
+            let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
+            let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+            format!("tag_{}_{}", id, &hash_hex[..8])
+        } else { String::new() };
+        
+        let playback_ticks: i64 = row.get(18).unwrap_or(0);
+        let runtime_mins: i32 = row.get(7).unwrap_or(0);
+        let total_ticks: i64 = (runtime_mins as i64) * 60 * 10_000_000;
+        
+        Ok(json!({
+            "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
+            "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
+            "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
+            "Overview": row.get::<_, String>(4).unwrap_or_default(), 
+            "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0), 
+            "RunTimeTicks": total_ticks,
+            "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
+            "BackdropImageTags": [],
+            "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
+            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
+            "UserData": { 
+                "PlaybackPositionTicks": playback_ticks, 
+                "PlayCount": 1, 
+                "IsFavorite": false, 
+                "Played": false 
+            }
+        }))
+    }).unwrap().filter_map(Result::ok).collect();
+    
+    Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
 pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
@@ -1082,26 +1111,19 @@ pub async fn emby_action() -> impl IntoResponse { StatusCode::OK.into_response()
 pub async fn emby_action_with_path(_: AxumPath<(String, String)>) -> impl IntoResponse { StatusCode::OK.into_response() }
 pub async fn emby_sessions() -> impl IntoResponse { Json(json!([])) }
 pub async fn emby_playing() -> impl IntoResponse { StatusCode::OK.into_response() }
-pub async fn emby_playing_progress() -> impl IntoResponse { StatusCode::OK.into_response() }
-pub async fn emby_playing_stopped() -> impl IntoResponse { StatusCode::OK.into_response() }
-
-pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
-    let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path, rating FROM items WHERE id != ?1 ORDER BY RANDOM() LIMIT 6").unwrap();
-    let items: Vec<Value> = stmt.query_map([item_id], |row| {
-        let id: i64 = row.get(0).unwrap_or_default();
-        let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
-        Ok(json!({
-            "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(),
-            "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
-            "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
-            "Overview": row.get::<_, String>(4).unwrap_or_default(),
-            "CommunityRating": row.get::<_, f64>(6).unwrap_or(0.0),
-            "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) },
-            "BackdropImageTags": []
-        }))
-    }).unwrap().filter_map(Result::ok).collect();
-    Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
+pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, body: Bytes) -> impl IntoResponse {
+    if let Ok(val) = serde_json::from_slice::<Value>(&body) {
+        if let Some(item_id_str) = val["ItemId"].as_str() {
+            if let Ok(item_id) = item_id_str.parse::<i64>() {
+                let ticks = val["PositionTicks"].as_i64().unwrap_or(0);
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+                let conn = pool.lock().unwrap();
+                let _ = conn.execute("UPDATE items SET playback_ticks = ?1, updated_at = ?2 WHERE id = ?3", [ticks, now, item_id]);
+                println!("💾 [PROGRESS] 保存进度: ItemId={}, Ticks={}", item_id, ticks);
+            }
+        }
+    }
+    StatusCode::OK.into_response()
 }
 
 pub async fn emby_thumbnail_set(AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
