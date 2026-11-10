@@ -181,6 +181,7 @@ fn sanitize_media_streams(streams: &mut Value) {
             }
         }
     }
+    // 递归清理所有的 null，替换为空字符串 ""
     fn replace_null(v: &mut Value) {
         match v {
             Value::Object(map) => { for (_, val) in map.iter_mut() { replace_null(val); } }
@@ -391,27 +392,29 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         stills.sort();
         let stills_json = serde_json::to_string(&stills).unwrap_or_default();
         
-        // === 核心逻辑：JSON 绝对优先 ===
+        // === JSON 优先读取时长，但不存新字段，只存 runtime ===
         let mediainfo_json_path = crate::probe::get_mediainfo_json_path(first_path);
-        let (probe_size, probe_runtime_ticks, media_streams_json_str) = if mediainfo_json_path.exists() {
+        let (probe_size, media_streams_json_str) = if mediainfo_json_path.exists() {
             if let Some(src) = crate::probe::load_cached_source(&mediainfo_json_path) {
                 let s = src.get("Size").and_then(|v| v.as_i64()).unwrap_or(0);
-                let rt = src.get("RunTimeTicks").and_then(|v| v.as_i64()).unwrap_or(0);
                 let ms = src.get("MediaStreams").cloned().unwrap_or(json!([]));
                 let ms_str = serde_json::to_string(&ms).unwrap_or_else(|_| "[]".to_string());
-                (s, rt, ms_str)
-            } else { (0, 0, "[]".to_string()) }
-        } else { (0, 0, "[]".to_string()) };
+                // 如果 JSON 里有精确时长，覆盖 runtime
+                if let Some(rt_ticks) = src.get("RunTimeTicks").and_then(|v| v.as_i64()) {
+                    if rt_ticks > 0 { runtime = (rt_ticks / 10_000_000 / 60) as i32; }
+                }
+                (s, ms_str)
+            } else { (0, "[]".to_string()) }
+        } else { (0, "[]".to_string()) };
         let final_size = if probe_size > 0 { probe_size } else { size };
-        let final_runtime = if probe_runtime_ticks > 0 { (probe_runtime_ticks / 10_000_000 / 60) as i32 } else { runtime };
 
         {
             let conn = match pool.lock() { Ok(c) => c, Err(_) => continue };
             let _ = conn.execute(
-                "INSERT INTO items (library_id, title, num, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name, strm_content, stills, parts, original_title, sort_title, country, language, writers, trailer, releasedate, media_streams, run_time_ticks) 
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41)
-                 ON CONFLICT(file_path) DO UPDATE SET title=excluded.title, num=excluded.num, size=excluded.size, mtime=excluded.mtime, plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, thumb_path=excluded.thumb_path, banner_path=excluded.banner_path, rating=excluded.rating, mpaa=excluded.mpaa, genres=excluded.genres, tags=excluded.tags, directors=excluded.directors, actors=excluded.actors, runtime=excluded.runtime, premiered=excluded.premiered, tagline=excluded.tagline, studios=excluded.studios, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, series=excluded.series, label=excluded.label, set_name=excluded.set_name, strm_content=excluded.strm_content, stills=excluded.stills, parts=excluded.parts, original_title=excluded.original_title, sort_title=excluded.sort_title, country=excluded.country, language=excluded.language, writers=excluded.writers, trailer=excluded.trailer, releasedate=excluded.releasedate, media_streams=excluded.media_streams, run_time_ticks=excluded.run_time_ticks",
-                rusqlite::params![lib_id, title, num, virtual_path, lib_type, plot, year, final_poster, final_fanart, logo, thumb, banner, final_size, mtime, rating, mpaa, genres, tags, directors, actors_json, final_runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name, strm_content, stills_json, parts_json, original_title, sort_title, country, language, writers, trailer, releasedate, media_streams_json_str, probe_runtime_ticks]
+                "INSERT INTO items (library_id, title, num, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name, strm_content, stills, parts, original_title, sort_title, country, language, writers, trailer, releasedate, media_streams) 
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40)
+                 ON CONFLICT(file_path) DO UPDATE SET title=excluded.title, num=excluded.num, size=excluded.size, mtime=excluded.mtime, plot=excluded.plot, year=excluded.year, poster_path=excluded.poster_path, fanart_path=excluded.fanart_path, logo_path=excluded.logo_path, thumb_path=excluded.thumb_path, banner_path=excluded.banner_path, rating=excluded.rating, mpaa=excluded.mpaa, genres=excluded.genres, tags=excluded.tags, directors=excluded.directors, actors=excluded.actors, runtime=excluded.runtime, premiered=excluded.premiered, tagline=excluded.tagline, studios=excluded.studios, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, series=excluded.series, label=excluded.label, set_name=excluded.set_name, strm_content=excluded.strm_content, stills=excluded.stills, parts=excluded.parts, original_title=excluded.original_title, sort_title=excluded.sort_title, country=excluded.country, language=excluded.language, writers=excluded.writers, trailer=excluded.trailer, releasedate=excluded.releasedate, media_streams=excluded.media_streams",
+                rusqlite::params![lib_id, title, num, virtual_path, lib_type, plot, year, final_poster, final_fanart, logo, thumb, banner, final_size, mtime, rating, mpaa, genres, tags, directors, actors_json, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name, strm_content, stills_json, parts_json, original_title, sort_title, country, language, writers, trailer, releasedate, media_streams_json_str]
             );
         }
     }
@@ -736,7 +739,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
 
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let item_opt = conn.query_row(
-        "SELECT id, title, type, year, plot, poster_path, file_path, studios, parts, runtime, actors, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, series, label, set_name, tagline, tags, directors, num, stills, releasedate, original_title, sort_title, country, language, writers, trailer, media_streams, date_created, primary_image_aspect_ratio, original_language, fanart_path, logo_path, thumb_path, banner_path, strm_content, run_time_ticks FROM items WHERE id = ?1",
+        "SELECT id, title, type, year, plot, poster_path, file_path, studios, parts, runtime, actors, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, series, label, set_name, tagline, tags, directors, num, stills, releasedate, original_title, sort_title, country, language, writers, trailer, media_streams, date_created, primary_image_aspect_ratio, original_language, fanart_path, logo_path, thumb_path, banner_path, strm_content FROM items WHERE id = ?1",
         [id],
         |row| {
             let title: String = row.get(1).unwrap_or_default();
@@ -780,7 +783,6 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let thumb_path: String = row.get(40).unwrap_or_default();
             let banner_path: String = row.get(41).unwrap_or_default();
             let strm_content: String = row.get(42).unwrap_or_default();
-            let exact_ticks: i64 = row.get(43).unwrap_or(0);
 
             let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
             let actors: Vec<Value> = serde_json::from_str(&actors_json).unwrap_or_default();
@@ -850,7 +852,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             }
 
             let date_created_ts = if date_created > 0 { date_created } else { mtime };
-            let run_time_ticks = if exact_ticks > 0 { exact_ticks } else { (runtime as i64) * 60 * 10_000_000 };
+            let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
             let est_bitrate = if size > 0 && run_time_ticks > 0 { (size * 8) / (run_time_ticks / 10_000_000) } else { 0 };
 
             let media_sources: Vec<Value> = if parts.is_empty() { vec![] } else {
@@ -934,16 +936,15 @@ pub async fn emby_playback_info(
         }))
         .unwrap_or_default();
     
-    let (parts_json_opt, runtime, media_streams_json, size, exact_ticks) = {
+    let (parts_json_opt, runtime, media_streams_json, size) = {
         let conn = pool.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT parts, runtime, media_streams, size, run_time_ticks FROM items WHERE id = ?1").unwrap();
+        let mut stmt = conn.prepare("SELECT parts, runtime, media_streams, size FROM items WHERE id = ?1").unwrap();
         stmt.query_row([item_id], |row| Ok((
             row.get::<_, String>(0).ok(),
             row.get::<_, i32>(1).unwrap_or(0),
             row.get::<_, String>(2).unwrap_or_else(|_| "[]".to_string()),
             row.get::<_, i64>(3).unwrap_or(0),
-            row.get::<_, i64>(4).unwrap_or(0),
-        ))).unwrap_or((None, 0, "[]".to_string(), 0, 0))
+        ))).unwrap_or((None, 0, "[]".to_string(), 0))
     };
     let parts: Vec<String> = parts_json_opt.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default();
     let mut exts: Vec<String> = Vec::new();
@@ -955,7 +956,7 @@ pub async fn emby_playback_info(
         exts.push(ext);
     }
     let play_session_id = uuid::Uuid::new_v4().to_string();
-    let run_time_ticks = if exact_ticks > 0 { exact_ticks } else { (runtime as i64) * 60 * 10_000_000 };
+    let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
     
     let mut parsed_streams: Value = serde_json::from_str(&media_streams_json).unwrap_or(json!([]));
     sanitize_media_streams(&mut parsed_streams);
