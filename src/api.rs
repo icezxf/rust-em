@@ -1066,6 +1066,13 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
     let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     
+    let item_title = {
+        let conn = pool.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT title FROM items WHERE id = ?1").unwrap();
+        stmt.query_row([item_id], |r| r.get::<_, String>(0)).unwrap_or_else(|_| "未知影片".to_string())
+    };
+    println!("🎬 [PLAY] 收到播放请求: 《{}》 (ID: {})", item_title, item_id);
+    
     let part_idx = if let Some(p) = query.get("part") { p.parse::<usize>().unwrap_or(0) }
     else if let Some(msid) = query.get("MediaSourceId").or_else(|| query.get("mediaSourceId")) {
         msid.split('_').last().and_then(|s| s.replace("cd", "").parse::<usize>().ok()).unwrap_or(0)
@@ -1077,6 +1084,7 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
         let cache_lock = cache.lock().unwrap(); 
         if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) { 
             if Instant::now() < *expire_at { 
+                println!("⚡ [PLAY] 命中缓存，直接 302 到: {}", cached_url);
                 return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); 
             } 
         } 
@@ -1100,6 +1108,7 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
     let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(15)).build().unwrap();
     let final_url = resolve_qmediasync_url(&client, url, ua).await.unwrap_or_else(|| url.to_string());
     
+    println!("🎯 [302 REDIRECT] 真实网盘地址: {}", final_url);
     { let mut cache_lock = cache.lock().unwrap(); cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(300))); }
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
 }
