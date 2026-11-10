@@ -173,13 +173,9 @@ pub async fn probe_strm(
         }
     }
 
-    // 如果解析失败，用兜底完美数据
+    // 如果解析失败，绝不伪造数据，直接返回空数组，让前端明显看出未探测到
     if media_streams.is_null() || media_streams.as_array().map_or(true, |a| a.is_empty()) {
-        media_streams = json!([
-            { "Type": "Video", "Index": 0, "Codec": "h264", "Profile": "Main", "Level": 41, "Width": 1920, "Height": 1080, "BitDepth": 8, "DisplayTitle": "1080p H264", "Title": "1080p H264", "AspectRatio": "16:9", "IsAnamorphic": false, "IsDefault": true, "IsForced": false, "IsExternal": false, "Language": "und" },
-            { "Type": "Audio", "Index": 1, "Codec": "aac", "Channels": 2, "ChannelLayout": "stereo", "BitRate": 192000, "SampleRate": 48000, "DisplayTitle": "AAC stereo", "Title": "AAC stereo", "IsDefault": true, "IsForced": false, "IsExternal": false, "Language": "und" }
-        ]);
-        default_audio_index = 1;
+        media_streams = json!([]);
     }
 
     let media_source = json!({

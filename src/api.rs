@@ -973,14 +973,7 @@ pub async fn emby_playback_info(
 
     let mut parsed_streams: Value = serde_json::from_str(&media_streams_json).unwrap_or(json!([]));
     sanitize_media_streams(&mut parsed_streams);
-    let final_streams = if parsed_streams.as_array().map_or(true, |a| a.is_empty()) {
-        json!([
-            {"Type": "Video", "Index": 0, "Codec": "h264", "DisplayTitle": "1080p H264", "Width": 1920, "Height": 1080, "BitRate": 8000000, "BitDepth": 8, "RealFrameRate": 24.0, "AverageFrameRate": 24.0, "Profile": "high", "Level": 41, "IsDefault": true, "IsForced": false, "IsExternal": false},
-            {"Type": "Audio", "Index": 1, "Codec": "aac", "DisplayTitle": "AAC 2.0", "Channels": 2, "BitRate": 192000, "SampleRate": 48000, "Profile": "LC", "IsDefault": true, "IsForced": false, "IsExternal": false}
-        ])
-    } else {
-        parsed_streams
-    };
+    let final_streams = parsed_streams; // 绝不造假，原样透传
 
     let prefetch = {
         let conn = pool.lock().unwrap();
