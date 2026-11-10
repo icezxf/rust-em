@@ -219,6 +219,22 @@ fn sanitize_media_streams(streams: &mut Value) {
             }
         }
     }
+    // 核心防线：递归清理所有的 null，全部替换为 ""，防止强类型客户端崩溃
+    fn replace_null(v: &mut Value) {
+        match v {
+            Value::Object(map) => {
+                for (_, val) in map.iter_mut() { replace_null(val); }
+            }
+            Value::Array(arr) => {
+                for val in arr.iter_mut() { replace_null(val); }
+            }
+            Value::Null => {
+                *v = Value::String("".to_string());
+            }
+            _ => {}
+        }
+    }
+    replace_null(streams);
 }
 
 // ======= Web API =======
@@ -902,7 +918,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
 
             Ok(json!({
                 "Id": id.to_string(), "ServerId": "rust-em-server", "Name": title.clone(),
-                "OriginalTitle": "",
+                "OriginalTitle": original_title,
                 "SortName": title.clone(),
                 "ForcedSortName": title.clone(),
                 "Type": if typ == "movies" { "Movie" } else { "Series" },
@@ -914,16 +930,16 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 "Taglines": if tagline.is_empty() { json!([]) } else { json!([tagline]) },
                 "Studios": studios, "People": people,
                 "ProviderIds": { 
-                    "Tmdb": if tmdb_id.is_empty() { "" } else { json!(tmdb_id) }, 
-                    "Imdb": if imdb_id.is_empty() { "" } else { json!(imdb_id) },
-                    "num": if num.is_empty() { "" } else { json!(num) }
+                    "Tmdb": tmdb_id, 
+                    "Imdb": imdb_id,
+                    "num": num
                 },
                 "ImageTags": image_tags, "BackdropImageTags": backdrop_tags,
                 "PrimaryImageAspectRatio": if aspect_ratio > 0.0 { json!(aspect_ratio) } else { json!(0.6666666666666666) },
                 "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(),
                 "OriginalLanguage": if !original_language.is_empty() { original_language } else { language },
                 "SetName": set_name,
-                "SeriesName": "",
+                "SeriesName": if typ == "tvshows" { series } else { "".to_string() },
                 "Path": decode_url(&real_path), "Container": "mp4", "MediaSourceCount": media_sources.len(),
                 "MediaSources": media_sources,
                 "ProbeEngine": "rust-native", "LocationType": "FileSystem",
