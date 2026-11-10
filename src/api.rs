@@ -107,8 +107,8 @@ fn extract_extension_from_url(url: &str) -> String {
 }
 
 pub async fn resolve_qmediasync_url(client: &reqwest::Client, url: &str, ua: &str) -> Option<String> {
-    let browser_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-    let resp = client.get(url).header(USER_AGENT, browser_ua).send().await.ok()?;
+    // 关键修复：使用客户端原本的 UA 去请求 OpenList，确保 115 等网盘的 CDN 链接不会因 UA 错乱而失效
+    let resp = client.get(url).header(USER_AGENT, ua).send().await.ok()?;
     let status = resp.status();
     if status.is_redirection() {
         println!("🎯 [RESOLVE] 成功获取 302 跳转！");
@@ -182,7 +182,6 @@ fn sanitize_media_streams(streams: &mut Value) {
             }
         }
     }
-    // 核心防线：递归清理所有的 null，替换为空字符串 ""
     fn replace_null(v: &mut Value) {
         match v {
             Value::Object(map) => { for (_, val) in map.iter_mut() { replace_null(val); } }
@@ -393,7 +392,6 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         stills.sort();
         let stills_json = serde_json::to_string(&stills).unwrap_or_default();
         
-        // === JSON 优先读取时长，但不存新字段，只存 runtime ===
         let mediainfo_json_path = crate::probe::get_mediainfo_json_path(first_path);
         let (probe_size, media_streams_json_str) = if mediainfo_json_path.exists() {
             if let Some(src) = crate::probe::load_cached_source(&mediainfo_json_path) {
