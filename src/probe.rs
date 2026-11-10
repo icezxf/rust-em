@@ -109,67 +109,92 @@ pub async fn probe_strm(
 
     limiter.acquire().await;
     
-    // 直接发带 Range 的 GET 请求，放弃不支持的 HEAD
+    // ===== 核心优化：下载头部 2MB + 尾部 2MB =====
+    const CHUNK_SIZE: u64 = 2 * 1024 * 1024; // 2MB
+    
+    // 1. 请求头部
     let mut resp = client.get(&direct_url)
-        .header(reqwest::header::RANGE, "bytes=0-16777215")
-        .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        .send().await.map_err(|e| format!("请求真实直链失败: {}", e))?;
+        .header(reqwest::header::RANGE, format!("bytes=0-{}", CHUNK_SIZE - 1))
+        .header(reqwest::header::USER_AGENT, "Mozilla/5.0")
+        .send().await.map_err(|e| format!("请求头部失败: {}", e))?;
 
-    let status = resp.status();
     let content_type = resp.headers().get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-
     if content_type.contains("text/html") || content_type.contains("application/json") {
-        return Err(format!("网盘返回了错误页面 (类型: {})", content_type));
+        return Err("网盘返回了错误页面".to_string());
     }
 
-    if !status.is_success() && status != reqwest::StatusCode::PARTIAL_CONTENT {
-        return Err(format!("请求直链失败, HTTP状态: {}", status));
-    }
-
-    let mut size = 0u64;
+    // 获取文件总大小
+    let mut total_size = 0u64;
     if let Some(cr) = resp.headers().get(reqwest::header::CONTENT_RANGE).and_then(|v| v.to_str().ok()) {
         if let Some(total) = cr.split('/').last() {
-            size = total.parse::<u64>().unwrap_or(0);
+            total_size = total.parse::<u64>().unwrap_or(0);
         }
     }
-    if size == 0 {
-        size = resp.headers().get(reqwest::header::CONTENT_LENGTH)
+    if total_size == 0 {
+        total_size = resp.headers().get(reqwest::header::CONTENT_LENGTH)
             .and_then(|v| v.to_str().ok()).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
     }
 
-    if size < 1024 * 1024 { 
-        return Err(format!("文件大小异常: {} 字节", size)); 
+    // 流式读取头部，强行掐断防 OOM
+    let mut header_bytes = Vec::new();
+    while let Ok(Some(chunk)) = resp.chunk().await {
+        header_bytes.extend_from_slice(&chunk);
+        if header_bytes.len() as u64 >= CHUNK_SIZE { break; }
+    }
+
+    // 2. 请求尾部
+    let mut tail_bytes = Vec::new();
+    if total_size > CHUNK_SIZE * 2 {
+        let start = total_size - CHUNK_SIZE;
+        if let Ok(mut tail_resp) = client.get(&direct_url)
+            .header(reqwest::header::RANGE, format!("bytes={}-{}", start, total_size - 1))
+            .header(reqwest::header::USER_AGENT, "Mozilla/5.0")
+            .send().await 
+        {
+            while let Ok(Some(chunk)) = tail_resp.chunk().await {
+                tail_bytes.extend_from_slice(&chunk);
+                if tail_bytes.len() as u64 >= CHUNK_SIZE { break; }
+            }
+        }
+    }
+
+    if header_bytes.is_empty() {
+        return Err("读取到的视频头数据为空".to_string());
     }
 
     let container = infer_container(&content_type, &direct_url);
     
-    // 流式读取前 16MB
-    let mut header_bytes = Vec::new();
-    while let Ok(Some(chunk)) = resp.chunk().await {
-        header_bytes.extend_from_slice(&chunk);
-        if header_bytes.len() >= 16777216 { break; }
-    }
-
-    if header_bytes.len() < 1024 {
-        return Err("读取到的视频头数据太小，无法解析".to_string());
-    }
-
     let mut media_streams = Value::Null;
     let mut default_audio_index = -1;
     let mut default_sub_index = -1;
 
-    if header_bytes.len() > 1024 {
-        if let Ok(mut temp_file) = NamedTempFile::new() {
-            if temp_file.write_all(&header_bytes).is_ok() {
-                let temp_path = temp_file.path().to_owned();
-                if let Ok(Ok(parsed)) = tokio::task::spawn_blocking(move || parse_mediainfo(&temp_path)).await {
-                    if let Some(ms) = parsed.get("MediaStreams") { media_streams = ms.clone(); }
-                    if let Some(da) = parsed.get("DefaultAudioStreamIndex") { default_audio_index = da.as_i64().unwrap_or(-1); }
-                    if let Some(ds) = parsed.get("DefaultSubtitleStreamIndex") { default_sub_index = ds.as_i64().unwrap_or(-1); }
-                }
+    // 3. 将头尾数据拼接到本地临时文件（使用标准库，零依赖）
+    let temp_path = std::env::temp_dir().join(format!("rust_em_probe_{}.tmp", std::process::id()));
+    if let Ok(mut file) = std::fs::File::create(&temp_path) {
+        use std::io::Write; // 仅在这里作用域引入
+        
+        // 先写入头部
+        let _ = file.write_all(&header_bytes);
+        
+        // 如果有尾部数据，并且文件确实很大，用标准库的 set_len 和 seek
+        if !tail_bytes.is_empty() && total_size > (header_bytes.len() + tail_bytes.len()) as u64 {
+            if file.set_len(total_size).is_ok() {
+                use std::io::Seek;
+                let _ = file.seek(std::io::SeekFrom::Start(total_size - tail_bytes.len() as u64));
+                let _ = file.write_all(&tail_bytes);
             }
         }
+        drop(file); // 关闭文件，确保数据落盘
+
+        // 4. 调用 mediainfo 解析拼接后的临时文件
+        let path_clone = temp_path.clone();
+        if let Ok(Ok(parsed)) = tokio::task::spawn_blocking(move || parse_mediainfo(&path_clone)).await {
+            if let Some(ms) = parsed.get("MediaStreams") { media_streams = ms.clone(); }
+            if let Some(da) = parsed.get("DefaultAudioStreamIndex") { default_audio_index = da.as_i64().unwrap_or(-1); }
+            if let Some(ds) = parsed.get("DefaultSubtitleStreamIndex") { default_sub_index = ds.as_i64().unwrap_or(-1); }
+        }
+        let _ = std::fs::remove_file(&temp_path);
     }
 
     if media_streams.is_null() || media_streams.as_array().map_or(true, |a| a.is_empty()) {
@@ -178,7 +203,7 @@ pub async fn probe_strm(
 
     let media_source = json!({
         "AddApiKeyToDirectStreamUrl": false, "Bitrate": 0, "Container": container, "Formats": [], "HasMixedProtocols": false, "IsInfiniteStream": false, "IsRemote": true,
-        "MediaStreams": media_streams, "Protocol": "Http", "ReadAtNativeFramerate": false, "RequiredHttpHeaders": {}, "RequiresClosing": false, "RequiresLooping": false, "RequiresOpening": false, "RunTimeTicks": 0, "Size": size,
+        "MediaStreams": media_streams, "Protocol": "Http", "ReadAtNativeFramerate": false, "RequiredHttpHeaders": {}, "RequiresClosing": false, "RequiresLooping": false, "RequiresOpening": false, "RunTimeTicks": 0, "Size": total_size,
         "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsProbing": true, "SupportsTranscoding": false, "Type": "Default",
         "DefaultAudioStreamIndex": default_audio_index, "DefaultSubtitleStreamIndex": default_sub_index
     });
