@@ -527,7 +527,7 @@ pub async fn update_settings(State(pool): State<Arc<Mutex<Connection>>>, Json(re
 
 #[derive(Deserialize)]
 pub struct ProbeScanReq { pub path: String, pub interval_ms: Option<u64> }
-pub async fn probe_scan(State(pool): State<Arc<Mutex<Connection>>>, Json(req): Json<ProbeScanReq>) -> impl IntoResponse {
+pub async fn probe_scan(State(_pool): State<Arc<Mutex<Connection>>>, Json(req): Json<ProbeScanReq>) -> impl IntoResponse {
     let root = PathBuf::from(&req.path);
     if !root.is_dir() { return (StatusCode::BAD_REQUEST, Json(json!({"error":"路径不存在"}))).into_response(); }
     let limiter = crate::probe::ProbeLimiter::new(req.interval_ms.unwrap_or(1000));
@@ -1155,7 +1155,7 @@ pub async fn emby_search_hints(State(pool): State<Arc<Mutex<Connection>>>, Query
             "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
             "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) },
             "MatchedTerm": term,
-            "PrimaryImageTag": if has_poster { json!(format!("tag_{}", id)) } else { "" }
+            "PrimaryImageTag": if has_poster { format!("tag_{}", id) } else { "".to_string() }
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "SearchHints": hints, "TotalRecordCount": hints.len() }))
