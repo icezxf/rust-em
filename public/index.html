@@ -31,20 +31,20 @@
         </div>
     </div>
 
-    <button id="global-sidebar-btn" onclick="toggleSidebar()" class="fixed top-4 left-4 md:top-6 md:left-6 z-[90] text-gray-400 hover:text-white bg-[#16191f]/80 backdrop-blur-md p-2 rounded-lg transition border border-gray-700/50 hover:border-gray-500 shadow-xl">
-        <svg id="sidebar-icon-close" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
-        <svg id="sidebar-icon-open" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+    <button id="mobile-sidebar-btn" onclick="toggleSidebar()" class="fixed top-4 left-4 z-[90] md:hidden text-gray-400 hover:text-white bg-[#16191f]/80 backdrop-blur-md p-2 rounded-lg transition border border-gray-700/50 shadow-xl">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
     </button>
 
     <div id="main-view" class="hidden flex-1 flex flex-row h-full relative overflow-hidden">
-        <div id="desktop-sidebar" class="hidden md:flex h-full bg-[#16191f] flex-col border-r border-gray-800 z-[80] shrink-0 overflow-hidden sidebar-transition w-48 opacity-100 absolute md:relative">
-            <div class="w-48 py-4 pt-16 flex flex-col h-full">
-                <div class="flex justify-between items-center mb-8 px-4">
+        <!-- 侧边栏 (桌面端挤压，移动端抽屉) -->
+        <div id="desktop-sidebar" class="hidden md:flex h-full bg-[#16191f] flex-col border-r border-gray-800 z-[80] shrink-0 overflow-hidden sidebar-transition w-56 absolute md:relative">
+            <div class="w-56 py-4 flex flex-col h-full">
+                <div class="flex justify-between items-center mb-8 px-4 h-12">
                     <h1 class="text-lg font-bold text-blue-500 flex items-center gap-2 whitespace-nowrap">
                         <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
                         Rust-Em
                     </h1>
-                    <button onclick="toggleSidebar()" class="text-gray-400 hover:text-white shrink-0">
+                    <button onclick="toggleSidebar()" class="text-gray-400 hover:text-white shrink-0 p-1 bg-gray-800/50 rounded">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
                     </button>
                 </div>
@@ -68,12 +68,12 @@
         <div id="sidebar-overlay" onclick="toggleSidebar()" class="hidden fixed inset-0 bg-black/60 z-[75] md:hidden"></div>
 
         <div class="flex-1 flex flex-col h-full overflow-hidden bg-[#0f1115] relative w-full min-w-0">
-            <div id="top-bar" class="px-4 py-3 md:px-8 md:py-6 pl-16 md:pl-20 flex flex-col shadow-sm z-50 shrink-0 border-b border-gray-800/50 bg-[#0f1115]/80 backdrop-blur-md">
-                <div id="content-header" class="hidden flex gap-3">
-                    <button onclick="setTypeFilter('all')" id="btn-type-all" class="px-5 py-1.5 rounded-full text-sm font-medium bg-blue-600 text-white transition shadow-lg shadow-blue-500/30">全部</button>
-                    <button onclick="setTypeFilter('movies')" id="btn-type-movies" class="px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700">电影</button>
-                    <button onclick="setTypeFilter('tvshows')" id="btn-type-tvshows" class="px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700">剧集</button>
-                </div>
+            <!-- 顶栏 (显示折叠按钮，移除筛选器) -->
+            <div id="top-bar" class="px-4 py-3 md:px-6 md:py-4 flex items-center shadow-sm z-50 shrink-0 border-b border-gray-800/50 bg-[#0f1115]/80 backdrop-blur-md">
+                <button id="desktop-sidebar-btn" onclick="toggleSidebar()" class="hidden md:block text-gray-400 hover:text-white mr-4 transition">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                </button>
+                <div class="text-lg font-bold text-white tracking-wide">媒体库</div>
             </div>
 
             <div id="tab-library" class="hidden flex-1 overflow-y-auto p-4 pb-20 md:px-8 md:py-4 md:pb-4">
@@ -137,7 +137,7 @@
             </div>
         </div>
 
-        <div id="detail-modal" class="hidden fixed top-0 bottom-0 right-0 left-0 z-[70] overflow-y-auto bg-[#0b0e14] modal-transition">
+        <div id="detail-modal" class="hidden absolute inset-0 z-[70] overflow-y-auto bg-[#0b0e14] modal-transition">
             <div id="detail-fanart" class="fixed top-0 bottom-0 right-0 left-0 bg-cover bg-top backdrop-blur-heavy modal-transition opacity-20"></div>
             <div class="fixed top-0 bottom-0 right-0 left-0 bg-gradient-to-b from-black/80 via-black/60 to-[#0b0e14] z-[1]"></div>
             
@@ -271,18 +271,7 @@
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
                 <span class="text-[10px]">媒体库</span>
             </button>
-            <button onclick="setTypeFilter('all'); switchTab('library')" class="flex flex-col items-center gap-0.5 text-gray-400 hover:text-white px-3 py-2">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
-                <span class="text-[10px]">全部</span>
-            </button>
-            <button onclick="setTypeFilter('movies'); switchTab('library')" class="flex flex-col items-center gap-0.5 text-gray-400 hover:text-white px-3 py-2">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"></path></svg>
-                <span class="text-[10px]">电影</span>
-            </button>
-            <button onclick="setTypeFilter('tvshows'); switchTab('library')" class="flex flex-col items-center gap-0.5 text-gray-400 hover:text-white px-3 py-2">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
-                <span class="text-[10px]">剧集</span>
-            </button>
+
             <button onclick="switchTab('settings')" class="flex flex-col items-center gap-0.5 text-gray-400 hover:text-white px-3 py-2">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                 <span class="text-[10px]">设置</span>
@@ -306,7 +295,7 @@
         let selectedPaths = [];
         let allLibraries = [];
         let currentLibId = 'all';
-        let currentType = 'all';
+        // let currentType = 'all';
         let cachedItems = [];
         let currentPlayingItemId = null;
         let isProbeSelecting = false;
@@ -318,17 +307,14 @@
         function toggleSidebar() {
             const sidebar = document.getElementById('desktop-sidebar');
             const overlay = document.getElementById('sidebar-overlay');
-            const btn = document.getElementById('global-sidebar-btn');
-            const isOpen = sidebar.classList.contains('w-48');
+            const isOpen = sidebar.classList.contains('w-56');
             if (isOpen) {
-                sidebar.classList.remove('w-48', 'opacity-100'); sidebar.classList.add('w-0', 'opacity-0');
+                sidebar.classList.remove('w-56', 'opacity-100'); sidebar.classList.add('w-0', 'opacity-0');
                 if (window.innerWidth < 768) { sidebar.classList.add('hidden'); sidebar.classList.remove('flex'); }
                 overlay.classList.add('hidden');
-                btn.classList.remove('hidden');
             } else {
-                sidebar.classList.remove('w-0', 'opacity-0'); sidebar.classList.add('w-48', 'opacity-100');
+                sidebar.classList.remove('w-0', 'opacity-0'); sidebar.classList.add('w-56', 'opacity-100');
                 if (window.innerWidth < 768) { sidebar.classList.remove('hidden'); sidebar.classList.add('flex'); overlay.classList.remove('hidden'); }
-                btn.classList.add('hidden');
             }
         }
 
@@ -369,7 +355,7 @@
             const topBar = document.getElementById('top-bar');
             if (tab === 'library') {
                 topBar.classList.remove('hidden');
-                document.getElementById('content-header').classList.remove('hidden');
+                
                 document.getElementById('tab-library').classList.remove('hidden');
                 loadMedia();
             } else if (tab === 'settings') {
@@ -397,21 +383,13 @@
         }
 
         function setLibraryFilter(libId) { closeDetail(); currentLibId = libId; renderSidebarLibraries(); switchTab('library'); }
-        function setTypeFilter(type) {
-            currentType = type;
-            ['all', 'movies', 'tvshows'].forEach(t => {
-                const btn = document.getElementById(`btn-type-${t}`);
-                if (t === type) btn.className = 'px-5 py-1.5 rounded-full text-sm font-medium bg-blue-600 text-white transition shadow-lg shadow-blue-500/30';
-                else btn.className = 'px-5 py-1.5 rounded-full text-sm font-medium bg-[#16191f] text-gray-400 hover:bg-gray-800 transition border border-gray-700';
-            });
-            loadMedia();
-        }
+
 
         async function loadMedia() {
             try {
                 let url = `/api/items?`;
                 if (currentLibId !== 'all') url += `library_id=${currentLibId}&`;
-                if (currentType !== 'all') url += `lib_type=${currentType}`;
+                
                 const grid = document.getElementById('media-grid');
                 grid.innerHTML = Array(12).fill(`<div class="animate-pulse bg-[#16191f] rounded-xl overflow-hidden aspect-[2/3]"><div class="w-full h-full bg-gray-800/50"></div></div>`).join('');
                 const data = await api(url);
