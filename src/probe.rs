@@ -181,7 +181,7 @@ pub async fn probe_strm(
     let media_source = json!({
         "AddApiKeyToDirectStreamUrl": false, "Bitrate": 0, "Container": container, "Formats": [], "HasMixedProtocols": false, "IsInfiniteStream": false, "IsRemote": true,
         "MediaStreams": media_streams, "Protocol": "Http", "ReadAtNativeFramerate": false, "RequiredHttpHeaders": {}, "RequiresClosing": false, "RequiresLooping": false, "RequiresOpening": false, "RunTimeTicks": 0, "Size": size,
-        "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsProbing": true, "SupportsTranscoding": true, "Type": "Default",
+        "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsProbing": true, "SupportsTranscoding": false, "Type": "Default",
         "DefaultAudioStreamIndex": default_audio_index, "DefaultSubtitleStreamIndex": default_sub_index
     });
 
