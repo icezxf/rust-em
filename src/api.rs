@@ -105,7 +105,7 @@ fn extract_extension_from_url(url: &str) -> String {
     "mp4".to_string()
 }
 
-async fn resolve_qmediasync_url(client: &reqwest::Client, url: &str, ua: &str) -> Option<String> {
+pub async fn resolve_qmediasync_url(client: &reqwest::Client, url: &str, ua: &str) -> Option<String> {
     // 带上 Range 请求头，强制 OpenList 吐出 302 真实地址
     let resp = client.get(url)
         .header(USER_AGENT, ua)
