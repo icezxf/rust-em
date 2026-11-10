@@ -844,7 +844,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                     "Name": director_str, 
                     "Type": "Director", 
                     "Id": format!("person_{}", director_str), 
-                    "PrimaryImageTag": Value::Null 
+                    "PrimaryImageTag": "" 
                 }));
             }
             
@@ -887,7 +887,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                     let stream_url = format!("/Videos/{}/original.mp4?MediaSourceId={}_cd{}", id, id, i);
                     json!({
                         "Id": format!("{}_cd{}", id, i), "ItemId": id.to_string(),
-                        "Path": real_path.clone(), "DirectStreamUrl": stream_url,
+                        "Path": decode_url(&real_path), "DirectStreamUrl": stream_url,
                         "Protocol": "Http", "Container": "mp4", "Name": title.clone(),
                         "Type": "Default", "VideoType": "VideoFile", "IsRemote": true,
                         "Bitrate": est_bitrate, "RunTimeTicks": run_time_ticks, "Size": size,
@@ -921,8 +921,8 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 "ImageTags": image_tags, "BackdropImageTags": backdrop_tags,
                 "PrimaryImageAspectRatio": if aspect_ratio > 0.0 { json!(aspect_ratio) } else { json!(0.6666666666666666) },
                 "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(),
-                "OriginalLanguage": if !original_language.is_empty() { json!(original_language) } else if !language.is_empty() { json!(language) } else { Value::Null },
-                "SetName": if set_name.is_empty() { Value::Null } else { json!(set_name) },
+                "OriginalLanguage": if !original_language.is_empty() { original_language } else { language },
+                "SetName": set_name,
                 "SeriesName": Value::Null,
                 "Path": real_path, "Container": "mp4", "MediaSourceCount": media_sources.len(),
                 "MediaSources": media_sources,
