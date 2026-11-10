@@ -640,7 +640,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
 
 pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks FROM items WHERE playback_ticks > 0 ORDER BY updated_at DESC LIMIT 30").unwrap();
+    let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path FROM items WHERE playback_ticks > 0 ORDER BY updated_at DESC LIMIT 30").unwrap();
     let items: Vec<Value> = stmt.query_map([], |row| {
         let id: i64 = row.get(0).unwrap_or_default();
         let poster_path: String = row.get(5).unwrap_or_default();
@@ -650,6 +650,13 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let poster_tag = if has_poster { format!("tag_{}_{}", id, &hash_hex[..8]) } else { String::new() };
         
         let playback_ticks: i64 = row.get(18).unwrap_or(0);
+        let fanart_path: String = row.get(19).unwrap_or_default();
+        let has_fanart = !fanart_path.is_empty();
+        let backdrop_tag = if has_fanart {
+            let mut h = Sha256::new(); h.update(fanart_path.as_bytes()); let hash = h.finalize();
+            let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+            format!("backdrop_{}_{}", id, &hash_hex[..8])
+        } else { String::new() };
         let runtime_mins: i32 = row.get(7).unwrap_or(0);
         let total_ticks: i64 = (runtime_mins as i64) * 60 * 10_000_000;
         
@@ -661,7 +668,7 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0), 
             "RunTimeTicks": total_ticks,
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
-            "BackdropImageTags": [],
+            "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
             "UserData": { 
