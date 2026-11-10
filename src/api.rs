@@ -136,13 +136,17 @@ fn sanitize_media_streams(streams: &mut Value) {
                 let mut display_title = obj.get("DisplayTitle").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
                 if stream_type == "Video" {
-                    let h = obj.get("Height").and_then(|v| v.as_i64()).unwrap_or(0);
                     let depth = obj.get("BitDepth").and_then(|v| v.as_i64()).unwrap_or(0);
                     
-                    if display_title.is_empty() || !display_title.contains(&format!("{}p", h)) {
-                        let p = if h >= 2160 { "2160p" } else if h >= 1080 { "1080p" } else if h >= 720 { "720p" } else { "SD" };
+                    // 彻底相信 QMS 传来的 DisplayTitle，只有在完全为空时才兜底生成
+                    if display_title.is_empty() {
+                        let w = obj.get("Width").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let h = obj.get("Height").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let base = std::cmp::max(w, h);
+                        let p = if base >= 2160 { "2160p" } else if base >= 1080 { "1080p" } else if base >= 720 { "720p" } else { "SD" };
                         display_title = format!("{} {}", p, codec);
                     }
+                    
                     if !display_title.contains("bit") && depth > 0 {
                         display_title = format!("{} {}bit", display_title, depth);
                     }
