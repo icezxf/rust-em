@@ -1,10 +1,7 @@
 use serde_json::{json, Value};
-use std::io::{Write, Seek, SeekFrom};
-use futures_util::StreamExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tempfile::NamedTempFile;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use mediainfo::{MediaInfo, StreamKind, InfoKind};
