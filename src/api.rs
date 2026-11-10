@@ -1109,6 +1109,9 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
     let final_url = resolve_qmediasync_url(&client, url, ua).await.unwrap_or_else(|| url.to_string());
     
     println!("🎯 [302 REDIRECT] 真实网盘地址: {}", final_url);
+    println!("🎬 [PLAY] ID: {} | 拿到直链准备 302", item_id);
+    println!("🎯 [302 REDIRECT] 真实地址: {}", final_url);
+
     { let mut cache_lock = cache.lock().unwrap(); cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(300))); }
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
 }
