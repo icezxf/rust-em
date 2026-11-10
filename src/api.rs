@@ -817,16 +817,30 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 json!({ "Name": s, "Id": sid })
             }).collect();
 
-            let people: Vec<Value> = actors.iter().map(|a| json!({
-                "Name": a["name"].as_str().unwrap_or_default(),
-                "Role": a["role"].as_str().unwrap_or_default(),
-                "Type": "Actor",
-                "Id": format!("person_{}", a["name"].as_str().unwrap_or_default()),
-                "PrimaryImageTag": a["thumb"].as_str().unwrap_or_default()
-            })).collect();
+            let mut people: Vec<Value> = Vec::new();
             
-            // 将 " / " 替换为标准逗号分隔，供顶层 Director 字段使用
-            let director_str = directors_str.replace(" / ", ", ");
+            // 将多个导演合并为一条记录，确保 Yamby 顶部能把所有导演都显示出来
+            let dir_names: Vec<&str> = directors_str.split(" / ").filter(|s| !s.is_empty()).collect();
+            let director_str = dir_names.join(", ");
+            if !director_str.is_empty() {
+                people.push(json!({ 
+                    "Name": director_str, 
+                    "Type": "Director", 
+                    "Id": format!("person_{}", director_str), 
+                    "PrimaryImageTag": Value::Null 
+                }));
+            }
+            
+            // 接着加入演员
+            for a in actors.iter() {
+                people.push(json!({
+                    "Name": a["name"].as_str().unwrap_or_default(),
+                    "Role": a["role"].as_str().unwrap_or_default(),
+                    "Type": "Actor",
+                    "Id": format!("person_{}", a["name"].as_str().unwrap_or_default()),
+                    "PrimaryImageTag": a["thumb"].as_str().unwrap_or_default()
+                }));
+            }
 
             let mut image_tags = serde_json::Map::new();
             if !poster_path.is_empty() {
