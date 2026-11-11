@@ -1706,18 +1706,26 @@ pub async fn emby_scheduled_tasks() -> impl IntoResponse {
 }
 
 pub async fn emby_refresh_library(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
+    let status = SCAN_STATUS.get_or_init(|| Mutex::new(false));
+    *status.lock().unwrap() = true;
+    println!("📡 [TASK] 客户端触发了计划任务：全库扫描");
+
     let pool_clone = pool.clone();
     tokio::task::spawn_blocking(move || {
-        let conn = pool_clone.lock().unwrap();
-        let mut stmt = match conn.prepare("SELECT id, path, type FROM libraries") {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-        let libs: Vec<(i64, String, String)> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .unwrap()
-            .filter_map(Result::ok)
-            .collect();
+        // 注意：这里用大括号限制 conn 的作用域，查询完立刻释放数据库锁，防止后续 scan_directory 死锁
+        let libs = {
+            let conn = pool_clone.lock().unwrap();
+            let mut stmt = match conn.prepare("SELECT id, path, type FROM libraries") {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            let libs: Vec<(i64, String, String)> = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .filter_map(Result::ok)
+                .collect();
+            libs
+        }; // 锁在这里释放
 
         for (id, path_json, lib_type) in libs {
             if let Ok(paths) = serde_json::from_str::<Vec<String>>(&path_json) {
@@ -1726,7 +1734,12 @@ pub async fn emby_refresh_library(State(pool): State<Arc<Mutex<Connection>>>) ->
                 }
             }
         }
+        
+        let status = SCAN_STATUS.get_or_init(|| Mutex::new(false));
+        *status.lock().unwrap() = false;
+        let time = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S.0000000Z").to_string();
+        *LAST_SCAN_TIME.get_or_init(|| Mutex::new("".to_string())).lock().unwrap() = time;
+        println!("✅ [TASK] 计划任务扫描完成");
     });
-    // 标准 Emby 触发任务返回 204 No Content
     StatusCode::NO_CONTENT.into_response()
 }
