@@ -824,6 +824,7 @@ pub struct EmbyItemsQuery {
     #[serde(rename = "Filters")] filters: Option<String>,
     #[serde(rename = "SortBy")] sort_by: Option<String>,
     #[serde(rename = "SortOrder")] sort_order: Option<String>,
+    #[serde(rename = "Recursive")] recursive: Option<bool>,
 }
 
 pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
@@ -832,8 +833,13 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
     let conn = pool.lock().unwrap();
     
     // 拦截真正的文件夹请求 (支持无限层级目录)
-    if let Some(types) = &query.include_item_types {
-        if types.to_lowercase().contains("folder") {
+    // 兼容 Hills (Recursive=false) 和 Yamby (IncludeItemTypes包含Folder)
+    let is_folder_view = query.recursive == Some(false)
+        || query.sort_by.as_deref().map_or(false, |s| s.contains("IsFolder"))
+        || query.include_item_types.as_deref().map_or(false, |t| t.to_lowercase().contains("folder"));
+
+    if is_folder_view {
+        {
             // 寻找当前的基路径（取决于点的是第一层 lib_ 还是更深层的 folder_）
             let base_path = if let Some(pid) = &query.parent_id {
                 if pid.starts_with("lib_") {
