@@ -819,7 +819,43 @@ pub async fn emby_items_with_user(State(pool): State<Arc<Mutex<Connection>>>, Ax
 async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -> Response {
     let conn = pool.lock().unwrap();
     
-    // 拦截标签实体请求 (Yamby 点标签栏时发起的)
+    // 1. 拦截合集请求 (BoxSet)
+    if let Some(types) = &query.include_item_types {
+        if types.to_lowercase().contains("boxset") {
+            let mut sql = "SELECT set_name FROM items WHERE set_name != ''".to_string();
+            if let Some(pid) = &query.parent_id {
+                if pid.starts_with("lib_") {
+                    if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
+                        sql.push_str(&format!(" AND library_id = {}", lib_id));
+                    }
+                }
+            }
+            
+            let mut boxsets = Vec::new();
+            if let Ok(mut stmt) = conn.prepare(&sql) {
+                if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+                    let mut set_names = std::collections::HashSet::new();
+                    for s in mapped.flatten() {
+                        for name in s.split(" / ").filter(|s| !s.trim().is_empty()) {
+                            set_names.insert(name.to_string());
+                        }
+                    }
+                    for name in set_names {
+                        let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
+                        boxsets.push(json!({
+                            "Name": name, "Id": format!("boxset_{:x}", hash), "ServerId": "rust-em-server",
+                            "Type": "BoxSet", "IsFolder": true, "MediaType": "Video",
+                            "ImageTags": {"Primary": "tag_boxset"}, "BackdropImageTags": [],
+                            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
+                        }));
+                    }
+                }
+            }
+            return Json(json!({ "Items": boxsets, "TotalRecordCount": boxsets.len() })).into_response();
+        }
+    }
+
+    // 2. 拦截标签实体请求 (Yamby 点标签栏时发起的)
     if let Some(types) = &query.include_item_types {
         if types.to_lowercase() == "tag" {
             let mut sql = "SELECT tags FROM items WHERE tags != ''".to_string();
@@ -876,7 +912,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
     let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path, date_created, actors, directors, tags, studios, play_count FROM items WHERE 1=1".to_string();
     let mut params: Vec<String> = Vec::new();
 
-    // 1. 铁血硬过滤：解决串台问题。电影查 movies，剧集查 tvshows。
+    // 3. 过滤逻辑
     if let Some(types) = &query.include_item_types {
         let t = types.to_lowercase();
         if t.contains("movie") {
@@ -884,6 +920,9 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         } else if t.contains("series") || t.contains("episode") {
             sql.push_str(" AND type = 'tvshows'");
         }
+        
+        // 如果客户端在查文件夹且包含了 Movie，说明它想要文件目录结构
+        // 我们的库是平铺的，直接给它返回电影
     }
 
     // 2. 处理 ParentId（媒体库/合集/演员主页）
