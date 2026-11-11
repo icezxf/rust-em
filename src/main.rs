@@ -50,23 +50,23 @@ async fn main() {
         .route("/Users/{user_id}/Items/{item_id}", get(api::emby_item_detail_with_user))
         
         // 图片路由极其容易因为参数数量不匹配报错，这里统一修改 Handler 名称和参数
-        .route("/Items/{item_id}/Images/{image_type}", get(api::emby_item_image))
-        .route("/Items/{item_id}/Images/{image_type}/{index}", get(api::emby_item_image_with_index))
-        .route("/Users/{user_id}/Items/{item_id}/Images/{image_type}", get(api::emby_item_image_with_user))
-        .route("/Users/{user_id}/Images/{image_type}", get(api::emby_item_image_user_only))
-        .route("/Persons/{person_id}/Images/{image_type}", get(api::emby_person_image))
+        .route("/Items/{item_id}/Images/{image_type}", get(api::emby_item_image).head(api::emby_item_image))
+        .route("/Items/{item_id}/Images/{image_type}/{index}", get(api::emby_item_image_with_index).head(api::emby_item_image_with_index))
+        .route("/Users/{user_id}/Items/{item_id}/Images/{image_type}", get(api::emby_item_image_with_user).head(api::emby_item_image_with_user))
+        .route("/Users/{user_id}/Images/{image_type}", get(api::emby_item_image_user_only).head(api::emby_item_image_user_only))
+        .route("/Persons/{person_id}/Images/{image_type}", get(api::emby_person_image).head(api::emby_person_image))
 
         .route("/Items/{item_id}/PlaybackInfo", get(api::emby_playback_info).post(api::emby_playback_info))
-        .route("/Videos/{item_id}/stream", get(api::emby_stream))
-        .route("/Videos/{item_id}/stream.{ext}", get(api::emby_stream_with_ext))
-        .route("/Videos/{item_id}/original", get(api::emby_stream))
-        .route("/Videos/{item_id}/original.{ext}", get(api::emby_stream_with_ext))
-        .route("/Videos/{item_id}/{source_id}/stream", get(api::emby_stream_with_source))
-        .route("/Videos/{item_id}/{source_id}/stream.{ext}", get(api::emby_stream_with_source_ext))
+        .route("/Videos/{item_id}/stream", get(api::emby_stream).head(api::emby_stream))
+        .route("/Videos/{item_id}/stream.{ext}", get(api::emby_stream_with_ext).head(api::emby_stream_with_ext))
+        .route("/Videos/{item_id}/original", get(api::emby_stream).head(api::emby_stream))
+        .route("/Videos/{item_id}/original.{ext}", get(api::emby_stream_with_ext).head(api::emby_stream_with_ext))
+        .route("/Videos/{item_id}/{source_id}/stream", get(api::emby_stream_with_source).head(api::emby_stream_with_source))
+        .route("/Videos/{item_id}/{source_id}/stream.{ext}", get(api::emby_stream_with_source_ext).head(api::emby_stream_with_source_ext))
         .route("/Items/{item_id}/Download", get(api::emby_download))
         
         .route("/Items/{item_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream))
-        .route("/Videos/{item_id}/{source_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream_with_source))
+        .route("/Videos/{item_id}/{source_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream_with_source).head(api::emby_subtitle_stream_with_source))
         
         .route("/Sessions", get(api::emby_sessions))
         .route("/Sessions/Playing", post(api::emby_playing))
@@ -95,7 +95,13 @@ async fn main() {
         .route("/api/images/{id}/{type}", get(api::get_image))
         .route("/api/user/update", post(api::update_user))
         .route("/api/settings", get(api::get_settings).post(api::update_settings))
-        .route("/api/probe/scan", post(api::probe_scan));
+        .route("/api/probe/scan", post(api::probe_scan)
+        // 兼容小写 Videos 路由
+        .route("/videos/{item_id}/stream", get(api::emby_stream).head(api::emby_stream))
+        .route("/videos/{item_id}/stream.{container}", get(api::emby_stream_with_ext).head(api::emby_stream_with_ext))
+        .route("/videos/{item_id}/{media_source_id}/stream", get(api::emby_stream_with_source).head(api::emby_stream_with_source))
+        .route("/videos/{item_id}/{media_source_id}/stream.{container}", get(api::emby_stream_with_source_ext).head(api::emby_stream_with_source_ext))
+);
 
     let app = Router::new()
         .merge(web_routes)
