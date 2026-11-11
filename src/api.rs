@@ -893,6 +893,47 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
     }
 
     if let Some(types) = &query.include_item_types {
+        let t_lower = types.to_lowercase();
+        
+        // 【补全丢失的字典拦截】
+        if t_lower == "tag" {
+            let mut sql = "SELECT tags FROM items WHERE tags != ''".to_string();
+            if let Some(pid) = &query.parent_id {
+                if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
+            }
+            let mut set = std::collections::HashSet::new();
+            if let Ok(mut stmt) = conn.prepare(&sql) {
+                if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+                    for t_str in mapped.flatten() { for tag in t_str.split(" / ") { if !tag.trim().is_empty() { set.insert(tag.trim().to_string()); } } }
+                }
+            }
+            let mut names: Vec<String> = set.into_iter().collect();
+            names.sort();
+            let items: Vec<Value> = names.into_iter().map(|name| {
+                json!({ "Name": name, "Id": name, "ServerId": "rust-em-server", "Type": "Tag", "IsFolder": false, "MediaType": "Video", "PrimaryImageAspectRatio": 0.6666666666666666, "ImageTags": {}, "BackdropImageTags": [], "ImageBlurHashes": {}, "LocationType": "FileSystem", "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 } })
+            }).collect();
+            return Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response();
+        }
+        
+        if t_lower == "genre" {
+            let mut sql = "SELECT genres FROM items WHERE genres != ''".to_string();
+            if let Some(pid) = &query.parent_id {
+                if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
+            }
+            let mut set = std::collections::HashSet::new();
+            if let Ok(mut stmt) = conn.prepare(&sql) {
+                if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+                    for g_str in mapped.flatten() { for g in g_str.split(" / ") { if !g.trim().is_empty() { set.insert(g.trim().to_string()); } } }
+                }
+            }
+            let mut names: Vec<String> = set.into_iter().collect();
+            names.sort();
+            let items: Vec<Value> = names.into_iter().map(|name| {
+                json!({ "Name": name, "Id": format!("genre_{}", name), "ServerId": "rust-em-server", "Type": "Genre", "IsFolder": false, "MediaType": "Video", "PrimaryImageAspectRatio": 0.6666666666666666, "ImageTags": {}, "BackdropImageTags": [], "ImageBlurHashes": {}, "LocationType": "FileSystem", "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 } })
+            }).collect();
+            return Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response();
+        }
+
         if types.to_lowercase().contains("boxset") {
             let mut sql = "SELECT set_name FROM items WHERE set_name != ''".to_string();
             if let Some(pid) = &query.parent_id {
