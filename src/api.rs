@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::HashMap;
 use std::time::{Duration, Instant, UNIX_EPOCH, SystemTime};
-use rusqlite::{Connection, params_from_iter};
+use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncReadExt;
@@ -1222,6 +1222,7 @@ pub async fn emby_item_image_with_index(State(pool): State<Arc<Mutex<Connection>
     let idx = index.parse::<usize>().unwrap_or(0);
     emby_item_image_inner(pool, item_id, image_type, idx).await
 }
+#[allow(dead_code)]
 pub async fn emby_item_image_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id, image_type)): AxumPath<(String, String, String)>) -> Response {
     emby_item_image_inner(pool, item_id, image_type, 0).await
 }
@@ -1421,6 +1422,7 @@ pub async fn emby_hide_from_resume(AxumPath((_user_id, _item_id)): AxumPath<(Str
 }
 
 pub async fn emby_action() -> impl IntoResponse { StatusCode::OK.into_response() }
+#[allow(dead_code)]
 pub async fn emby_action_with_path(_: AxumPath<(String, String)>) -> impl IntoResponse { StatusCode::OK.into_response() }
 pub async fn emby_sessions() -> impl IntoResponse { Json(json!([])) }
 
@@ -1572,6 +1574,7 @@ pub async fn emby_person(AxumPath(person_id): AxumPath<String>) -> impl IntoResp
     }))
 }
 
+#[allow(dead_code)]
 pub async fn emby_person_items(
     State(pool): State<Arc<Mutex<Connection>>>,
     AxumPath(person_id): AxumPath<String>,
@@ -1597,6 +1600,7 @@ pub async fn emby_studio(AxumPath(studio_id): AxumPath<String>) -> impl IntoResp
     }))
 }
 
+#[allow(dead_code)]
 pub async fn emby_studio_items(
     State(pool): State<Arc<Mutex<Connection>>>,
     AxumPath(studio_id): AxumPath<String>,
@@ -1690,7 +1694,7 @@ pub async fn emby_scheduled_tasks() -> impl IntoResponse {
             "Triggers": [
                 {
                     "Type": "IntervalTrigger",
-                    "IntervalTicks": 864000000000
+                    "IntervalTicks": 864000000000i64
                 }
             ],
             "Description": "Scans your media library for new and updated files.",
