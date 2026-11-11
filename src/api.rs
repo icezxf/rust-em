@@ -16,6 +16,8 @@ use tokio::io::AsyncReadExt;
 static TOKENS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 static STRM_CACHE: OnceLock<Mutex<HashMap<String, (String, Instant)>>> = OnceLock::new();
 static GLOBAL_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static SCAN_STATUS: OnceLock<Mutex<bool>> = OnceLock::new();
+static LAST_SCAN_TIME: OnceLock<Mutex<String>> = OnceLock::new();
 const MAX_STRM_SIZE: u64 = 16 * 1024;
 
 pub async fn logger_middleware(req: Request, next: Next) -> Response {
