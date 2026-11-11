@@ -67,6 +67,7 @@ fn emby_routes() -> Router<AppState> {
         // 服务发现与公共认证
         .route("/System/Info/Public", get(api::emby_public_info))
         .route("/System/Info", get(api::emby_info))
+        .route("/System/ActivityLog/Entries", get(api::emby_activity_log))
         .route("/System/Ping", get(api::emby_ping).post(api::emby_ping))
         .route("/Users/Public", get(api::emby_public_users))
         .route("/Users/AuthenticateByName", post(api::emby_authenticate))

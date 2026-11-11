@@ -24,7 +24,15 @@ pub async fn logger_middleware(req: Request, next: Next) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
     let path = uri.path();
-    if path.ends_with(".css") || path.ends_with(".js") || path.ends_with(".png") || path.ends_with(".jpg") { return next.run(req).await; }
+    
+    // 过滤掉不需要打印的干扰请求
+    if path.ends_with(".css") || path.ends_with(".js") || path.ends_with(".png") || path.ends_with(".jpg") 
+        || path.contains("/Images/") || path.contains("/api/images/") 
+        || path.contains("/Sessions/Playing/Progress")
+        || path.contains("websocket") || path.contains("webhook") || path.contains("Webhook") {
+        return next.run(req).await; 
+    }
+
     let ua = req.headers().get("User-Agent").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     let query = uri.query().unwrap_or("");
     println!("📥 [REQ] {} {}?{} | UA: {}", method, path, query, ua);
@@ -1744,4 +1752,8 @@ pub async fn emby_refresh_library(State(pool): State<Arc<Mutex<Connection>>>) ->
         println!("✅ [TASK] 计划任务扫描完成");
     });
     StatusCode::NO_CONTENT.into_response()
+}
+
+pub async fn emby_activity_log() -> impl IntoResponse {
+    Json(json!({ "Items": [], "TotalRecordCount": 0 }))
 }
