@@ -849,7 +849,8 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         } else if decoded_pid.starts_with("person_") {
             let name = decoded_pid.replace("person_", "").trim().to_string();
             if !name.is_empty() {
-                sql.push_str(" AND actors LIKE ?");
+                sql.push_str(" AND (actors LIKE ? OR directors LIKE ?)");
+                params.push(format!("%{}%", name));
                 params.push(format!("%{}%", name));
             }
         } else if decoded_pid.starts_with("studio_") {
@@ -878,7 +879,8 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         let decoded = decode_url(p).replace('+', " ");
         let name = decoded.replace("person_", "").trim().to_string(); 
         if !name.is_empty() {
-            sql.push_str(" AND actors LIKE ?");
+            sql.push_str(" AND (actors LIKE ? OR directors LIKE ?)");
+            params.push(format!("%{}%", name));
             params.push(format!("%{}%", name));
         }
     }
