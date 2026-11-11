@@ -1645,7 +1645,13 @@ pub async fn emby_action() -> impl IntoResponse { StatusCode::OK.into_response()
 pub async fn emby_action_with_path(_: AxumPath<(String, String)>) -> impl IntoResponse { StatusCode::OK.into_response() }
 pub async fn emby_sessions() -> impl IntoResponse { Json(json!([])) }
 
-pub async fn emby_playing() -> impl IntoResponse { StatusCode::OK.into_response() }
+pub async fn emby_playing(body: Bytes) -> impl IntoResponse {
+    // 【抓包探针】
+    println!("========== 🚨 [PLAYING 抓包] ==========");
+    println!("{}", String::from_utf8_lossy(&body));
+    println!("=======================================");
+    StatusCode::OK.into_response() 
+}
 pub async fn emby_playing_stopped() -> impl IntoResponse { StatusCode::OK.into_response() }
 
 pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, body: Bytes) -> impl IntoResponse {
