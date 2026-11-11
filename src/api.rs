@@ -780,6 +780,7 @@ pub struct EmbyItemsQuery {
     #[serde(rename = "StudioIds")] studio_ids: Option<String>,
     #[serde(rename = "Studios")] studios: Option<String>,
     #[serde(rename = "IncludeItemTypes")] include_item_types: Option<String>,
+    #[serde(rename = "Filters")] filters: Option<String>,
 }
 
 pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
@@ -806,7 +807,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response();
     }
 
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path, date_created, actors, directors, tags, studios FROM items WHERE 1=1".to_string();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path, date_created, actors, directors, tags, studios, play_count FROM items WHERE 1=1".to_string();
     let mut params: Vec<String> = Vec::new();
 
     // 1. 铁血硬过滤：解决串台问题。电影查 movies，剧集查 tvshows。
@@ -924,6 +925,15 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         if !name.is_empty() { sql.push_str(" AND studios LIKE ?"); params.push(format!("%{}%", name)); }
     }
 
+    // 处理是否已观看的筛选
+    if let Some(filters) = &query.filters {
+        if filters.contains("IsPlayed") {
+            sql.push_str(" AND play_count > 0");
+        } else if filters.contains("IsUnplayed") {
+            sql.push_str(" AND play_count = 0");
+        }
+    }
+
     let from_idx = sql.find(" FROM items").unwrap_or(0);
     let count_sql = format!("SELECT COUNT(*){}", &sql[from_idx..]);
     let total: i64 = conn.query_row(&count_sql, rusqlite::params_from_iter(params.iter()), |r| r.get(0)).unwrap_or(0);
@@ -958,6 +968,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         let date_created: i64 = row.get(20).unwrap_or(0);
         let final_date_created = if date_created > 0 { date_created } else { mtime };
         let played_pct = if total_ticks > 0 { (playback_ticks * 100 / total_ticks) as i32 } else { 0 };
+        let play_count: i32 = row.get(25).unwrap_or(0);
         let date_str = format_iso8601(final_date_created);
         
         Ok(json!({
@@ -983,7 +994,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
                 "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size,
                 "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks
             }],
-            "UserData": { "PlaybackPositionTicks": playback_ticks, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": played_pct }
+            "UserData": { "PlaybackPositionTicks": playback_ticks, "PlayCount": play_count, "IsFavorite": false, "Played": play_count > 0, "PlayedPercentage": played_pct }
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "Items": items, "TotalRecordCount": total })).into_response()
@@ -1036,7 +1047,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
 
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let item_opt = conn.query_row(
-        "SELECT id, title, type, year, plot, poster_path, file_path, studios, parts, runtime, actors, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, series, label, set_name, tagline, tags, directors, num, stills, releasedate, original_title, sort_title, country, language, writers, trailer, media_streams, date_created, primary_image_aspect_ratio, original_language, fanart_path, logo_path, thumb_path, banner_path, strm_content, playback_ticks FROM items WHERE id = ?1",
+        "SELECT id, title, type, year, plot, poster_path, file_path, studios, parts, runtime, actors, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, series, label, set_name, tagline, tags, directors, num, stills, releasedate, original_title, sort_title, country, language, writers, trailer, media_streams, date_created, primary_image_aspect_ratio, original_language, fanart_path, logo_path, thumb_path, banner_path, strm_content, playback_ticks, play_count FROM items WHERE id = ?1",
         [id],
         |row| {
             let title: String = row.get(1).unwrap_or_default();
@@ -1081,6 +1092,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let banner_path: String = row.get(41).unwrap_or_default();
             let strm_content: String = row.get(42).unwrap_or_default();
             let playback_ticks: i64 = row.get(43).unwrap_or(0);
+            let play_count: i32 = row.get(44).unwrap_or(0);
 
             let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
             let actors: Vec<Value> = serde_json::from_str(&actors_json).unwrap_or_default();
@@ -1195,7 +1207,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 "MediaSources": media_sources,
                 "ProbeEngine": "rust-native", "LocationType": "FileSystem",
                 "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
-                "UserData": { "ItemId": id.to_string(), "Key": id.to_string(), "PlaybackPositionTicks": playback_ticks, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": if run_time_ticks > 0 { playback_ticks * 100 / run_time_ticks } else { 0 } }
+                "UserData": { "ItemId": id.to_string(), "Key": id.to_string(), "PlaybackPositionTicks": playback_ticks, "PlayCount": play_count, "IsFavorite": false, "Played": play_count > 0, "PlayedPercentage": if run_time_ticks > 0 { playback_ticks * 100 / run_time_ticks } else { 0 } }
             }))
         }
     ).ok();
@@ -1422,8 +1434,19 @@ pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, b
                 let ticks = val["PositionTicks"].as_i64().unwrap_or(0);
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
                 let conn = pool.lock().unwrap();
-                let current_ticks: i64 = conn.query_row("SELECT playback_ticks FROM items WHERE id = ?1", [item_id], |r| r.get(0)).unwrap_or(0);
-                if ticks > 10_000_000 || ticks == 0 && current_ticks == 0 {
+                let (runtime_mins, current_ticks): (i32, i64) = conn.query_row(
+                    "SELECT runtime, playback_ticks FROM items WHERE id = ?1", 
+                    [item_id], 
+                    |r| Ok((r.get(0).unwrap_or(0), r.get(1).unwrap_or(0)))
+                ).unwrap_or((0, 0));
+                
+                let total_ticks = (runtime_mins as i64) * 60 * 10_000_000;
+                
+                if total_ticks > 0 && ticks > (total_ticks * 90 / 100) {
+                    // 超过 90%，标记已看完，并清空继续观看进度
+                    let _ = conn.execute("UPDATE items SET play_count = play_count + 1, playback_ticks = 0, updated_at = ?1 WHERE id = ?2", [now, item_id]);
+                    println!("💾 [PROGRESS] 标记为已看完: ItemId={}", item_id);
+                } else if ticks > 10_000_000 || (ticks == 0 && current_ticks == 0) {
                     let _ = conn.execute("UPDATE items SET playback_ticks = ?1, updated_at = ?2 WHERE id = ?3", [ticks, now, item_id]);
                 }
                 println!("💾 [PROGRESS] 保存进度: ItemId={}, Ticks={}", item_id, ticks);
