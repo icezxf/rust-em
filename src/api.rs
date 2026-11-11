@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::HashMap;
 use std::time::{Duration, Instant, UNIX_EPOCH, SystemTime};
-use rusqlite::Connection;
+use rusqlite::{Connection, params_from_iter};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncReadExt;
@@ -107,7 +107,6 @@ fn extract_extension_from_url(url: &str) -> String {
 }
 
 pub async fn resolve_qmediasync_url(client: &reqwest::Client, url: &str, ua: &str) -> Option<String> {
-    // 绝对死守的底线：使用客户端原本的 UA 请求，绝不使用写死的浏览器 UA，防止 115 等网盘链接失效！
     let resp = client.get(url).header(USER_AGENT, ua).send().await.ok()?;
     let status = resp.status();
     if status.is_redirection() {
@@ -434,19 +433,54 @@ pub struct ItemQuery {
 pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<ItemQuery>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT id, title, num, type, year, plot, poster_path, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, size, series, label, set_name, file_path, strm_content, stills, parts, media_streams FROM items WHERE 1=1".to_string();
+    let mut params: Vec<String> = Vec::new();
     
-    if let Some(lid) = query.library_id { sql.push_str(&format!(" AND library_id = {}", lid)); }
-    if let Some(lt) = query.lib_type { sql.push_str(&format!(" AND type = '{}'", lt)); }
+    if let Some(lid) = query.library_id { 
+        sql.push_str(" AND library_id = ?");
+        params.push(lid.to_string());
+    }
+    if let Some(lt) = &query.lib_type { 
+        sql.push_str(" AND type = ?");
+        params.push(lt.to_string());
+    }
     
-    if let Some(a) = &query.actor { sql.push_str(&format!(" AND (actors LIKE '%\\\"name\\\":\\\"{}\\\"%' OR directors LIKE '%{}%')", a, a)); }
-    if let Some(g) = &query.genre { sql.push_str(&format!(" AND genres LIKE '%{}%'", g)); }
-    if let Some(t) = &query.tag { sql.push_str(&format!(" AND tags LIKE '%{}%'", t)); }
-    if let Some(st) = &query.studio { sql.push_str(&format!(" AND studios LIKE '%{}%'", st)); }
+    if let Some(a) = &query.actor { 
+        sql.push_str(" AND (actors LIKE ? OR actors LIKE ? OR directors = ? OR directors LIKE ? OR directors LIKE ? OR directors LIKE ?)");
+        params.push(format!("%\"name\":\"{}\"%", a));
+        params.push(format!("%\"name\": \"{}\"%", a));
+        params.push(a.clone());
+        params.push(format!("{} / %", a));
+        params.push(format!("% / {}", a));
+        params.push(format!("% / {} / %", a));
+    }
+    if let Some(g) = &query.genre { 
+        sql.push_str(" AND (genres = ? OR genres LIKE ? OR genres LIKE ? OR genres LIKE ?)");
+        params.push(g.clone());
+        params.push(format!("{} / %", g));
+        params.push(format!("% / {}", g));
+        params.push(format!("% / {} / %", g));
+    }
+    if let Some(t) = &query.tag { 
+        sql.push_str(" AND (tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)");
+        params.push(t.clone());
+        params.push(format!("{} / %", t));
+        params.push(format!("% / {}", t));
+        params.push(format!("% / {} / %", t));
+    }
+    if let Some(st) = &query.studio { 
+        sql.push_str(" AND (studios = ? OR studios LIKE ? OR studios LIKE ? OR studios LIKE ?)");
+        params.push(st.clone());
+        params.push(format!("{} / %", st));
+        params.push(format!("% / {}", st));
+        params.push(format!("% / {} / %", st));
+    }
     
     sql.push_str(" ORDER BY title ASC");
     
     let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL Prepare Error: {}", e)).into_response() };
-    let items: Vec<Value> = stmt.query_map([], |row| {
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+    
+    let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
         let actors_json: String = row.get(12).unwrap_or_else(|_| "[]".to_string());
         let actors: Value = serde_json::from_str(&actors_json).unwrap_or(json!([]));
         let stills_json: String = row.get(25).unwrap_or_else(|_| "[]".to_string());
@@ -629,16 +663,22 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
 pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<HashMap<String, String>>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path FROM items WHERE 1=1".to_string();
+    let mut params: Vec<String> = Vec::new();
     
     if let Some(pid) = query.get("ParentId") {
         if pid.starts_with("lib_") {
-            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); }
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { 
+                sql.push_str(" AND library_id = ?");
+                params.push(lib_id.to_string());
+            }
         }
     }
     sql.push_str(" ORDER BY id DESC LIMIT 16"); 
     
     let mut stmt = conn.prepare(&sql).unwrap();
-    let items: Vec<Value> = stmt.query_map([], |row| {
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+    
+    let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
         let id: i64 = row.get(0).unwrap_or_default();
         let poster_path: String = row.get(5).unwrap_or_default();
         let has_poster = !poster_path.is_empty();
@@ -684,7 +724,6 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 }
         }))
     }).unwrap().filter_map(Result::ok).collect();
-    // 致命修复：Latest 接口必须直接返回裸数组，不能带 Items 外壳！
     Json(items).into_response()
 }
 
@@ -778,10 +817,14 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
     }
 
     let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path, date_created, actors, directors, tags, studios FROM items WHERE 1=1".to_string();
+    let mut params: Vec<String> = Vec::new();
     
     if let Some(pid) = &query.parent_id {
         if pid.starts_with("lib_") {
-            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); }
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { 
+                sql.push_str(" AND library_id = ?"); 
+                params.push(lib_id.to_string());
+            }
         } else if pid.starts_with("boxset_") {
             let mut found_set_name = String::new();
             let mut names = Vec::new();
@@ -797,42 +840,68 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
                 }
                 if !found_set_name.is_empty() { break; }
             }
-            if !found_set_name.is_empty() { sql.push_str(&format!(" AND (set_name = '{}' OR set_name LIKE '{} / %' OR set_name LIKE '% / {}' OR set_name LIKE '% / {} / %')", found_set_name, found_set_name, found_set_name, found_set_name)); }
+            if !found_set_name.is_empty() { 
+                sql.push_str(" AND (set_name = ? OR set_name LIKE ? OR set_name LIKE ? OR set_name LIKE ?)"); 
+                params.push(found_set_name.clone());
+                params.push(format!("{} / %", found_set_name));
+                params.push(format!("% / {}", found_set_name));
+                params.push(format!("% / {} / %", found_set_name));
+            }
             else { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
         }
     }
 
-    // Emby 客户端筛选项 (必须解码 URL 编码的字符，否则中文搜不到)
+    // 严格边界参数绑定
     if let Some(p) = &query.person_ids { 
         let decoded = decode_url(p);
         let name = decoded.replace("person_", ""); 
-        sql.push_str(&format!(" AND (actors LIKE '%\\\"name\\\":\\\"{}\\\"%' OR directors LIKE '%{}%')", name, name)); 
+        sql.push_str(" AND (directors = ? OR directors LIKE ? OR directors LIKE ? OR directors LIKE ? OR actors LIKE ? OR actors LIKE ?)");
+        params.push(name.clone());
+        params.push(format!("{} / %", name));
+        params.push(format!("% / {}", name));
+        params.push(format!("% / {} / %", name));
+        params.push(format!("%\"name\":\"{}\"%", name));
+        params.push(format!("%\"name\": \"{}\"%", name));
     }
     if let Some(g) = query.genre_ids.as_ref().or(query.genres.as_ref()) { 
         let decoded = decode_url(g);
         let name = decoded.replace("genre_", ""); 
-        sql.push_str(&format!(" AND genres LIKE '%{}%'", name)); 
+        sql.push_str(" AND (genres = ? OR genres LIKE ? OR genres LIKE ? OR genres LIKE ?)");
+        params.push(name.clone());
+        params.push(format!("{} / %", name));
+        params.push(format!("% / {}", name));
+        params.push(format!("% / {} / %", name));
     }
     if let Some(t) = query.tag_ids.as_ref().or(query.tags.as_ref()) { 
         let decoded = decode_url(t);
         let name = decoded.replace("tag_", "");
-        sql.push_str(&format!(" AND tags LIKE '%{}%'", name)); 
+        sql.push_str(" AND (tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)");
+        params.push(name.clone());
+        params.push(format!("{} / %", name));
+        params.push(format!("% / {}", name));
+        params.push(format!("% / {} / %", name));
     }
     if let Some(sid) = query.studio_ids.as_ref().or(query.studios.as_ref()) { 
         let decoded = decode_url(sid);
         let name = decoded.replace("studio_", "");
-        sql.push_str(&format!(" AND studios LIKE '%{}%'", name)); 
+        sql.push_str(" AND (studios = ? OR studios LIKE ? OR studios LIKE ? OR studios LIKE ?)");
+        params.push(name.clone());
+        params.push(format!("{} / %", name));
+        params.push(format!("% / {}", name));
+        params.push(format!("% / {} / %", name));
     }
 
     let from_idx = sql.find(" FROM items").unwrap_or(0);
     let count_sql = format!("SELECT COUNT(*){}", &sql[from_idx..]);
-    let total: i64 = conn.query_row(&count_sql, [], |r| r.get(0)).unwrap_or(0);
+    let total: i64 = conn.query_row(&count_sql, rusqlite::params_from_iter(params.iter()), |r| r.get(0)).unwrap_or(0);
+    
     let start = query.start_index.unwrap_or(0);
     let limit = query.limit.unwrap_or(100);
     sql.push_str(&format!(" ORDER BY id DESC LIMIT {} OFFSET {}", limit, start));
     
     let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
-    let items: Vec<Value> = stmt.query_map([], |row| {
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+    let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
         let id: i64 = row.get(0).unwrap_or_default();
         let poster_path: String = row.get(5).unwrap_or_default();
         let has_poster = !poster_path.is_empty();
@@ -1431,8 +1500,52 @@ pub async fn emby_person(AxumPath(person_id): AxumPath<String>) -> impl IntoResp
     let decoded = decode_url(&person_id);
     let name = decoded.replace("person_", "");
     Json(json!({
-        "Name": name, "Id": person_id, "ServerId": "rust-em-server", "Type": "Person", "ImageTags": {},
+        "Name": name,
+        "ServerId": "rust-em-server",
+        "Id": person_id,
+        "Type": "Person",
+        "IsFolder": false,
+        "ImageTags": {},
+        "BackdropImageTags": [],
+        "UserData": { "PlayCount": 0, "IsFavorite": false, "Played": false }
     }))
+}
+
+pub async fn emby_person_items(
+    State(pool): State<Arc<Mutex<Connection>>>,
+    AxumPath(person_id): AxumPath<String>,
+    Query(mut query): Query<EmbyItemsQuery>
+) -> impl IntoResponse {
+    if query.person_ids.is_none() && query.studios.is_none() {
+        query.person_ids = Some(person_id);
+    }
+    emby_items_inner(pool, query).await
+}
+
+pub async fn emby_studio(AxumPath(studio_id): AxumPath<String>) -> impl IntoResponse {
+    let decoded = decode_url(&studio_id);
+    let name = decoded.replace("studio_", "");
+    Json(json!({
+        "Name": name,
+        "ServerId": "rust-em-server",
+        "Id": studio_id,
+        "Type": "Studio",
+        "IsFolder": false,
+        "ImageTags": {},
+        "BackdropImageTags": [],
+        "UserData": { "PlayCount": 0, "IsFavorite": false, "Played": false }
+    }))
+}
+
+pub async fn emby_studio_items(
+    State(pool): State<Arc<Mutex<Connection>>>,
+    AxumPath(studio_id): AxumPath<String>,
+    Query(mut query): Query<EmbyItemsQuery>
+) -> impl IntoResponse {
+    if query.studio_ids.is_none() && query.studios.is_none() {
+        query.studio_ids = Some(studio_id);
+    }
+    emby_items_inner(pool, query).await
 }
 
 async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
