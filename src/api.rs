@@ -85,6 +85,8 @@ fn decode_url(input: &str) -> String {
             } else {
                 result.push(b'%');
             }
+        } else if b == b'+' {
+            result.push(b' ');
         } else {
             result.push(b);
         }
@@ -445,34 +447,21 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
     }
     
     if let Some(a) = &query.actor { 
-        sql.push_str(" AND (actors LIKE ? OR actors LIKE ? OR directors = ? OR directors LIKE ? OR directors LIKE ? OR directors LIKE ?)");
-        params.push(format!("%\"name\":\"{}\"%", a));
-        params.push(format!("%\"name\": \"{}\"%", a));
-        params.push(a.clone());
-        params.push(format!("{} / %", a));
-        params.push(format!("% / {}", a));
-        params.push(format!("% / {} / %", a));
+        sql.push_str(" AND (actors LIKE ? OR directors LIKE ?)");
+        params.push(format!("%{}%", a));
+        params.push(format!("%{}%", a));
     }
     if let Some(g) = &query.genre { 
-        sql.push_str(" AND (genres = ? OR genres LIKE ? OR genres LIKE ? OR genres LIKE ?)");
-        params.push(g.clone());
-        params.push(format!("{} / %", g));
-        params.push(format!("% / {}", g));
-        params.push(format!("% / {} / %", g));
+        sql.push_str(" AND genres LIKE ?");
+        params.push(format!("%{}%", g));
     }
     if let Some(t) = &query.tag { 
-        sql.push_str(" AND (tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)");
-        params.push(t.clone());
-        params.push(format!("{} / %", t));
-        params.push(format!("% / {}", t));
-        params.push(format!("% / {} / %", t));
+        sql.push_str(" AND tags LIKE ?");
+        params.push(format!("%{}%", t));
     }
     if let Some(st) = &query.studio { 
-        sql.push_str(" AND (studios = ? OR studios LIKE ? OR studios LIKE ? OR studios LIKE ?)");
-        params.push(st.clone());
-        params.push(format!("{} / %", st));
-        params.push(format!("% / {}", st));
-        params.push(format!("% / {} / %", st));
+        sql.push_str(" AND studios LIKE ?");
+        params.push(format!("%{}%", st));
     }
     
     sql.push_str(" ORDER BY title ASC");
@@ -662,6 +651,161 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
 
 pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<HashMap<String, String>>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path FROM items WHERE 1=1".to_string();
+    let mut params: Vec<String> = Vec::new();
+    
+    if let Some(pid) = query.get("ParentId") {
+        if pid.starts_with("lib_") {
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { 
+                sql.push_str(" AND library_id = ?");
+                params.push(lib_id.to_string());
+            }
+        }
+    }
+    sql.push_str(" ORDER BY id DESC LIMIT 16"); 
+    
+    let mut stmt = conn.prepare(&sql).unwrap();
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+    
+    let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
+        let id: i64 = row.get(0).unwrap_or_default();
+        let poster_path: String = row.get(5).unwrap_or_default();
+        let has_poster = !poster_path.is_empty();
+        let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
+        let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+        let poster_tag = if has_poster { format!("tag_{}_{}", id, &hash_hex[..8]) } else { String::new() };
+
+        let fanart_path: String = row.get(18).unwrap_or_default();
+        let has_fanart = !fanart_path.is_empty();
+        let mut hf = Sha256::new(); hf.update(fanart_path.as_bytes()); let hashf = hf.finalize();
+        let hash_hexf: String = hashf.iter().map(|b| format!("{:02x}", b)).collect();
+        let backdrop_tag = if has_fanart { format!("backdrop_{}_{}", id, &hash_hexf[..8]) } else { String::new() };
+
+        let runtime_mins: i32 = row.get(7).unwrap_or(0);
+        let total_ticks: i64 = (runtime_mins as i64) * 60 * 10_000_000;
+        let size: i64 = row.get(14).unwrap_or(0);
+        let mtime = row.get::<_, i64>(15).unwrap_or(0);
+        let date_str = format_iso8601(mtime);
+        
+        Ok(json!({
+            "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
+            "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
+            "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
+            "Overview": row.get::<_, String>(4).unwrap_or_default(), 
+            "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0), 
+            "RunTimeTicks": total_ticks,
+            "Size": size,
+            "DateCreated": date_str.clone(),
+            "EndDate": date_str,
+            "PrimaryImageAspectRatio": 0.6666666666666666,
+            "Container": "mp4",
+            "CanDelete": false,
+            "CanDownload": false,
+            "LocationType": "FileSystem",
+            "Status": "Continuing",
+            "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
+            "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
+            "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
+            "MediaSources": [{ 
+                "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size,
+                "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks
+            }],
+            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 }
+        }))
+    }).unwrap().filter_map(Result::ok).collect();
+    Json(items).into_response()
+}
+
+pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path FROM items WHERE playback_ticks > 0 ORDER BY updated_at DESC LIMIT 30").unwrap();
+    let items: Vec<Value> = stmt.query_map([], |row| {
+        let id: i64 = row.get(0).unwrap_or_default();
+        let poster_path: String = row.get(5).unwrap_or_default();
+        let has_poster = !poster_path.is_empty();
+        let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
+        let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+        let poster_tag = if has_poster { format!("tag_{}_{}", id, &hash_hex[..8]) } else { String::new() };
+        
+        let playback_ticks: i64 = row.get(18).unwrap_or(0);
+        let fanart_path: String = row.get(19).unwrap_or_default();
+        let has_fanart = !fanart_path.is_empty();
+        let mut hf = Sha256::new(); hf.update(fanart_path.as_bytes()); let hashf = hf.finalize();
+        let hash_hexf: String = hashf.iter().map(|b| format!("{:02x}", b)).collect();
+        let backdrop_tag = if has_fanart { format!("backdrop_{}_{}", id, &hash_hexf[..8]) } else { String::new() };
+
+        let runtime_mins: i32 = row.get(7).unwrap_or(0);
+        let total_ticks: i64 = (runtime_mins as i64) * 60 * 10_000_000;
+        let played_pct = if total_ticks > 0 { (playback_ticks * 100 / total_ticks) as i32 } else { 0 };
+        
+        Ok(json!({
+            "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
+            "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
+            "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
+            "Overview": row.get::<_, String>(4).unwrap_or_default(), 
+            "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0), 
+            "RunTimeTicks": total_ticks,
+            "DateCreated": format_iso8601(row.get::<_, i64>(15).unwrap_or(0)),
+            "PrimaryImageAspectRatio": 0.6666666666666666,
+            "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
+            "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
+            "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
+            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
+            "UserData": { 
+                "PlaybackPositionTicks": playback_ticks, 
+                "PlayCount": 1, 
+                "IsFavorite": false, 
+                "Played": false,
+                "PlayedPercentage": played_pct
+            }
+        }))
+    }).unwrap().filter_map(Result::ok).collect();
+    Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response()
+}
+
+pub async fn emby_items_next_up(_: AxumPath<String>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct EmbyItemsQuery { 
+    #[serde(rename = "ParentId")] parent_id: Option<String>,
+    #[serde(rename = "ListItemIds")] list_item_ids: Option<String>,
+    #[serde(rename = "StartIndex")] start_index: Option<i64>,
+    #[serde(rename = "Limit")] limit: Option<i64>,
+    #[serde(rename = "PersonIds")] person_ids: Option<String>,
+    #[serde(rename = "Genres")] genres: Option<String>,
+    #[serde(rename = "GenreIds")] genre_ids: Option<String>,
+    #[serde(rename = "Tags")] tags: Option<String>,
+    #[serde(rename = "TagIds")] tag_ids: Option<String>,
+    #[serde(rename = "StudioIds")] studio_ids: Option<String>,
+    #[serde(rename = "Studios")] studios: Option<String>,
+    #[serde(rename = "IncludeItemTypes")] include_item_types: Option<String>,
+}
+
+pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
+pub async fn emby_items_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
+async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -> Response {
+    let conn = pool.lock().unwrap();
+    
+    if let Some(list_ids) = &query.list_item_ids {
+        if let Ok(item_id) = list_ids.parse::<i64>() {
+            let set_name_str: String = conn.query_row("SELECT set_name FROM items WHERE id = ?1", [item_id], |r| r.get(0)).unwrap_or_default();
+            let mut boxsets = Vec::new();
+            for name in set_name_str.split(" / ").filter(|s| !s.trim().is_empty()) {
+                let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
+                let boxset_id = format!("boxset_{:x}", hash);
+                boxsets.push(json!({
+                    "Name": name, "Id": boxset_id, "ServerId": "rust-em-server",
+                    "Type": "BoxSet", "IsFolder": true, "MediaType": "Video",
+                    "ImageTags": {"Primary": "tag_boxset"}, "BackdropImageTags": [],
+                    "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
+                }));
+            }
+            return Json(json!({ "Items": boxsets, "TotalRecordCount": boxsets.len() })).into_response();
+        }
+        return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response();
+    }
+
     let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path, date_created, actors, directors, tags, studios FROM items WHERE 1=1".to_string();
     let mut params: Vec<String> = Vec::new();
 
@@ -714,6 +858,18 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
                 sql.push_str(" AND studios LIKE ?");
                 params.push(format!("%{}%", name));
             }
+        } else if decoded_pid.starts_with("genre_") {
+            let name = decoded_pid.replace("genre_", "").trim().to_string();
+            if !name.is_empty() {
+                sql.push_str(" AND genres LIKE ?");
+                params.push(format!("%{}%", name));
+            }
+        } else if decoded_pid.starts_with("tag_") {
+            let name = decoded_pid.replace("tag_", "").trim().to_string();
+            if !name.is_empty() {
+                sql.push_str(" AND tags LIKE ?");
+                params.push(format!("%{}%", name));
+            }
         }
     }
 
@@ -726,13 +882,44 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             params.push(format!("%{}%", name));
         }
     }
+    
+    // 智能纠正 Yamby 的错误：把塞进 GenreIds 里的 studio_ 和 tag_ 剥离出来
     if let Some(g) = &query.genre_ids { 
-        let decoded = decode_url(g).replace('+', " ");
-        let name = decoded.replace("genre_", "").trim().to_string();
-        if !name.is_empty() {
-            sql.push_str(" AND genres LIKE ?");
-            params.push(format!("%{}%", name));
+        let val = decode_url(g).replace('+', " ");
+        if val.starts_with("studio_") { 
+            let name = val.replace("studio_", "").trim().to_string();
+            if !name.is_empty() { sql.push_str(" AND studios LIKE ?"); params.push(format!("%{}%", name)); }
+        } else if val.starts_with("tag_") { 
+            let name = val.replace("tag_", "").trim().to_string();
+            if !name.is_empty() { sql.push_str(" AND tags LIKE ?"); params.push(format!("%{}%", name)); }
+        } else if val.starts_with("person_") { 
+            let name = val.replace("person_", "").trim().to_string();
+            if !name.is_empty() { sql.push_str(" AND actors LIKE ?"); params.push(format!("%{}%", name)); }
+        } else { 
+            let name = val.replace("genre_", "").trim().to_string();
+            if !name.is_empty() { sql.push_str(" AND genres LIKE ?"); params.push(format!("%{}%", name)); }
         }
+    }
+    if let Some(g) = &query.genres { 
+        let name = decode_url(g).replace('+', " ").replace("genre_", "").trim().to_string();
+        if !name.is_empty() { sql.push_str(" AND genres LIKE ?"); params.push(format!("%{}%", name)); }
+    }
+    
+    if let Some(t) = &query.tag_ids { 
+        let name = decode_url(t).replace('+', " ").replace("tag_", "").trim().to_string();
+        if !name.is_empty() { sql.push_str(" AND tags LIKE ?"); params.push(format!("%{}%", name)); }
+    }
+    if let Some(t) = &query.tags { 
+        let name = decode_url(t).replace('+', " ").replace("tag_", "").trim().to_string();
+        if !name.is_empty() { sql.push_str(" AND tags LIKE ?"); params.push(format!("%{}%", name)); }
+    }
+    if let Some(s) = &query.studio_ids { 
+        let name = decode_url(s).replace('+', " ").replace("studio_", "").trim().to_string();
+        if !name.is_empty() { sql.push_str(" AND studios LIKE ?"); params.push(format!("%{}%", name)); }
+    }
+    if let Some(s) = &query.studios { 
+        let name = decode_url(s).replace('+', " ").replace("studio_", "").trim().to_string();
+        if !name.is_empty() { sql.push_str(" AND studios LIKE ?"); params.push(format!("%{}%", name)); }
     }
 
     let from_idx = sql.find(" FROM items").unwrap_or(0);
