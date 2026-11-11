@@ -90,6 +90,7 @@ fn emby_routes() -> Router<AppState> {
         .route("/Users/{user_id}/Items/NextUp", get(api::emby_items_next_up))
         .route("/Items", get(api::emby_items))
         .route("/Items/Counts", get(api::emby_item_counts))
+        .route("/Items/Filters", get(api::emby_items_filters))
         .route("/Genres", get(api::emby_genres))
         .route("/Tags", get(api::emby_tags))
         .route("/Years", get(api::emby_years))

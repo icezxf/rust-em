@@ -2160,3 +2160,65 @@ pub async fn emby_official_ratings(
     }
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
+
+pub async fn emby_items_filters(
+    State(pool): State<Arc<Mutex<Connection>>>, 
+    Query(query): Query<HashMap<String, String>>
+) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut sql = "SELECT genres, tags, mpaa, year FROM items WHERE 1=1".to_string();
+    let mut params = Vec::new();
+    
+    if let Some(pid) = query.get("ParentId") {
+        if pid.starts_with("lib_") {
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
+                sql.push_str(" AND library_id = ?");
+                params.push(lib_id.to_string());
+            }
+        }
+    }
+
+    let mut genres = std::collections::HashSet::new();
+    let mut tags = std::collections::HashSet::new();
+    let mut ratings = std::collections::HashSet::new();
+    let mut years = std::collections::HashSet::new();
+
+    if let Ok(mut stmt) = conn.prepare(&sql) {
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+        if let Ok(mapped) = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
+            Ok((
+                row.get::<_, String>(0).unwrap_or_default(), 
+                row.get::<_, String>(1).unwrap_or_default(), 
+                row.get::<_, String>(2).unwrap_or_default(), 
+                row.get::<_, String>(3).unwrap_or_default()
+            ))
+        }) {
+            for (g_str, t_str, m_str, y_str) in mapped.flatten() {
+                for g in g_str.split(" / ") { if !g.trim().is_empty() { genres.insert(g.trim().to_string()); } }
+                for t in t_str.split(" / ") { if !t.trim().is_empty() { tags.insert(t.trim().to_string()); } }
+                if !m_str.is_empty() { ratings.insert(m_str); }
+                if let Ok(y) = y_str.parse::<i32>() { years.insert(y); }
+            }
+        }
+    }
+
+    // 严格按照 Emby 官方标准格式返回
+    let mut genre_items: Vec<Value> = genres.into_iter().map(|g| json!({"Name": g, "Id": g})).collect();
+    genre_items.sort_by(|a, b| a["Name"].as_str().unwrap_or("").cmp(b["Name"].as_str().unwrap_or("")));
+    
+    let mut tag_items: Vec<Value> = tags.into_iter().map(|t| json!({"Name": t, "Id": t})).collect();
+    tag_items.sort_by(|a, b| a["Name"].as_str().unwrap_or("").cmp(b["Name"].as_str().unwrap_or("")));
+
+    let mut rating_items: Vec<Value> = ratings.into_iter().map(|r| json!(r)).collect();
+    rating_items.sort_by(|a, b| a.as_str().unwrap_or("").cmp(b.as_str().unwrap_or("")));
+    
+    let mut year_list: Vec<i32> = years.into_iter().collect();
+    year_list.sort_by(|a, b| b.cmp(a)); // 年份倒序
+    
+    Json(json!({
+        "Genres": genre_items,
+        "Tags": tag_items,
+        "OfficialRatings": rating_items,
+        "Years": year_list
+    }))
+}
