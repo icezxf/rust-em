@@ -25,6 +25,7 @@ async fn main() {
     let conn = Connection::open(&db_path).expect("无法打开数据库");
     db::init_db(&conn);
     db::ensure_extra_columns(&conn);
+    let _ = conn.execute("ALTER TABLE items ADD COLUMN play_count INTEGER DEFAULT 0", []);
     db::init_settings_table(&conn);
     
     let state = Arc::new(Mutex::new(conn));
