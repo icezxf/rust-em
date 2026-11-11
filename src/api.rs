@@ -821,11 +821,16 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
     let mut params: Vec<String> = Vec::new();
     
     if let Some(types) = &query.include_item_types {
-        let t = types.to_lowercase();
-        if t.contains("movie") && !t.contains("series") && !t.contains("episode") {
-            sql.push_str(" AND type = 'movies'");
-        } else if (t.contains("series") || t.contains("episode")) && !t.contains("movie") {
-            sql.push_str(" AND type = 'tvshows'");
+        // 智能判定：如果客户端是在查演员或分类，直接无视它要求的 IncludeItemTypes，全给它！
+        let is_filtered_query = query.person_ids.is_some() || query.genre_ids.is_some() || query.studio_ids.is_some() || query.tag_ids.is_some() || query.parent_id.as_deref().map_or(false, |p| p.starts_with("person_") || p.starts_with("studio_") || p.starts_with("genre_"));
+        
+        if !is_filtered_query {
+            let t = types.to_lowercase();
+            if t.contains("movie") && !t.contains("series") && !t.contains("episode") {
+                sql.push_str(" AND (type = 'movies' OR type = 'movie')");
+            } else if (t.contains("series") || t.contains("episode")) && !t.contains("movie") {
+                sql.push_str(" AND type = 'tvshows'");
+            }
         }
     }
 
