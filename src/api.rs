@@ -2038,10 +2038,14 @@ pub async fn emby_tags(
     let mut names: Vec<String> = set.into_iter().collect();
     names.sort();
     
-    let items: Vec<Value> = names.into_iter().map(|name| {
-        // 返回纯字符串，而不是对象
-        json!(name)
-    }).collect();
+    let items: Vec<Value> = names.into_iter().map(|name| json!({
+        "Name": name, "Id": name, "ServerId": "rust-em-server",
+        "Type": "Tag", "IsFolder": false, "MediaType": "Video",
+        "PrimaryImageAspectRatio": 0.6666666666666666,
+        "ImageTags": {}, "BackdropImageTags": [], "ImageBlurHashes": {},
+        "LocationType": "FileSystem",
+        "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 }
+    })).collect();
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
@@ -2063,8 +2067,14 @@ pub async fn emby_years(
     if let Ok(mut stmt) = conn.prepare(&sql) {
         if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
             for y in mapped.flatten() {
-                // 返回纯字符串
-                items.push(json!(y));
+                items.push(json!({
+                    "Name": y, "Id": y, "ServerId": "rust-em-server",
+                    "Type": "Year", "IsFolder": false, "MediaType": "Video",
+                    "PrimaryImageAspectRatio": 0.6666666666666666,
+                    "ImageTags": {}, "BackdropImageTags": [], "ImageBlurHashes": {},
+                    "LocationType": "FileSystem",
+                    "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 }
+                }));
             }
         }
     }
@@ -2128,7 +2138,7 @@ pub async fn emby_official_ratings(
         if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
             for m in mapped.flatten() {
                 items.push(json!({
-                    "Name": m, "Id": format!("mpaa_{}", m), "ServerId": "rust-em-server",
+                    "Name": m, "Id": m, "ServerId": "rust-em-server",
                     "Type": "OfficialRating", "IsFolder": false, "MediaType": "Video",
                     "PrimaryImageAspectRatio": 0.6666666666666666,
                     "ImageTags": {}, "BackdropImageTags": [], "ImageBlurHashes": {},
