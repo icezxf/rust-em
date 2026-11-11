@@ -819,6 +819,41 @@ pub async fn emby_items_with_user(State(pool): State<Arc<Mutex<Connection>>>, Ax
 async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -> Response {
     let conn = pool.lock().unwrap();
     
+    // 拦截标签实体请求 (Yamby 点标签栏时发起的)
+    if let Some(types) = &query.include_item_types {
+        if types.to_lowercase() == "tag" {
+            let mut sql = "SELECT tags FROM items WHERE tags != ''".to_string();
+            if let Some(pid) = &query.parent_id {
+                if pid.starts_with("lib_") {
+                    if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
+                        sql.push_str(&format!(" AND library_id = {}", lib_id));
+                    }
+                }
+            }
+            
+            let mut tags_set = std::collections::HashSet::new();
+            if let Ok(mut stmt) = conn.prepare(&sql) {
+                if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+                    for t_str in mapped.flatten() {
+                        for t in t_str.split(" / ") {
+                            let name = t.trim();
+                            if !name.is_empty() { tags_set.insert(name.to_string()); }
+                        }
+                    }
+                }
+            }
+
+            let items: Vec<Value> = tags_set.into_iter().map(|t| {
+                json!({
+                    "Name": t, "Id": format!("tag_{}", t), "ServerId": "rust-em-server",
+                    "Type": "Tag", "IsFolder": false, "MediaType": "Video",
+                    "ImageTags": {}, "BackdropImageTags": []
+                })
+            }).collect();
+            return Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response();
+        }
+    }
+
     if let Some(list_ids) = &query.list_item_ids {
         if let Ok(item_id) = list_ids.parse::<i64>() {
             let set_name_str: String = conn.query_row("SELECT set_name FROM items WHERE id = ?1", [item_id], |r| r.get(0)).unwrap_or_default();
