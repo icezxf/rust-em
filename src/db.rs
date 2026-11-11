@@ -1,6 +1,7 @@
 use rusqlite::Connection;
 
 pub fn init_db(conn: &Connection) {
+    let _ = conn.execute("ALTER TABLE items ADD COLUMN is_favorite INTEGER DEFAULT 0", []);
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password TEXT);
         CREATE TABLE IF NOT EXISTS libraries (id INTEGER PRIMARY KEY, name TEXT, path TEXT, type TEXT);

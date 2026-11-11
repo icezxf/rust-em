@@ -90,6 +90,7 @@ fn emby_routes() -> Router<AppState> {
         .route("/Users/{user_id}/Items/NextUp", get(api::emby_items_next_up))
         .route("/Items", get(api::emby_items))
         .route("/Items/Counts", get(api::emby_item_counts))
+        .route("/Genres", get(api::emby_genres))
         .route("/Search/Hints", get(api::emby_search_hints))
         
         // 详情、元数据、人物与图片
@@ -143,7 +144,7 @@ fn emby_routes() -> Router<AppState> {
         // 杂项操作 (统一返回 OK)
         .route("/Items/{item_id}/Refresh", post(api::emby_action))
         .route("/Users/{user_id}/PlayedItems/{item_id}", post(api::emby_action).delete(api::emby_action))
-        .route("/Users/{user_id}/FavoriteItems/{item_id}", post(api::emby_action).delete(api::emby_action))
+        .route("/Users/{user_id}/FavoriteItems/{item_id}", post(api::emby_mark_favorite).delete(api::emby_unmark_favorite))
         .route("/Sessions/Logout", post(api::emby_action))
         .route("/api/danmu/{item_id}", get(api::emby_danmu))
 }

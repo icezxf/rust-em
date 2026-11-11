@@ -726,10 +726,29 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
     Json(items).into_response()
 }
 
-pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>) -> impl IntoResponse {
+pub async fn emby_items_resume(
+    State(pool): State<Arc<Mutex<Connection>>>, 
+    AxumPath(_user_id): AxumPath<String>,
+    Query(query): Query<HashMap<String, String>>
+) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path FROM items WHERE playback_ticks > 0 ORDER BY updated_at DESC LIMIT 30").unwrap();
-    let items: Vec<Value> = stmt.query_map([], |row| {
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path FROM items WHERE playback_ticks > 0".to_string();
+    let mut params: Vec<String> = Vec::new();
+    
+    // 支持只显示当前媒体库的继续观看
+    if let Some(pid) = query.get("ParentId") {
+        if pid.starts_with("lib_") {
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
+                sql.push_str(" AND library_id = ?");
+                params.push(lib_id.to_string());
+            }
+        }
+    }
+    sql.push_str(" ORDER BY updated_at DESC LIMIT 30");
+    
+    let mut stmt = conn.prepare(&sql).unwrap();
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+    let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
         let id: i64 = row.get(0).unwrap_or_default();
         let poster_path: String = row.get(5).unwrap_or_default();
         let has_poster = !poster_path.is_empty();
@@ -791,6 +810,8 @@ pub struct EmbyItemsQuery {
     #[serde(rename = "Studios")] studios: Option<String>,
     #[serde(rename = "IncludeItemTypes")] include_item_types: Option<String>,
     #[serde(rename = "Filters")] filters: Option<String>,
+    #[serde(rename = "SortBy")] sort_by: Option<String>,
+    #[serde(rename = "SortOrder")] sort_order: Option<String>,
 }
 
 pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
@@ -935,12 +956,15 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         if !name.is_empty() { sql.push_str(" AND studios LIKE ?"); params.push(format!("%{}%", name)); }
     }
 
-    // 处理是否已观看的筛选
+    // 处理是否已观看、是否收藏的筛选
     if let Some(filters) = &query.filters {
         if filters.contains("IsPlayed") {
             sql.push_str(" AND play_count > 0");
         } else if filters.contains("IsUnplayed") {
             sql.push_str(" AND play_count = 0");
+        }
+        if filters.contains("IsFavorite") {
+            sql.push_str(" AND is_favorite = 1");
         }
     }
 
@@ -950,7 +974,24 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
     
     let start = query.start_index.unwrap_or(0);
     let limit = query.limit.unwrap_or(100);
-    sql.push_str(&format!(" ORDER BY id DESC LIMIT {} OFFSET {}", limit, start));
+    
+    // 动态排序处理
+    let mut order_clause = " ORDER BY id DESC".to_string();
+    if let Some(sort_by) = &query.sort_by {
+        let is_desc = query.sort_order.as_deref().unwrap_or("Ascending").to_lowercase() == "descending";
+        let dir = if is_desc { " DESC" } else { " ASC" };
+        
+        if sort_by.contains("DateCreated") {
+            order_clause = format!(" ORDER BY date_created {}", dir);
+        } else if sort_by.contains("SortName") || sort_by.contains("Filename") {
+            order_clause = format!(" ORDER BY title {}", dir);
+        } else if sort_by.contains("ProductionYear") {
+            order_clause = format!(" ORDER BY year {}", dir);
+        } else if sort_by.contains("CommunityRating") {
+            order_clause = format!(" ORDER BY rating {}", dir);
+        }
+    }
+    sql.push_str(&format!("{} LIMIT {} OFFSET {}", order_clause, limit, start));
     
     let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
@@ -1756,4 +1797,58 @@ pub async fn emby_refresh_library(State(pool): State<Arc<Mutex<Connection>>>) ->
 
 pub async fn emby_activity_log() -> impl IntoResponse {
     Json(json!({ "Items": [], "TotalRecordCount": 0 }))
+}
+
+pub async fn emby_genres(
+    State(pool): State<Arc<Mutex<Connection>>>, 
+    Query(query): Query<HashMap<String, String>>
+) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut sql = "SELECT genres FROM items WHERE genres != ''".to_string();
+    if let Some(pid) = query.get("ParentId") {
+        if pid.starts_with("lib_") {
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
+                sql.push_str(&format!(" AND library_id = {}", lib_id));
+            }
+        }
+    }
+    
+    let mut genres_set = std::collections::HashSet::new();
+    if let Ok(mut stmt) = conn.prepare(&sql) {
+        if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+            for g_str in mapped.flatten() {
+                for g in g_str.split(" / ") {
+                    let name = g.trim();
+                    if !name.is_empty() { genres_set.insert(name.to_string()); }
+                }
+            }
+        }
+    }
+
+    let items: Vec<Value> = genres_set.into_iter().map(|g| {
+        json!({
+            "Name": g, "Id": format!("genre_{}", g), "ServerId": "rust-em-server",
+            "Type": "Genre", "IsFolder": false, "MediaType": "Video",
+            "ImageTags": {}, "BackdropImageTags": []
+        })
+    }).collect();
+    Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
+}
+
+pub async fn emby_mark_favorite(
+    State(pool): State<Arc<Mutex<Connection>>>,
+    AxumPath((_user_id, item_id)): AxumPath<(String, i64)>
+) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let _ = conn.execute("UPDATE items SET is_favorite = 1 WHERE id = ?1", [item_id]);
+    StatusCode::OK.into_response()
+}
+
+pub async fn emby_unmark_favorite(
+    State(pool): State<Arc<Mutex<Connection>>>,
+    AxumPath((_user_id, item_id)): AxumPath<(String, i64)>
+) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let _ = conn.execute("UPDATE items SET is_favorite = 0 WHERE id = ?1", [item_id]);
+    StatusCode::OK.into_response()
 }
