@@ -422,13 +422,20 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
 
 // ======= Web 接口 =======
 #[derive(Deserialize)]
-pub struct ItemQuery { library_id: Option<i64>, lib_type: Option<String> }
+pub struct ItemQuery { library_id: Option<i64>, lib_type: Option<String>, actor: Option<String>, genre: Option<String>, tag: Option<String>, studio: Option<String> }
 
 pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<ItemQuery>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT id, title, num, type, year, plot, poster_path, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, size, series, label, set_name, file_path, strm_content, stills, parts, media_streams FROM items WHERE 1=1".to_string();
     if let Some(lid) = query.library_id { sql.push_str(&format!(" AND library_id = {}", lid)); }
     if let Some(lt) = query.lib_type { sql.push_str(&format!(" AND type = '{}'", lt)); }
+    
+    // 网页端筛选逻辑
+    if let Some(a) = &query.actor { sql.push_str(&format!(" AND (actors LIKE '%\"name\":\"{}\"%' OR directors LIKE '%{}%')", a, a)); }
+    if let Some(g) = &query.genre { sql.push_str(&format!(" AND genres LIKE '%{}%'", g)); }
+    if let Some(t) = &query.tag { sql.push_str(&format!(" AND tags LIKE '%{}%'", t)); }
+    if let Some(st) = &query.studio { sql.push_str(&format!(" AND studios LIKE '%{}%'", st)); }
+    
     sql.push_str(" ORDER BY title ASC");
     let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL Prepare Error: {}", e)).into_response() };
     let items: Vec<Value> = stmt.query_map([], |row| {
@@ -732,6 +739,10 @@ pub struct EmbyItemsQuery {
     #[serde(rename = "ListItemIds")] list_item_ids: Option<String>,
     #[serde(rename = "StartIndex")] start_index: Option<i64>,
     #[serde(rename = "Limit")] limit: Option<i64>,
+    #[serde(rename = "PersonIds")] person_ids: Option<String>,
+    #[serde(rename = "Genres")] genres: Option<String>,
+    #[serde(rename = "Tags")] tags: Option<String>,
+    #[serde(rename = "StudioIds")] studio_ids: Option<String>,
 }
 
 pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
@@ -758,7 +769,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response();
     }
 
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path, date_created FROM items WHERE 1=1".to_string();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path, date_created, actors, directors, tags, studios FROM items WHERE 1=1".to_string();
     
     if let Some(pid) = &query.parent_id {
         if pid.starts_with("lib_") {
@@ -782,6 +793,15 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
             else { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
         }
     }
+
+    // Emby 客户端筛选项
+    if let Some(p) = &query.person_ids { 
+        let name = p.replace("person_", ""); 
+        sql.push_str(&format!(" AND (actors LIKE '%\"name\":\"{}\"%' OR directors LIKE '%{}%')", name, name)); 
+    }
+    if let Some(g) = &query.genres { sql.push_str(&format!(" AND genres LIKE '%{}%'", g)); }
+    if let Some(t) = &query.tags { sql.push_str(&format!(" AND tags LIKE '%{}%'", t)); }
+    if let Some(sid) = &query.studio_ids { sql.push_str(&format!(" AND studios LIKE '%{}%'", sid)); }
 
     let from_idx = sql.find(" FROM items").unwrap_or(0);
     let count_sql = format!("SELECT COUNT(*){}", &sql[from_idx..]);
