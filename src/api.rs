@@ -488,7 +488,12 @@ pub async fn get_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((id,
 }
 
 async fn serve_file(path_str: &str) -> Response {
-    if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str.to_string())], "").into_response(); }
+    // 如果是网络图（http/https），直接返回空（404），不代理，不下载，防止卡死 UI
+    if path_str.starts_with("http") { 
+        return StatusCode::NOT_FOUND.into_response(); 
+    }
+    
+    // 如果是本地图，直接读硬盘秒开
     if let Ok(bytes) = tokio::fs::read(&path_str).await {
         let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
         return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
@@ -1383,11 +1388,7 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
 
     if let Some(path_str) = path_opt {
         if !path_str.is_empty() {
-            if path_str.starts_with("http") { return (StatusCode::FOUND, [(LOCATION, path_str)], "").into_response(); }
-            if let Ok(bytes) = tokio::fs::read(&path_str).await {
-                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
-                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
-            }
+            return serve_file(&path_str).await;
         }
     }
     StatusCode::NOT_FOUND.into_response()
