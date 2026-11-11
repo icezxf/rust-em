@@ -870,6 +870,8 @@ pub struct EmbyItemsQuery {
     #[serde(rename = "SortBy")] sort_by: Option<String>,
     #[serde(rename = "SortOrder")] sort_order: Option<String>,
     #[serde(rename = "Recursive")] recursive: Option<bool>,
+    #[serde(rename = "SearchTerm", alias = "searchTerm", alias = "searchterm")]
+    search_term: Option<String>,
 }
 
 pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
@@ -1079,6 +1081,109 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         }
     }
 
+    // ===== SearchTerm 搜索（参数化，不建 people 表） =====
+    let search_term_raw = query.search_term.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let mut search_person_items: Vec<Value> = Vec::new();
+    let mut is_search = false;
+    let mut search_term_len = 0usize;
+
+    if let Some(term) = search_term_raw {
+        search_term_len = term.chars().count();
+        if search_term_len <= 1 {
+            return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response();
+        }
+        is_search = true;
+
+        let pattern = format!("%{}%", term);
+
+        // 媒体项匹配：标题/原名/标签/演员/导演
+        sql.push_str(
+            " AND (title LIKE ? OR original_title LIKE ? OR tags LIKE ? OR actors LIKE ? OR directors LIKE ?)"
+        );
+        params.push(pattern.clone());
+        params.push(pattern.clone());
+        params.push(pattern.clone());
+        params.push(pattern.clone());
+        params.push(pattern.clone());
+
+        let types_lower = query.include_item_types.as_deref().map(|t| t.to_lowercase()).unwrap_or_default();
+        let wants_person = types_lower.contains("person");
+        let wants_media = types_lower.contains("movie") || types_lower.contains("series");
+        let only_person = wants_person && !wants_media;
+
+        if wants_person {
+            let lib_id_opt = query.parent_id.as_deref()
+                .filter(|p| p.starts_with("lib_"))
+                .and_then(|p| p.trim_start_matches("lib_").parse::<i64>().ok());
+
+            let mut person_sql = String::from(
+                "SELECT actors, directors FROM items WHERE (actors LIKE ? OR directors LIKE ?)"
+            );
+            if lib_id_opt.is_some() {
+                person_sql.push_str(" AND library_id = ?");
+            }
+            person_sql.push_str(" LIMIT 500");
+
+            if let Ok(mut pstmt) = conn.prepare(&person_sql) {
+                let mut names_set: HashSet<String> = HashSet::new();
+                let mut p_params: Vec<Box<dyn rusqlite::ToSql>> = vec![
+                    Box::new(pattern.clone()),
+                    Box::new(pattern.clone()),
+                ];
+                if let Some(lid) = lib_id_opt {
+                    p_params.push(Box::new(lid));
+                }
+                let p_refs: Vec<&dyn rusqlite::ToSql> = p_params.iter().map(|b| b.as_ref()).collect();
+
+                if let Ok(mapped) = pstmt.query_map(rusqlite::params_from_iter(p_refs), |r| {
+                    Ok((
+                        r.get::<_, String>(0).unwrap_or_default(),
+                        r.get::<_, String>(1).unwrap_or_default(),
+                    ))
+                }) {
+                    for (actors, directors) in mapped.flatten() {
+                        if let Ok(arr) = serde_json::from_str::<Vec<Value>>(&actors) {
+                            for a in arr {
+                                if let Some(n) = a.get("name").and_then(|v| v.as_str()) {
+                                    if n.contains(term) { names_set.insert(n.to_string()); }
+                                }
+                            }
+                        }
+                        for d in directors.split(" / ") {
+                            let d = d.trim();
+                            if !d.is_empty() && d.contains(term) { names_set.insert(d.to_string()); }
+                        }
+                    }
+                }
+
+                for name in names_set {
+                    search_person_items.push(json!({
+                        "Name": name,
+                        "Id": format!("person_{}", name),
+                        "ServerId": "rust-em-server",
+                        "Type": "Person",
+                        "IsFolder": false,
+                        "MediaType": "Video",
+                        "ImageTags": {},
+                        "BackdropImageTags": [],
+                        "UserData": {
+                            "PlaybackPositionTicks": 0,
+                            "PlayCount": 0,
+                            "IsFavorite": false,
+                            "Played": false
+                        }
+                    }));
+                }
+            }
+        }
+
+        if only_person {
+            let final_total = if search_term_len >= 4 { search_person_items.len() as i64 } else { 0 };
+            return Json(json!({ "Items": search_person_items, "TotalRecordCount": final_total })).into_response();
+        }
+    }
+    // ===== SearchTerm 搜索结束 =====
+
     // 【核心修复 2】智能分发与精准匹配
     // 【核心修复】支持按逗号或竖线拆分，并严格使用 AND 关系
     // 【核心优化】分离 OR 和 AND 逻辑
@@ -1152,9 +1257,13 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         params.push(name.clone()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name));
     }
 
-    let from_idx = sql.find(" FROM items").unwrap_or(0);
-    let count_sql = format!("SELECT COUNT(*){}", &sql[from_idx..]);
-    let total: i64 = conn.query_row(&count_sql, rusqlite::params_from_iter(params.iter()), |r| r.get(0)).unwrap_or(0);
+    let total: i64 = if is_search {
+        0
+    } else {
+        let from_idx = sql.find(" FROM items").unwrap_or(0);
+        let count_sql = format!("SELECT COUNT(*){}", &sql[from_idx..]);
+        conn.query_row(&count_sql, rusqlite::params_from_iter(params.iter()), |r| r.get(0)).unwrap_or(0)
+    };
     
     let mut order_clause = " ORDER BY id DESC".to_string();
     if let Some(sort_by) = &query.sort_by {
@@ -1172,7 +1281,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
     
     let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
-    let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
+    let mut items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
         let id: i64 = row.get(0).unwrap_or_default();
         let poster_path: String = row.get(5).unwrap_or_default();
         let has_poster = !poster_path.is_empty();
@@ -1214,7 +1323,13 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
             "UserData": { "PlaybackPositionTicks": playback_ticks, "PlayCount": play_count, "IsFavorite": false, "Played": play_count > 0, "PlayedPercentage": played_pct }
         }))
     }).unwrap().filter_map(Result::ok).collect();
-    Json(json!({ "Items": items, "TotalRecordCount": total })).into_response()
+    items.extend(search_person_items);
+    let final_total = if is_search {
+        if search_term_len < 4 { 0 } else { items.len() as i64 }
+    } else {
+        total
+    };
+    Json(json!({ "Items": items, "TotalRecordCount": final_total })).into_response()
 }
 
 pub async fn emby_item_detail(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<String>) -> Response { emby_item_detail_inner(pool, item_id).await }
