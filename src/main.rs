@@ -17,7 +17,7 @@ pub type AppState = Arc<Mutex<Connection>>;
 
 #[tokio::main]
 async fn main() {
-    // 1. 初始化数据库 (适配 Docker 挂载路径)
+    // 1. 初始化数据库 (完美兼容 Docker 挂载路径)
     let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "/app/data/data.db".to_string());
     if let Some(parent) = std::path::Path::new(&db_path).parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -43,13 +43,11 @@ async fn main() {
         .route("/api/settings", get(api::get_settings).post(api::update_settings))
         .route("/api/probe/scan", post(api::probe_scan))
         
-        // ===== Emby API 路由 (嵌套在 /emby 下) =====
+        // ===== Emby API 路由 =====
         .nest("/emby", emby_routes())
-        
-        // ===== Emby 路由 (兼容未嵌套 /emby 的情况) =====
         .merge(emby_routes())
 
-        // 3. 静态文件服务（网页端 index.html 等）
+        // 3. 静态文件服务（网页端）
         .fallback_service(tower_http::services::ServeDir::new("public").append_index_html_on_directories(true))
 
         // 4. 中间件挂载
@@ -71,7 +69,6 @@ fn emby_routes() -> Router<AppState> {
         .route("/System/Ping", get(api::emby_ping).post(api::emby_ping))
         .route("/Users/Public", get(api::emby_public_users))
         .route("/Users/AuthenticateByName", post(api::emby_authenticate))
-        .route("/Users/{user_id}/Authenticate", post(api::emby_authenticate)) 
         
         // 用户与鉴权
         .route("/Auth/Keys", get(api::emby_auth_keys))
@@ -91,20 +88,20 @@ fn emby_routes() -> Router<AppState> {
         .route("/Items/Counts", get(api::emby_item_counts))
         .route("/Search/Hints", get(api::emby_search_hints))
         
-        // 详情、元数据与图片
+        // 详情、元数据、人物与图片
         .route("/Users/{user_id}/Items/{item_id}", get(api::emby_item_detail_with_user))
         .route("/Items/{item_id}", get(api::emby_item_detail).head(api::emby_item_detail))
         .route("/Items/{item_id}/Similar", get(api::emby_similar))
         .route("/Items/{item_id}/ThumbnailSet", get(api::emby_thumbnail_set))
+        .route("/Persons/{person_id}", get(api::emby_person))
+        .route("/Persons/{person_id}/Images/{image_type}", get(api::emby_person_image))
         .route("/Items/{item_id}/Images/{image_type}", 
             get(api::emby_item_image).head(api::emby_item_image))
         .route("/Items/{item_id}/Images/{image_type}/{index}", 
             get(api::emby_item_image_with_index).head(api::emby_item_image_with_index))
         .route("/Users/{user_id}/Images/{image_type}", get(api::emby_item_image_user_only))
-        .route("/Persons/{person_id}", get(api::emby_person))
-        .route("/Persons/{person_id}/Images/{image_type}", get(api::emby_person_image))
         
-        // 剧集相关（返回空或默认处理）
+        // 剧集相关
         .route("/Shows/NextUp", get(api::emby_shows_next_up))
         .route("/Shows/{series_id}/Seasons", get(api::emby_shows_seasons))
         .route("/Shows/{series_id}/Episodes", get(api::emby_shows_episodes))
@@ -120,7 +117,7 @@ fn emby_routes() -> Router<AppState> {
         .route("/Videos/{item_id}/{source_id}/stream", get(api::emby_stream_with_source).head(api::emby_stream_with_source))
         .route("/Videos/{item_id}/{source_id}/stream.{ext}", get(api::emby_stream_with_source_ext).head(api::emby_stream_with_source_ext))
         
-        // 小写路由兼容 (部分客户端重定向会转小写)
+        // 小写路由兼容
         .route("/videos/{item_id}/stream", get(api::emby_stream).head(api::emby_stream))
         .route("/videos/{item_id}/original.mp4", get(api::emby_stream).head(api::emby_stream))
         .route("/videos/{item_id}/original.strm", get(api::emby_stream).head(api::emby_stream))
@@ -132,14 +129,14 @@ fn emby_routes() -> Router<AppState> {
         .route("/Videos/{item_id}/{source_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream_with_source))
         .route("/Items/{item_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream))
         
-        // 会话与播放进度
+        // 会话与进度
         .route("/Sessions", get(api::emby_sessions))
         .route("/Sessions/Playing", post(api::emby_playing))
         .route("/Sessions/Playing/Progress", post(api::emby_playing_progress))
         .route("/Sessions/Playing/Stopped", post(api::emby_playing_stopped))
         .route("/Users/{user_id}/Items/{item_id}/HideFromResume", post(api::emby_hide_from_resume))
         
-        // 杂项操作 (统一返回 OK，防止客户端报错)
+        // 杂项操作 (统一返回 OK)
         .route("/Items/{item_id}/Refresh", post(api::emby_action))
         .route("/Users/{user_id}/PlayedItems/{item_id}", post(api::emby_action).delete(api::emby_action))
         .route("/Users/{user_id}/FavoriteItems/{item_id}", post(api::emby_action).delete(api::emby_action))

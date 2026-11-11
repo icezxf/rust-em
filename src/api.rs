@@ -422,21 +422,29 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
 
 // ======= Web 接口 =======
 #[derive(Deserialize)]
-pub struct ItemQuery { library_id: Option<i64>, lib_type: Option<String>, actor: Option<String>, genre: Option<String>, tag: Option<String>, studio: Option<String> }
+pub struct ItemQuery { 
+    library_id: Option<i64>, 
+    lib_type: Option<String>,
+    actor: Option<String>, 
+    genre: Option<String>, 
+    tag: Option<String>, 
+    studio: Option<String> 
+}
 
 pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<ItemQuery>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT id, title, num, type, year, plot, poster_path, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, size, series, label, set_name, file_path, strm_content, stills, parts, media_streams FROM items WHERE 1=1".to_string();
+    
     if let Some(lid) = query.library_id { sql.push_str(&format!(" AND library_id = {}", lid)); }
     if let Some(lt) = query.lib_type { sql.push_str(&format!(" AND type = '{}'", lt)); }
     
-    // 网页端筛选逻辑
-    if let Some(a) = &query.actor { sql.push_str(&format!(" AND (actors LIKE '%\"name\":\"{}\"%' OR directors LIKE '%{}%')", a, a)); }
+    if let Some(a) = &query.actor { sql.push_str(&format!(" AND (actors LIKE '%\\\"name\\\":\\\"{}\\\"%' OR directors LIKE '%{}%')", a, a)); }
     if let Some(g) = &query.genre { sql.push_str(&format!(" AND genres LIKE '%{}%'", g)); }
     if let Some(t) = &query.tag { sql.push_str(&format!(" AND tags LIKE '%{}%'", t)); }
     if let Some(st) = &query.studio { sql.push_str(&format!(" AND studios LIKE '%{}%'", st)); }
     
     sql.push_str(" ORDER BY title ASC");
+    
     let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("SQL Prepare Error: {}", e)).into_response() };
     let items: Vec<Value> = stmt.query_map([], |row| {
         let actors_json: String = row.get(12).unwrap_or_else(|_| "[]".to_string());
@@ -495,7 +503,6 @@ pub async fn get_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((id,
 }
 
 async fn serve_file(path_str: &str) -> Response {
-    // 如果是网络图，直接返回 1x1 透明 PNG，不下载，防崩溃
     if path_str.starts_with("http") { 
         let png_bytes: [u8; 67] = [
             0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
@@ -506,7 +513,6 @@ async fn serve_file(path_str: &str) -> Response {
         ];
         return (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response(); 
     }
-    // 如果是本地图，读硬盘秒开
     if let Ok(bytes) = tokio::fs::read(&path_str).await {
         let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
         return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
@@ -678,8 +684,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 }
         }))
     }).unwrap().filter_map(Result::ok).collect();
-    
-    // 致命修复：Latest 接口必须直接返回数组，不能带 Items 外壳！
+    // 致命修复：Latest 接口必须直接返回裸数组，不能带 Items 外壳！
     Json(items).into_response()
 }
 
@@ -741,8 +746,11 @@ pub struct EmbyItemsQuery {
     #[serde(rename = "Limit")] limit: Option<i64>,
     #[serde(rename = "PersonIds")] person_ids: Option<String>,
     #[serde(rename = "Genres")] genres: Option<String>,
+    #[serde(rename = "GenreIds")] genre_ids: Option<String>,
     #[serde(rename = "Tags")] tags: Option<String>,
+    #[serde(rename = "TagIds")] tag_ids: Option<String>,
     #[serde(rename = "StudioIds")] studio_ids: Option<String>,
+    #[serde(rename = "Studios")] studios: Option<String>,
 }
 
 pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
@@ -794,14 +802,27 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         }
     }
 
-    // Emby 客户端筛选项
+    // Emby 客户端筛选项 (必须解码 URL 编码的字符，否则中文搜不到)
     if let Some(p) = &query.person_ids { 
-        let name = p.replace("person_", ""); 
-        sql.push_str(&format!(" AND (actors LIKE '%\"name\":\"{}\"%' OR directors LIKE '%{}%')", name, name)); 
+        let decoded = decode_url(p);
+        let name = decoded.replace("person_", ""); 
+        sql.push_str(&format!(" AND (actors LIKE '%\\\"name\\\":\\\"{}\\\"%' OR directors LIKE '%{}%')", name, name)); 
     }
-    if let Some(g) = &query.genres { sql.push_str(&format!(" AND genres LIKE '%{}%'", g)); }
-    if let Some(t) = &query.tags { sql.push_str(&format!(" AND tags LIKE '%{}%'", t)); }
-    if let Some(sid) = &query.studio_ids { sql.push_str(&format!(" AND studios LIKE '%{}%'", sid)); }
+    if let Some(g) = query.genre_ids.as_ref().or(query.genres.as_ref()) { 
+        let decoded = decode_url(g);
+        let name = decoded.replace("genre_", ""); 
+        sql.push_str(&format!(" AND genres LIKE '%{}%'", name)); 
+    }
+    if let Some(t) = query.tag_ids.as_ref().or(query.tags.as_ref()) { 
+        let decoded = decode_url(t);
+        let name = decoded.replace("tag_", "");
+        sql.push_str(&format!(" AND tags LIKE '%{}%'", name)); 
+    }
+    if let Some(sid) = query.studio_ids.as_ref().or(query.studios.as_ref()) { 
+        let decoded = decode_url(sid);
+        let name = decoded.replace("studio_", "");
+        sql.push_str(&format!(" AND studios LIKE '%{}%'", name)); 
+    }
 
     let from_idx = sql.find(" FROM items").unwrap_or(0);
     let count_sql = format!("SELECT COUNT(*){}", &sql[from_idx..]);
@@ -973,7 +994,6 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
 
             let studios: Vec<Value> = studios_str.split(" / ").filter(|s| !s.trim().is_empty()).map(|s| {
                 json!({ "Name": s, "Id": format!("studio_{}", s) })
-                json!({ "Name": s, "Id": sid })
             }).collect();
 
             let mut people: Vec<Value> = Vec::new();
@@ -1068,7 +1088,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 "MediaSources": media_sources,
                 "ProbeEngine": "rust-native", "LocationType": "FileSystem",
                 "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
-                "UserData": { "ItemId": id.to_string(), "Key": id.to_string(), "PlaybackPositionTicks": playback_ticks, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": if run_time_ticks > 0 { (playback_ticks * 100 / run_time_ticks) } else { 0 } }
+                "UserData": { "ItemId": id.to_string(), "Key": id.to_string(), "PlaybackPositionTicks": playback_ticks, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": if run_time_ticks > 0 { playback_ticks * 100 / run_time_ticks } else { 0 } }
             }))
         }
     ).ok();
@@ -1288,7 +1308,6 @@ pub async fn emby_sessions() -> impl IntoResponse { Json(json!([])) }
 pub async fn emby_playing() -> impl IntoResponse { StatusCode::OK.into_response() }
 pub async fn emby_playing_stopped() -> impl IntoResponse { StatusCode::OK.into_response() }
 
-// 接收播放进度，并更新到数据库
 pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, body: Bytes) -> impl IntoResponse {
     if let Ok(val) = serde_json::from_slice::<Value>(&body) {
         if let Some(item_id_str) = val["ItemId"].as_str() {
@@ -1296,7 +1315,6 @@ pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, b
                 let ticks = val["PositionTicks"].as_i64().unwrap_or(0);
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
                 let conn = pool.lock().unwrap();
-                // 如果进度小于 10 秒（刚开始播放），或者是 0（客户端暂停），都不覆盖掉已经存下的历史进度
                 let current_ticks: i64 = conn.query_row("SELECT playback_ticks FROM items WHERE id = ?1", [item_id], |r| r.get(0)).unwrap_or(0);
                 if ticks > 10_000_000 || ticks == 0 && current_ticks == 0 {
                     let _ = conn.execute("UPDATE items SET playback_ticks = ?1, updated_at = ?2 WHERE id = ?3", [ticks, now, item_id]);
@@ -1407,6 +1425,14 @@ pub async fn emby_display_preferences(_: AxumPath<String>) -> impl IntoResponse 
 
 pub async fn emby_item_image_user_only(_: AxumPath<(String, String)>) -> Response {
     StatusCode::NOT_FOUND.into_response()
+}
+
+pub async fn emby_person(AxumPath(person_id): AxumPath<String>) -> impl IntoResponse {
+    let decoded = decode_url(&person_id);
+    let name = decoded.replace("person_", "");
+    Json(json!({
+        "Name": name, "Id": person_id, "ServerId": "rust-em-server", "Type": "Person", "ImageTags": {},
+    }))
 }
 
 async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
