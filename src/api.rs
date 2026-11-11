@@ -422,9 +422,9 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         let mut original_title = String::new(); let mut sort_title = String::new(); let mut country = String::new(); let mut language = String::new();
         let mut writers = String::new(); let mut trailer = String::new();
 
-        for nfo in nfo_candidates {
+        for nfo in &nfo_candidates {
             if nfo.exists() {
-                if let Some(meta) = crate::nfo::read_nfo(&nfo) {
+                if let Some(meta) = crate::nfo::read_nfo(nfo) {
                     if let Some(t) = &meta.title { title = t.clone(); }
                     if let Some(n) = &meta.num { num = n.clone(); }
                     if let Some(p) = &meta.plot { plot = p.clone(); }
