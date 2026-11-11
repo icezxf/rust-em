@@ -81,6 +81,21 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
 
 
 
+
+fn to_hex(s: &str) -> String { s.as_bytes().iter().map(|b| format!("{:02x}", b)).collect() }
+fn from_hex(s: &str) -> Option<String> {
+    if !s.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    for i in (0..s.len()).step_by(2) {
+        if i + 1 < s.len() {
+            if let Ok(b) = u8::from_str_radix(&s[i..i+2], 16) { bytes.push(b); } else { return None; }
+        }
+    }
+    String::from_utf8(bytes).ok()
+}
+
 fn decode_url(input: &str) -> String {
     let mut result = Vec::new();
     let mut bytes = input.bytes();
