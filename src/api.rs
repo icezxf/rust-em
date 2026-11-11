@@ -973,6 +973,12 @@ pub async fn emby_item_detail_with_user(State(pool): State<Arc<Mutex<Connection>
 }
 
 async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -> Response {
+    if item_id.starts_with("person_") {
+        return emby_person(AxumPath(item_id)).await.into_response();
+    } else if item_id.starts_with("studio_") {
+        return emby_studio(AxumPath(item_id)).await.into_response();
+    }
+
     let conn = pool.lock().unwrap();
     
     if item_id.starts_with("boxset_") {
@@ -1558,6 +1564,17 @@ pub async fn emby_studio_items(
 }
 
 async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
+    if item_id.starts_with("person_") || item_id.starts_with("studio_") {
+        let png_bytes: [u8; 67] = [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+            0x42, 0x60, 0x82
+        ];
+        return (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response();
+    }
+
     let path_opt = {
         let conn = pool.lock().unwrap();
 
