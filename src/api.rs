@@ -79,6 +79,18 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     Err(StatusCode::UNAUTHORIZED)
 }
 
+
+fn to_hex(s: &str) -> String { s.as_bytes().iter().map(|b| format!("{:02x}", b)).collect() }
+fn from_hex(s: &str) -> Option<String> {
+    let mut bytes = Vec::new();
+    for i in (0..s.len()).step_by(2) {
+        if i + 1 < s.len() {
+            if let Ok(b) = u8::from_str_radix(&s[i..i+2], 16) { bytes.push(b); } else { return None; }
+        }
+    }
+    String::from_utf8(bytes).ok()
+}
+
 fn decode_url(input: &str) -> String {
     let mut result = Vec::new();
     let mut bytes = input.bytes();
@@ -819,7 +831,60 @@ pub async fn emby_items_with_user(State(pool): State<Arc<Mutex<Connection>>>, Ax
 async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -> Response {
     let conn = pool.lock().unwrap();
     
-    // 1. 拦截合集请求 (BoxSet)
+    // 拦截真正的文件夹请求 (仅当 ParentId 是 lib 时，才展示第一层文件夹)
+    if let Some(types) = &query.include_item_types {
+        if types.to_lowercase().contains("folder") {
+            if let Some(pid) = &query.parent_id {
+                if pid.starts_with("lib_") {
+                    if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
+                        let mut base_paths = Vec::new();
+                        if let Ok(path_json) = conn.query_row("SELECT path FROM libraries WHERE id = ?1", [lib_id], |r| r.get::<_, String>(0)) {
+                            if let Ok(paths) = serde_json::from_str::<Vec<String>>(&path_json) {
+                                base_paths = paths;
+                            }
+                        }
+                        
+                        let mut folders_set = std::collections::HashSet::new();
+                        if let Ok(mut stmt) = conn.prepare("SELECT file_path FROM items WHERE library_id = ?1") {
+                            if let Ok(mapped) = stmt.query_map([lib_id], |r| r.get::<_, String>(0)) {
+                                for f_path in mapped.flatten() {
+                                    for base in &base_paths {
+                                        let base_clean = base.trim_end_matches('/');
+                                        if f_path.starts_with(base_clean) {
+                                            let rel_path = f_path[base_clean.len()..].trim_start_matches('/');
+                                            if let Some(first_dir) = rel_path.split('/').next() {
+                                                if !first_dir.is_empty() && first_dir != rel_path {
+                                                    let folder_abs_path = format!("{}/{}", base_clean, first_dir);
+                                                    folders_set.insert((first_dir.to_string(), folder_abs_path));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        let mut folder_items = Vec::new();
+                        for (name, abs_path) in folders_set {
+                            let hex_id = to_hex(&abs_path);
+                            folder_items.push(json!({
+                                "Name": name, "Id": format!("folder_{}", hex_id), "ServerId": "rust-em-server",
+                                "Type": "Folder", "IsFolder": true, "MediaType": "Video",
+                                "ImageTags": {}, "BackdropImageTags": [],
+                                "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
+                            }));
+                        }
+                        
+                        if !folder_items.is_empty() {
+                            return Json(json!({ "Items": folder_items, "TotalRecordCount": folder_items.len() })).into_response();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 拦截合集请求 (BoxSet)
     if let Some(types) = &query.include_item_types {
         if types.to_lowercase().contains("boxset") {
             let mut sql = "SELECT set_name FROM items WHERE set_name != ''".to_string();
@@ -921,12 +986,20 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
             sql.push_str(" AND type = 'tvshows'");
         }
         
-        // 如果客户端在查文件夹且包含了 Movie，说明它想要文件目录结构
-        // 我们的库是平铺的，直接给它返回电影
+        // 允许同时包含 Movie 和 Folder，当在 lib_ 下会展示虚拟文件夹，在 folder_ 下会展示真实电影
     }
 
     // 2. 处理 ParentId（媒体库/合集/演员主页）
     if let Some(pid) = &query.parent_id {
+        if pid.starts_with("folder_") {
+            let hex_path = pid.trim_start_matches("folder_");
+            if let Some(abs_path) = from_hex(hex_path) {
+                sql.push_str(" AND file_path LIKE ?");
+                params.push(format!("{}/%", abs_path.trim_end_matches('/')));
+            } else {
+                return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response();
+            }
+        } else {
         let decoded_pid = decode_url(pid).replace('+', " ");
         if decoded_pid.starts_with("lib_") {
             if let Ok(lib_id) = decoded_pid.trim_start_matches("lib_").parse::<i64>() { 
@@ -977,6 +1050,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
                 sql.push_str(" AND tags LIKE ?");
                 params.push(format!("%{}%", name));
             }
+        }
         }
     }
 
