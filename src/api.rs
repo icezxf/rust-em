@@ -831,55 +831,59 @@ pub async fn emby_items_with_user(State(pool): State<Arc<Mutex<Connection>>>, Ax
 async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -> Response {
     let conn = pool.lock().unwrap();
     
-    // 拦截真正的文件夹请求 (仅当 ParentId 是 lib 时，才展示第一层文件夹)
+    // 拦截真正的文件夹请求 (支持无限层级目录)
     if let Some(types) = &query.include_item_types {
         if types.to_lowercase().contains("folder") {
-            if let Some(pid) = &query.parent_id {
+            // 寻找当前的基路径（取决于点的是第一层 lib_ 还是更深层的 folder_）
+            let base_path = if let Some(pid) = &query.parent_id {
                 if pid.starts_with("lib_") {
                     if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
-                        let mut base_paths = Vec::new();
                         if let Ok(path_json) = conn.query_row("SELECT path FROM libraries WHERE id = ?1", [lib_id], |r| r.get::<_, String>(0)) {
-                            if let Ok(paths) = serde_json::from_str::<Vec<String>>(&path_json) {
-                                base_paths = paths;
-                            }
-                        }
-                        
-                        let mut folders_set = std::collections::HashSet::new();
-                        if let Ok(mut stmt) = conn.prepare("SELECT file_path FROM items WHERE library_id = ?1") {
-                            if let Ok(mapped) = stmt.query_map([lib_id], |r| r.get::<_, String>(0)) {
-                                for f_path in mapped.flatten() {
-                                    for base in &base_paths {
-                                        let base_clean = base.trim_end_matches('/');
-                                        if f_path.starts_with(base_clean) {
-                                            let rel_path = f_path[base_clean.len()..].trim_start_matches('/');
-                                            if let Some(first_dir) = rel_path.split('/').next() {
-                                                if !first_dir.is_empty() && first_dir != rel_path {
-                                                    let folder_abs_path = format!("{}/{}", base_clean, first_dir);
-                                                    folders_set.insert((first_dir.to_string(), folder_abs_path));
-                                                }
-                                            }
-                                        }
-                                    }
+                            serde_json::from_str::<Vec<String>>(&path_json).ok().and_then(|paths| paths.first().cloned())
+                        } else { None }
+                    } else { None }
+                } else if pid.starts_with("folder_") {
+                    from_hex(pid.trim_start_matches("folder_"))
+                } else { None }
+            } else { None };
+
+            if let Some(base) = base_path {
+                let base_clean = base.trim_end_matches('/');
+                let mut folders_set = std::collections::HashSet::new();
+                
+                // 查一下这个基路径下所有的文件
+                if let Ok(mut stmt) = conn.prepare("SELECT file_path FROM items WHERE file_path LIKE ?") {
+                    let like_pattern = format!("{}/%", base_clean);
+                    if let Ok(mapped) = stmt.query_map([&like_pattern], |r| r.get::<_, String>(0)) {
+                        for f_path in mapped.flatten() {
+                            let rel_path = f_path[base_clean.len()..].trim_start_matches('/');
+                            if let Some(first_dir) = rel_path.split('/').next() {
+                                // 如果 first_dir != rel_path，说明当前文件还在更深层的子文件夹里
+                                if !first_dir.is_empty() && first_dir != rel_path {
+                                    let folder_abs_path = format!("{}/{}", base_clean, first_dir);
+                                    folders_set.insert((first_dir.to_string(), folder_abs_path));
                                 }
                             }
                         }
-                        
-                        let mut folder_items = Vec::new();
-                        for (name, abs_path) in folders_set {
-                            let hex_id = to_hex(&abs_path);
-                            folder_items.push(json!({
-                                "Name": name, "Id": format!("folder_{}", hex_id), "ServerId": "rust-em-server",
-                                "Type": "Folder", "IsFolder": true, "MediaType": "Video",
-                                "ImageTags": {}, "BackdropImageTags": [],
-                                "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
-                            }));
-                        }
-                        
-                        if !folder_items.is_empty() {
-                            return Json(json!({ "Items": folder_items, "TotalRecordCount": folder_items.len() })).into_response();
-                        }
                     }
                 }
+                
+                // 如果找到了子文件夹，优先返回子文件夹列表，拦截掉平铺电影
+                if !folders_set.is_empty() {
+                    let mut folder_items = Vec::new();
+                    for (name, abs_path) in folders_set {
+                        let hex_id = to_hex(&abs_path);
+                        folder_items.push(json!({
+                            "Name": name, "Id": format!("folder_{}", hex_id), "ServerId": "rust-em-server",
+                            "Type": "Folder", "IsFolder": true, "MediaType": "Video",
+                            "ImageTags": {}, "BackdropImageTags": [],
+                            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
+                        }));
+                    }
+                    return Json(json!({ "Items": folder_items, "TotalRecordCount": folder_items.len() })).into_response();
+                }
+                
+                // 如果 folders_set 为空，说明这已经是最底层目录了，无需 return，让代码继续往下走查电影
             }
         }
     }
