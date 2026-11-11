@@ -416,17 +416,36 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
         let stills_json = serde_json::to_string(&stills).unwrap_or_default();
         
         let mediainfo_json_path = crate::probe::get_mediainfo_json_path(first_path);
-        let (probe_size, media_streams_json_str) = if mediainfo_json_path.exists() {
+        let (probe_size, mut media_streams_json_str) = if mediainfo_json_path.exists() {
             if let Some(src) = crate::probe::load_cached_source(&mediainfo_json_path) {
                 let s = src.get("Size").and_then(|v| v.as_i64()).unwrap_or(0);
                 let ms = src.get("MediaStreams").cloned().unwrap_or(json!([]));
                 let ms_str = serde_json::to_string(&ms).unwrap_or_else(|_| "[]".to_string());
+                // 只有当 JSON 里的时长大于 0 时，才去覆盖 NFO 里解析出来的 runtime
                 if let Some(rt_ticks) = src.get("RunTimeTicks").and_then(|v| v.as_i64()) {
                     if rt_ticks > 0 { runtime = (rt_ticks / 10_000_000 / 60) as i32; }
                 }
                 (s, ms_str)
             } else { (0, "[]".to_string()) }
         } else { (0, "[]".to_string()) };
+
+        // 【NFO 兜底逻辑】如果 JSON 里没有解析出流信息（为空），那么尝试去读 NFO 里的 <fileinfo> 流信息
+        if media_streams_json_str == "[]" {
+            let mut nfo_streams = String::new();
+            for nfo in &nfo_candidates {
+                if nfo.exists() {
+                    if let Some(meta) = crate::nfo::read_nfo(&nfo) {
+                        if let Some(ms) = meta.media_streams {
+                            nfo_streams = ms;
+                            break;
+                        }
+                    }
+                }
+            }
+            if !nfo_streams.is_empty() {
+                media_streams_json_str = nfo_streams;
+            }
+        }
         let final_size = if probe_size > 0 { probe_size } else { size };
         let updated_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
 
