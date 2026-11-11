@@ -17,8 +17,12 @@ pub type AppState = Arc<Mutex<Connection>>;
 
 #[tokio::main]
 async fn main() {
-    // 1. 初始化数据库
-    let conn = Connection::open("data.db").expect("无法打开数据库");
+    // 1. 初始化数据库 (适配 Docker 挂载路径)
+    let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "/app/data/data.db".to_string());
+    if let Some(parent) = std::path::Path::new(&db_path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let conn = Connection::open(&db_path).expect("无法打开数据库");
     db::init_db(&conn);
     db::ensure_extra_columns(&conn);
     db::init_settings_table(&conn);
