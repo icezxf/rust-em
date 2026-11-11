@@ -1046,14 +1046,22 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
     }
 
     // 【核心修复 2】智能分发与精准匹配
+    // 【核心修复】支持按逗号或竖线拆分，并严格使用 AND 关系
     let mut filter_ids = Vec::new();
-    if let Some(p) = &query.person_ids { filter_ids.push(("person", decode_url(p))); }
-    if let Some(g) = &query.genre_ids { filter_ids.push(("genre", decode_url(g))); }
-    if let Some(g) = &query.genres { filter_ids.push(("genre", decode_url(g))); }
-    if let Some(t) = &query.tag_ids { filter_ids.push(("tag", decode_url(t))); }
-    if let Some(t) = &query.tags { filter_ids.push(("tag", decode_url(t))); }
-    if let Some(s) = &query.studio_ids { filter_ids.push(("studio", decode_url(s))); }
-    if let Some(s) = &query.studios { filter_ids.push(("studio", decode_url(s))); }
+    let split_ids = |val: &str| -> Vec<String> {
+        decode_url(val).split(|c| c == ',' || c == '|')
+            .map(|x| x.trim().to_string())
+            .filter(|x| !x.is_empty())
+            .collect()
+    };
+
+    if let Some(p) = &query.person_ids { for id in split_ids(p) { filter_ids.push(("person", id)); } }
+    if let Some(g) = &query.genre_ids { for id in split_ids(g) { filter_ids.push(("genre", id)); } }
+    if let Some(g) = &query.genres { for id in split_ids(g) { filter_ids.push(("genre", id)); } }
+    if let Some(t) = &query.tag_ids { for id in split_ids(t) { filter_ids.push(("tag", id)); } }
+    if let Some(t) = &query.tags { for id in split_ids(t) { filter_ids.push(("tag", id)); } }
+    if let Some(s) = &query.studio_ids { for id in split_ids(s) { filter_ids.push(("studio", id)); } }
+    if let Some(s) = &query.studios { for id in split_ids(s) { filter_ids.push(("studio", id)); } }
 
     for (typ, raw_id) in filter_ids {
         let name = if raw_id.starts_with("person_") { raw_id.replace("person_", "") }
@@ -1064,14 +1072,15 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         let name = name.trim();
         if name.is_empty() { continue; }
 
-        if typ == "person" || raw_id.starts_with("person_") {
+        // 因为是遍历循环，每次 sql.push_str(" AND (...)") 就天然形成了 AND 关系！
+        if raw_id.starts_with("tag_") || typ == "tag" {
+            sql.push_str(" AND (tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)");
+            params.push(name.to_string()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name));
+        } else if typ == "person" || raw_id.starts_with("person_") {
             sql.push_str(" AND (directors = ? OR directors LIKE ? OR directors LIKE ? OR directors LIKE ? OR actors LIKE ? OR actors LIKE ?)");
             params.push(name.to_string()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name)); params.push(format!("%\"name\":\"{}\"%", name)); params.push(format!("%\"name\": \"{}\"%", name));
         } else if typ == "studio" || raw_id.starts_with("studio_") {
             sql.push_str(" AND (studios = ? OR studios LIKE ? OR studios LIKE ? OR studios LIKE ?)");
-            params.push(name.to_string()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name));
-        } else if typ == "tag" || raw_id.starts_with("tag_") {
-            sql.push_str(" AND (tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)");
             params.push(name.to_string()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name));
         } else {
             sql.push_str(" AND (genres = ? OR genres LIKE ? OR genres LIKE ? OR genres LIKE ?)");
