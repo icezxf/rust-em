@@ -304,6 +304,87 @@ fn get_base_stem(stem: &str) -> String {
     stem.to_string()
 }
 
+
+fn parse_nfo_stream_details(nfo_text: &str) -> Value {
+    let mut streams = Vec::new();
+
+    let extract_tag = |text: &str, tag: &str| -> Option<String> {
+        let start_tag = format!("<{}>", tag);
+        let end_tag = format!("</{}>", tag);
+        if let Some(start) = text.find(&start_tag) {
+            if let Some(end) = text[start..].find(&end_tag) {
+                return Some(text[start + start_tag.len()..start + end].trim().to_string());
+            }
+        }
+        None
+    };
+
+    // 1. 解析视频流 <video>
+    if let Some(v_start) = nfo_text.find("<video>") {
+        if let Some(v_end) = nfo_text.find("</video>") {
+            let v_text = &nfo_text[v_start..v_end];
+            let codec = extract_tag(v_text, "codec").unwrap_or_default();
+            let w = extract_tag(v_text, "width").and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+            let h = extract_tag(v_text, "height").and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+            let bitrate = extract_tag(v_text, "bitrate").and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+            let framerate_str = extract_tag(v_text, "framerate").unwrap_or_default();
+            let framerate = if let Some((n, d)) = framerate_str.split_once('/') {
+                let num = n.parse::<f64>().unwrap_or(0.0);
+                let den = d.parse::<f64>().unwrap_or(1.0);
+                if den > 0.0 { num / den } else { 0.0 }
+            } else {
+                framerate_str.parse::<f64>().unwrap_or(0.0)
+            };
+
+            streams.push(json!({
+                "Type": "Video", "Codec": codec, "Width": w, "Height": h,
+                "BitRate": bitrate, "AverageFrameRate": framerate, "RealFrameRate": framerate,
+                "IsDefault": true
+            }));
+        }
+    }
+
+    // 2. 解析音频流 <audio> (可能有多个)
+    let mut search_idx = 0;
+    while let Some(a_start_rel) = nfo_text[search_idx..].find("<audio>") {
+        let a_start = search_idx + a_start_rel;
+        if let Some(a_end_rel) = nfo_text[a_start..].find("</audio>") {
+            let a_end = a_start + a_end_rel;
+            let a_text = &nfo_text[a_start..a_end];
+            let codec = extract_tag(a_text, "codec").unwrap_or_default();
+            let ch = extract_tag(a_text, "channels").and_then(|s| s.parse::<i64>().ok()).unwrap_or(2);
+            let bitrate = extract_tag(a_text, "bitrate").and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+            let sample_rate = extract_tag(a_text, "samplingrate").and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+            let lang = extract_tag(a_text, "language").unwrap_or_default();
+
+            streams.push(json!({
+                "Type": "Audio", "Codec": codec, "Channels": ch,
+                "BitRate": bitrate, "SampleRate": sample_rate, "Language": lang, "IsDefault": true
+            }));
+            search_idx = a_end + 8; // 8 is len("</audio>")
+        } else { break; }
+    }
+
+    // 3. 解析字幕流 <subtitle> (可能有多个)
+    search_idx = 0;
+    while let Some(s_start_rel) = nfo_text[search_idx..].find("<subtitle>") {
+        let s_start = search_idx + s_start_rel;
+        if let Some(s_end_rel) = nfo_text[s_start..].find("</subtitle>") {
+            let s_end = s_start + s_end_rel;
+            let s_text = &nfo_text[s_start..s_end];
+            let codec = extract_tag(s_text, "codec").unwrap_or_default();
+            let lang = extract_tag(s_text, "language").unwrap_or_default();
+
+            streams.push(json!({
+                "Type": "Subtitle", "Codec": codec, "Language": lang, "IsDefault": false
+            }));
+            search_idx = s_end + 11; // 11 is len("</subtitle>")
+        } else { break; }
+    }
+
+    json!(streams)
+}
+
 fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, dir_path: String) {
     println!("🔍 开始扫描目录: {:?}", dir_path);
     let mut count = 0;
@@ -458,19 +539,27 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
 
         // 【NFO 兜底逻辑】如果 JSON 里没有解析出流信息（为空），那么尝试去读 NFO 里的 <fileinfo> 流信息
         if media_streams_json_str == "[]" {
-            let mut nfo_streams = String::new();
             for nfo in &nfo_candidates {
                 if nfo.exists() {
+                    // 优先用我们强行解析的逻辑，直接抠 <streamdetails>
+                    if let Ok(nfo_text) = std::fs::read_to_string(&nfo) {
+                        if nfo_text.contains("<streamdetails>") {
+                            let parsed_streams = parse_nfo_stream_details(&nfo_text);
+                            if parsed_streams.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+                                media_streams_json_str = parsed_streams.to_string();
+                                println!("🎯 [NFO] 成功从 <streamdetails> 强行提取媒体流参数!");
+                                break;
+                            }
+                        }
+                    }
+                    // 如果上面的没成，再用 nfo.rs 库里的解析兜底
                     if let Some(meta) = crate::nfo::read_nfo(&nfo) {
                         if let Some(ms) = meta.media_streams {
-                            nfo_streams = ms;
+                            media_streams_json_str = ms;
                             break;
                         }
                     }
                 }
-            }
-            if !nfo_streams.is_empty() {
-                media_streams_json_str = nfo_streams;
             }
         }
         let final_size = if probe_size > 0 { probe_size } else { size };
