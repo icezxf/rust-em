@@ -851,44 +851,53 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         }
     }
 
-    // 严格边界参数绑定
-    if let Some(p) = &query.person_ids { 
-        let decoded = decode_url(p);
-        let name = decoded.replace("person_", ""); 
-        sql.push_str(" AND (directors = ? OR directors LIKE ? OR directors LIKE ? OR directors LIKE ? OR actors LIKE ? OR actors LIKE ?)");
-        params.push(name.clone());
-        params.push(format!("{} / %", name));
-        params.push(format!("% / {}", name));
-        params.push(format!("% / {} / %", name));
-        params.push(format!("%\"name\":\"{}\"%", name));
-        params.push(format!("%\"name\": \"{}\"%", name));
-    }
-    if let Some(g) = query.genre_ids.as_ref().or(query.genres.as_ref()) { 
-        let decoded = decode_url(g);
-        let name = decoded.replace("genre_", ""); 
-        sql.push_str(" AND (genres = ? OR genres LIKE ? OR genres LIKE ? OR genres LIKE ?)");
-        params.push(name.clone());
-        params.push(format!("{} / %", name));
-        params.push(format!("% / {}", name));
-        params.push(format!("% / {} / %", name));
-    }
-    if let Some(t) = query.tag_ids.as_ref().or(query.tags.as_ref()) { 
-        let decoded = decode_url(t);
-        let name = decoded.replace("tag_", "");
-        sql.push_str(" AND (tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)");
-        params.push(name.clone());
-        params.push(format!("{} / %", name));
-        params.push(format!("% / {}", name));
-        params.push(format!("% / {} / %", name));
-    }
-    if let Some(sid) = query.studio_ids.as_ref().or(query.studios.as_ref()) { 
-        let decoded = decode_url(sid);
-        let name = decoded.replace("studio_", "");
-        sql.push_str(" AND (studios = ? OR studios LIKE ? OR studios LIKE ? OR studios LIKE ?)");
-        params.push(name.clone());
-        params.push(format!("{} / %", name));
-        params.push(format!("% / {}", name));
-        params.push(format!("% / {} / %", name));
+    // 严格边界参数绑定 (根据 Yamby 实际发来的复合 ID 进行智能分发)
+    let mut filter_ids = Vec::new();
+    if let Some(p) = &query.person_ids { filter_ids.push(decode_url(p)); }
+    if let Some(g) = &query.genre_ids { filter_ids.push(decode_url(g)); }
+    if let Some(g) = &query.genres { filter_ids.push(decode_url(g)); }
+    if let Some(t) = &query.tag_ids { filter_ids.push(decode_url(t)); }
+    if let Some(t) = &query.tags { filter_ids.push(decode_url(t)); }
+    if let Some(s) = &query.studio_ids { filter_ids.push(decode_url(s)); }
+    if let Some(s) = &query.studios { filter_ids.push(decode_url(s)); }
+
+    for raw_id in filter_ids {
+        let name = if raw_id.starts_with("person_") { raw_id.replace("person_", "") }
+            else if raw_id.starts_with("genre_") { raw_id.replace("genre_", "") }
+            else if raw_id.starts_with("tag_") { raw_id.replace("tag_", "") }
+            else if raw_id.starts_with("studio_") { raw_id.replace("studio_", "") }
+            else { raw_id.clone() };
+        
+        if name.is_empty() { continue; }
+
+        if raw_id.starts_with("person_") || query.person_ids.is_some() && raw_id == *query.person_ids.as_ref().unwrap() {
+            sql.push_str(" AND (directors = ? OR directors LIKE ? OR directors LIKE ? OR directors LIKE ? OR actors LIKE ? OR actors LIKE ?)");
+            params.push(name.clone());
+            params.push(format!("{} / %", name));
+            params.push(format!("% / {}", name));
+            params.push(format!("% / {} / %", name));
+            params.push(format!("%\"name\":\"{}\"%", name));
+            params.push(format!("%\"name\": \"{}\"%", name));
+        } else if raw_id.starts_with("studio_") {
+            sql.push_str(" AND (studios = ? OR studios LIKE ? OR studios LIKE ? OR studios LIKE ?)");
+            params.push(name.clone());
+            params.push(format!("{} / %", name));
+            params.push(format!("% / {}", name));
+            params.push(format!("% / {} / %", name));
+        } else if raw_id.starts_with("tag_") {
+            sql.push_str(" AND (tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)");
+            params.push(name.clone());
+            params.push(format!("{} / %", name));
+            params.push(format!("% / {}", name));
+            params.push(format!("% / {} / %", name));
+        } else {
+            // 默认当作 genre 处理 (包括没前缀的)
+            sql.push_str(" AND (genres = ? OR genres LIKE ? OR genres LIKE ? OR genres LIKE ?)");
+            params.push(name.clone());
+            params.push(format!("{} / %", name));
+            params.push(format!("% / {}", name));
+            params.push(format!("% / {} / %", name));
+        }
     }
 
     let from_idx = sql.find(" FROM items").unwrap_or(0);
