@@ -966,10 +966,41 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
 
     if let Some(pid) = &query.parent_id {
         if pid.starts_with("folder_") {
-            if let Some(abs_path) = from_hex(pid.trim_start_matches("folder_")) { sql.push_str(" AND file_path LIKE ?"); params.push(format!("{}/%", abs_path.trim_end_matches('/'))); }
-            else { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
+            if let Some(abs_path) = from_hex(pid.trim_start_matches("folder_")) { 
+                sql.push_str(" AND file_path LIKE ?"); 
+                params.push(format!("{}/%", abs_path.trim_end_matches('/'))); 
+            } else { 
+                return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); 
+            }
         } else if pid.starts_with("lib_") {
-            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(" AND library_id = ?"); params.push(lib_id.to_string()); }
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { 
+                sql.push_str(" AND library_id = ?"); 
+                params.push(lib_id.to_string()); 
+            }
+        } else if pid.starts_with("boxset_") {
+            let mut found_set_name = String::new();
+            let mut names = Vec::new();
+            if let Ok(mut stmt_all) = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''") {
+                if let Ok(mapped) = stmt_all.query_map([], |r| r.get::<_, String>(0)) {
+                    for s in mapped.flatten() { names.push(s); }
+                }
+            }
+            for full_str in names {
+                for name in full_str.split(" / ").filter(|s| !s.trim().is_empty()) {
+                    let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
+                    if format!("boxset_{:x}", hash) == *pid { found_set_name = name.to_string(); break; }
+                }
+                if !found_set_name.is_empty() { break; }
+            }
+            if !found_set_name.is_empty() {
+                sql.push_str(" AND (set_name = ? OR set_name LIKE ? OR set_name LIKE ? OR set_name LIKE ?)");
+                params.push(found_set_name.clone());
+                params.push(format!("{} / %", found_set_name));
+                params.push(format!("% / {}", found_set_name));
+                params.push(format!("% / {} / %", found_set_name));
+            } else {
+                return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response();
+            }
         }
     }
 
