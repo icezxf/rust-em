@@ -101,6 +101,7 @@ fn emby_routes() -> Router<AppState> {
         .route("/Items/{item_id}/Images/{image_type}/{index}", 
             get(api::emby_item_image_with_index).head(api::emby_item_image_with_index))
         .route("/Users/{user_id}/Images/{image_type}", get(api::emby_item_image_user_only))
+        .route("/Persons/{person_id}", get(api::emby_person))
         .route("/Persons/{person_id}/Images/{image_type}", get(api::emby_person_image))
         
         // 剧集相关（返回空或默认处理）

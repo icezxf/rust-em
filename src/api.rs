@@ -963,19 +963,16 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let genres_vec: Vec<&str> = genres_str.split(" / ").filter(|s| !s.is_empty()).collect();
             let mut genre_items = Vec::new();
             for g in &genres_vec {
-                let mut h = Sha256::new(); h.update(g.as_bytes()); let hash = h.finalize();
-                genre_items.push(json!({"Id": format!("genre-{:x}", hash), "Name": g}));
+                genre_items.push(json!({"Id": format!("genre_{}", g), "Name": g}));
             }
             let tags_vec: Vec<&str> = tags_str.split(" / ").filter(|s| !s.is_empty()).collect();
             let mut tag_items = Vec::new();
             for t in &tags_vec {
-                let mut h = Sha256::new(); h.update(t.as_bytes()); let hash = h.finalize();
-                tag_items.push(json!({"Id": format!("tag-{:x}", hash), "Name": t}));
+                tag_items.push(json!({"Id": format!("tag_{}", t), "Name": t}));
             }
 
             let studios: Vec<Value> = studios_str.split(" / ").filter(|s| !s.trim().is_empty()).map(|s| {
-                let mut h = Sha256::new(); h.update(s.as_bytes()); let hash = h.finalize();
-                let sid = (i64::from_be_bytes([hash[0], hash[1], hash[2], hash[3], hash[4], hash[5], hash[6], hash[7]])).abs() % 1_000_000_000 + 1;
+                json!({ "Name": s, "Id": format!("studio_{}", s) })
                 json!({ "Name": s, "Id": sid })
             }).collect();
 
