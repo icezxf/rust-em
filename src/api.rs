@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant, UNIX_EPOCH, SystemTime};
-use rusqlite::{Connection, params_from_iter};
+use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncReadExt;
@@ -1791,4 +1791,34 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
         }
     }
     StatusCode::NOT_FOUND.into_response()
+}
+
+pub async fn emby_studios(
+    State(pool): State<Arc<Mutex<Connection>>>, 
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap
+) -> impl IntoResponse {
+    let is_yamby = headers.get(USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("").contains("Yamby");
+    let conn = pool.lock().unwrap();
+    let mut sql = "SELECT studios FROM items WHERE studios != ''".to_string();
+    if let Some(pid) = query.get("ParentId") {
+        if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
+    }
+    let mut set = std::collections::HashSet::new();
+    if let Ok(mut stmt) = conn.prepare(&sql) {
+        if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+            for st_str in mapped.flatten() { for st in st_str.split(" / ") { if !st.trim().is_empty() { set.insert(st.trim().to_string()); } } }
+        }
+    }
+    let mut names: Vec<String> = set.into_iter().collect();
+    names.sort();
+    let items: Vec<Value> = names.into_iter().map(|name| {
+        if is_yamby { json!(name) }
+        else { json!({ "Name": name, "Id": name, "ServerId": "rust-em-server", "Type": "Studio", "IsFolder": false, "MediaType": "Video", "PrimaryImageAspectRatio": 0.6666666666666666, "ImageTags": {}, "BackdropImageTags": [], "ImageBlurHashes": {}, "LocationType": "FileSystem", "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 } }) }
+    }).collect();
+    Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
+}
+
+pub async fn emby_activity_log() -> impl IntoResponse {
+    Json(json!({ "Items": [], "TotalRecordCount": 0 }))
 }
