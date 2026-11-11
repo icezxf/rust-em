@@ -376,6 +376,33 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                     let resolve_path = |p: &str| -> String { if p.is_empty() { return String::new(); } if p.starts_with("http") || p.starts_with("/") { return p.to_string(); } parent.join(p).to_string_lossy().to_string() };
                     if let Some(poster) = &meta.poster { nfo_poster = resolve_path(poster); }
                     if let Some(fanart) = &meta.fanart { nfo_fanart = resolve_path(fanart); }
+                    
+                    // 【核心修复】：如果常规解析没拿到时长，强行去 NFO 文本里抠取 <durationinseconds>
+                    if runtime <= 0 {
+                        if let Ok(nfo_text) = std::fs::read_to_string(&nfo) {
+                            if let Some(start) = nfo_text.find("<durationinseconds>") {
+                                let rest = &nfo_text[start + 19..];
+                                if let Some(end) = rest.find("</durationinseconds>") {
+                                    if let Ok(secs) = rest[..end].trim().parse::<i32>() {
+                                        runtime = (secs + 59) / 60; // 向上取整到分钟
+                                        println!("🎯 [NFO] 从 <durationinseconds> 强行提取时长: {} 分钟", runtime);
+                                    }
+                                }
+                            }
+                            // 如果还没有，再找 <duration>
+                            if runtime <= 0 {
+                                if let Some(start) = nfo_text.find("<duration>") {
+                                    let rest = &nfo_text[start + 10..];
+                                    if let Some(end) = rest.find("</duration>") {
+                                        if let Ok(mins) = rest[..end].trim().parse::<i32>() {
+                                            runtime = mins;
+                                            println!("🎯 [NFO] 从 <duration> 强行提取时长: {} 分钟", runtime);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     break;
                 }
             }
