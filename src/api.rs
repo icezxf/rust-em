@@ -1649,6 +1649,11 @@ pub async fn emby_playing() -> impl IntoResponse { StatusCode::OK.into_response(
 pub async fn emby_playing_stopped() -> impl IntoResponse { StatusCode::OK.into_response() }
 
 pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, body: Bytes) -> impl IntoResponse {
+    // 【抓包探针】打印客户端回传的原始数据
+    println!("========== 🚨 [PROGRESS 抓包] ==========");
+    println!("{}", String::from_utf8_lossy(&body));
+    println!("========================================");
+
     if let Ok(val) = serde_json::from_slice::<Value>(&body) {
         if let Some(item_id_str) = val["ItemId"].as_str() {
             if let Ok(item_id) = item_id_str.parse::<i64>() {
