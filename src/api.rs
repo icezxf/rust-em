@@ -1043,19 +1043,22 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
                 params.push(format!("%{}%", name));
             }
         } else if decoded_pid.starts_with("studio_") {
-            let name = decoded_pid.replace("studio_", "").trim().to_string();
+            let hex_str = decoded_pid.replace("studio_", "");
+            let name = from_hex(&hex_str).unwrap_or(hex_str).trim().to_string();
             if !name.is_empty() {
                 sql.push_str(" AND studios LIKE ?");
                 params.push(format!("%{}%", name));
             }
         } else if decoded_pid.starts_with("genre_") {
-            let name = decoded_pid.replace("genre_", "").trim().to_string();
+            let hex_str = decoded_pid.replace("genre_", "");
+            let name = from_hex(&hex_str).unwrap_or(hex_str).trim().to_string();
             if !name.is_empty() {
                 sql.push_str(" AND genres LIKE ?");
                 params.push(format!("%{}%", name));
             }
         } else if decoded_pid.starts_with("tag_") {
-            let name = decoded_pid.replace("tag_", "").trim().to_string();
+            let hex_str = decoded_pid.replace("tag_", "");
+            let name = from_hex(&hex_str).unwrap_or(hex_str).trim().to_string();
             if !name.is_empty() {
                 sql.push_str(" AND tags LIKE ?");
                 params.push(format!("%{}%", name));
@@ -1079,16 +1082,19 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
     if let Some(g) = &query.genre_ids { 
         let val = decode_url(g).replace('+', " ");
         if val.starts_with("studio_") { 
-            let name = val.replace("studio_", "").trim().to_string();
+            let hex_str = val.replace("studio_", "");
+            let name = from_hex(&hex_str).unwrap_or(hex_str).trim().to_string();
             if !name.is_empty() { sql.push_str(" AND studios LIKE ?"); params.push(format!("%{}%", name)); }
         } else if val.starts_with("tag_") { 
-            let name = val.replace("tag_", "").trim().to_string();
+            let hex_str = val.replace("tag_", "");
+            let name = from_hex(&hex_str).unwrap_or(hex_str).trim().to_string();
             if !name.is_empty() { sql.push_str(" AND tags LIKE ?"); params.push(format!("%{}%", name)); }
         } else if val.starts_with("person_") { 
             let name = val.replace("person_", "").trim().to_string();
             if !name.is_empty() { sql.push_str(" AND actors LIKE ?"); params.push(format!("%{}%", name)); }
         } else { 
-            let name = val.replace("genre_", "").trim().to_string();
+            let hex_str = val.replace("genre_", "");
+            let name = from_hex(&hex_str).unwrap_or(hex_str).trim().to_string();
             if !name.is_empty() { sql.push_str(" AND genres LIKE ?"); params.push(format!("%{}%", name)); }
         }
     }
@@ -1098,19 +1104,23 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
     }
     
     if let Some(t) = &query.tag_ids { 
-        let name = decode_url(t).replace('+', " ").replace("tag_", "").trim().to_string();
+        let hex_str = decode_url(t).replace('+', " ").replace("tag_", "");
+        let name = from_hex(&hex_str).unwrap_or(hex_str).trim().to_string();
         if !name.is_empty() { sql.push_str(" AND tags LIKE ?"); params.push(format!("%{}%", name)); }
     }
     if let Some(t) = &query.tags { 
-        let name = decode_url(t).replace('+', " ").replace("tag_", "").trim().to_string();
+        let hex_str = decode_url(t).replace('+', " ").replace("tag_", "");
+        let name = from_hex(&hex_str).unwrap_or(hex_str).trim().to_string();
         if !name.is_empty() { sql.push_str(" AND tags LIKE ?"); params.push(format!("%{}%", name)); }
     }
     if let Some(s) = &query.studio_ids { 
-        let name = decode_url(s).replace('+', " ").replace("studio_", "").trim().to_string();
+        let hex_str = decode_url(s).replace('+', " ").replace("studio_", "");
+        let name = from_hex(&hex_str).unwrap_or(hex_str).trim().to_string();
         if !name.is_empty() { sql.push_str(" AND studios LIKE ?"); params.push(format!("%{}%", name)); }
     }
     if let Some(s) = &query.studios { 
-        let name = decode_url(s).replace('+', " ").replace("studio_", "").trim().to_string();
+        let hex_str = decode_url(s).replace('+', " ").replace("studio_", "");
+        let name = from_hex(&hex_str).unwrap_or(hex_str).trim().to_string();
         if !name.is_empty() { sql.push_str(" AND studios LIKE ?"); params.push(format!("%{}%", name)); }
     }
 
@@ -1312,7 +1322,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let genres_vec: Vec<&str> = genres_str.split(" / ").filter(|s| !s.is_empty()).collect();
             let mut genre_items = Vec::new();
             for g in &genres_vec {
-                genre_items.push(json!({"Id": format!("genre_{}", g), "Name": g}));
+                genre_items.push(json!({"Id": format!("genre_{}", to_hex(&g)), "Name": g}));
             }
             let tags_vec: Vec<&str> = tags_str.split(" / ").filter(|s| !s.is_empty()).collect();
             let mut tag_items = Vec::new();
@@ -1985,7 +1995,7 @@ pub async fn emby_genres(
 
     let items: Vec<Value> = genres_set.into_iter().map(|g| {
         json!({
-            "Name": g, "Id": format!("genre_{}", g), "ServerId": "rust-em-server",
+            "Name": g, "Id": format!("genre_{}", to_hex(&g)), "ServerId": "rust-em-server",
             "Type": "Genre", "IsFolder": false, "MediaType": "Video",
             "ImageTags": {}, "BackdropImageTags": []
         })
@@ -2109,7 +2119,7 @@ pub async fn emby_studios(
     names.sort();
     
     let items: Vec<Value> = names.into_iter().map(|name| json!({
-        "Name": name, "Id": format!("studio_{}", name), "ServerId": "rust-em-server",
+        "Name": name, "Id": format!("studio_{}", to_hex(&name)), "ServerId": "rust-em-server",
         "Type": "Studio", "IsFolder": false, "MediaType": "Video",
         "PrimaryImageAspectRatio": 0.6666666666666666,
         "ImageTags": {}, "BackdropImageTags": [], "ImageBlurHashes": {},
