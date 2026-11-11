@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use axum::{
     routing::{get, post, delete},
     Router, middleware,
