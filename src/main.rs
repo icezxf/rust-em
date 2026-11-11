@@ -73,6 +73,8 @@ fn emby_routes() -> Router<AppState> {
         
         // 用户与鉴权
         .route("/Auth/Keys", get(api::emby_auth_keys))
+        .route("/ScheduledTasks", get(api::emby_scheduled_tasks))
+        .route("/ScheduledTasks/Running/RefreshLibrary", post(api::emby_refresh_library))
         .route("/Users/{user_id}", get(api::emby_user))
         .route("/DisplayPreferences/{id}", get(api::emby_display_preferences))
         

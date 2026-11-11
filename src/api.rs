@@ -1674,3 +1674,55 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
     }
     StatusCode::NOT_FOUND.into_response()
 }
+
+pub async fn emby_scheduled_tasks() -> impl IntoResponse {
+    Json(json!([
+        {
+            "Name": "Scan Media Library",
+            "State": "Idle",
+            "Id": "RefreshLibrary",
+            "LastExecutionResult": {
+                "StartTimeUtc": "2024-01-01T00:00:00.0000000Z",
+                "EndTimeUtc": "2024-01-01T00:00:01.0000000Z",
+                "Status": "Completed",
+                "Error": ""
+            },
+            "Triggers": [
+                {
+                    "Type": "IntervalTrigger",
+                    "IntervalTicks": 864000000000
+                }
+            ],
+            "Description": "Scans your media library for new and updated files.",
+            "Category": "Library",
+            "IsHidden": false,
+            "Key": "RefreshLibrary"
+        }
+    ]))
+}
+
+pub async fn emby_refresh_library(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
+    let pool_clone = pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool_clone.lock().unwrap();
+        let mut stmt = match conn.prepare("SELECT id, path, type FROM libraries") {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let libs: Vec<(i64, String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+
+        for (id, path_json, lib_type) in libs {
+            if let Ok(paths) = serde_json::from_str::<Vec<String>>(&path_json) {
+                for path in paths {
+                    scan_directory(pool_clone.clone(), id, lib_type.clone(), path);
+                }
+            }
+        }
+    });
+    // 标准 Emby 触发任务返回 204 No Content
+    StatusCode::NO_CONTENT.into_response()
+}
