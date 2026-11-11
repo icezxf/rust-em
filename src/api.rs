@@ -107,7 +107,7 @@ fn extract_extension_from_url(url: &str) -> String {
 }
 
 pub async fn resolve_qmediasync_url(client: &reqwest::Client, url: &str, ua: &str) -> Option<String> {
-    // 关键修复：使用客户端原本的 UA 去请求 OpenList，确保 115 等网盘的 CDN 链接不会因 UA 错乱而失效
+    // 绝对死守的底线：使用客户端原本的 UA 请求，绝不使用写死的浏览器 UA，防止 115 等网盘链接失效！
     let resp = client.get(url).header(USER_AGENT, ua).send().await.ok()?;
     let status = resp.status();
     if status.is_redirection() {
@@ -488,12 +488,18 @@ pub async fn get_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((id,
 }
 
 async fn serve_file(path_str: &str) -> Response {
-    // 如果是网络图（http/https），直接返回空（404），不代理，不下载，防止卡死 UI
+    // 如果是网络图，直接返回 1x1 透明 PNG，不下载，防崩溃
     if path_str.starts_with("http") { 
-        return StatusCode::NOT_FOUND.into_response(); 
+        let png_bytes: [u8; 67] = [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+            0x42, 0x60, 0x82
+        ];
+        return (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response(); 
     }
-    
-    // 如果是本地图，直接读硬盘秒开
+    // 如果是本地图，读硬盘秒开
     if let Ok(bytes) = tokio::fs::read(&path_str).await {
         let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
         return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
@@ -623,7 +629,6 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let id: i64 = row.get(0).unwrap_or_default();
         let poster_path: String = row.get(5).unwrap_or_default();
         let has_poster = !poster_path.is_empty();
-        
         let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
         let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
         let poster_tag = if has_poster { format!("tag_{}_{}", id, &hash_hex[..8]) } else { String::new() };
@@ -637,38 +642,31 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let runtime_mins: i32 = row.get(7).unwrap_or(0);
         let total_ticks: i64 = (runtime_mins as i64) * 60 * 10_000_000;
         let size: i64 = row.get(14).unwrap_or(0);
-        let mtime: i64 = row.get(15).unwrap_or(0);
+        let mtime = row.get::<_, i64>(15).unwrap_or(0);
+        let date_str = format_iso8601(mtime);
         
         Ok(json!({
-            "Name": row.get::<_, String>(1).unwrap_or_default(), 
-            "Id": id.to_string(), 
-            "ServerId": "rust-em-server",
+            "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
             "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
-            "IsFolder": false, 
-            "MediaType": "Video", 
-            "LocationType": "FileSystem",
-            "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
+            "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
             "Overview": row.get::<_, String>(4).unwrap_or_default(), 
             "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0), 
             "RunTimeTicks": total_ticks,
             "Size": size,
-            "DateCreated": format_iso8601(mtime),
+            "DateCreated": date_str.clone(),
+            "EndDate": date_str,
             "PrimaryImageAspectRatio": 0.6666666666666666,
             "Container": "mp4",
             "CanDelete": false,
             "CanDownload": false,
+            "LocationType": "FileSystem",
             "Status": "Continuing",
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
             "MediaSources": [{ 
-                "Id": id.to_string(), 
-                "Protocol": "Http", 
-                "SupportsDirectPlay": true, 
-                "Container": "mp4", 
-                "Size": size,
-                "Type": "Default",
-                "Name": "Direct Play"
+                "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size,
+                "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks
             }],
             "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 }
         }))
@@ -690,13 +688,13 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let playback_ticks: i64 = row.get(18).unwrap_or(0);
         let fanart_path: String = row.get(19).unwrap_or_default();
         let has_fanart = !fanart_path.is_empty();
-        let backdrop_tag = if has_fanart {
-            let mut h = Sha256::new(); h.update(fanart_path.as_bytes()); let hash = h.finalize();
-            let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
-            format!("backdrop_{}_{}", id, &hash_hex[..8])
-        } else { String::new() };
+        let mut hf = Sha256::new(); hf.update(fanart_path.as_bytes()); let hashf = hf.finalize();
+        let hash_hexf: String = hashf.iter().map(|b| format!("{:02x}", b)).collect();
+        let backdrop_tag = if has_fanart { format!("backdrop_{}_{}", id, &hash_hexf[..8]) } else { String::new() };
+
         let runtime_mins: i32 = row.get(7).unwrap_or(0);
         let total_ticks: i64 = (runtime_mins as i64) * 60 * 10_000_000;
+        let played_pct = if total_ticks > 0 { (playback_ticks * 100 / total_ticks) as i32 } else { 0 };
         
         Ok(json!({
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
@@ -705,6 +703,8 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "Overview": row.get::<_, String>(4).unwrap_or_default(), 
             "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0), 
             "RunTimeTicks": total_ticks,
+            "DateCreated": format_iso8601(row.get::<_, i64>(15).unwrap_or(0)),
+            "PrimaryImageAspectRatio": 0.6666666666666666,
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
@@ -713,7 +713,8 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
                 "PlaybackPositionTicks": playback_ticks, 
                 "PlayCount": 1, 
                 "IsFavorite": false, 
-                "Played": false 
+                "Played": false,
+                "PlayedPercentage": played_pct
             }
         }))
     }).unwrap().filter_map(Result::ok).collect();
@@ -755,7 +756,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response();
     }
 
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks FROM items WHERE 1=1".to_string();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path, date_created FROM items WHERE 1=1".to_string();
     
     if let Some(pid) = &query.parent_id {
         if pid.starts_with("lib_") {
@@ -799,16 +800,45 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         } else { String::new() };
         let playback_ticks: i64 = row.get(18).unwrap_or(0);
         
+        let fanart_path: String = row.get(19).unwrap_or_default();
+        let has_fanart = !fanart_path.is_empty();
+        let mut hf = Sha256::new(); hf.update(fanart_path.as_bytes()); let hashf = hf.finalize();
+        let hash_hexf: String = hashf.iter().map(|b| format!("{:02x}", b)).collect();
+        let backdrop_tag = if has_fanart { format!("backdrop_{}_{}", id, &hash_hexf[..8]) } else { String::new() };
+        
+        let runtime_mins: i32 = row.get(7).unwrap_or(0);
+        let total_ticks: i64 = (runtime_mins as i64) * 60 * 10_000_000;
+        let size: i64 = row.get(14).unwrap_or(0);
+        let mtime: i64 = row.get(15).unwrap_or(0);
+        let date_created: i64 = row.get(20).unwrap_or(0);
+        let final_date_created = if date_created > 0 { date_created } else { mtime };
+        let played_pct = if total_ticks > 0 { (playback_ticks * 100 / total_ticks) as i32 } else { 0 };
+        let date_str = format_iso8601(final_date_created);
+        
         Ok(json!({
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
             "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
             "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
             "Overview": row.get::<_, String>(4).unwrap_or_default(), 
             "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0), 
+            "RunTimeTicks": total_ticks,
+            "Size": size,
+            "DateCreated": date_str.clone(),
+            "EndDate": date_str,
+            "PrimaryImageAspectRatio": 0.6666666666666666,
+            "Container": "mp4",
+            "CanDelete": false,
+            "CanDownload": false,
+            "LocationType": "FileSystem",
+            "Status": "Continuing",
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
+            "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
-            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
-            "UserData": { "PlaybackPositionTicks": playback_ticks, "PlayCount": 0, "IsFavorite": false, "Played": false }
+            "MediaSources": [{ 
+                "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size,
+                "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks
+            }],
+            "UserData": { "PlaybackPositionTicks": playback_ticks, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": played_pct }
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "Items": items, "TotalRecordCount": total })).into_response()
@@ -1247,7 +1277,11 @@ pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, b
                 let ticks = val["PositionTicks"].as_i64().unwrap_or(0);
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
                 let conn = pool.lock().unwrap();
-                let _ = conn.execute("UPDATE items SET playback_ticks = ?1, updated_at = ?2 WHERE id = ?3", [ticks, now, item_id]);
+                // 如果进度小于 10 秒（刚开始播放），或者是 0（客户端暂停），都不覆盖掉已经存下的历史进度
+                let current_ticks: i64 = conn.query_row("SELECT playback_ticks FROM items WHERE id = ?1", [item_id], |r| r.get(0)).unwrap_or(0);
+                if ticks > 10_000_000 || ticks == 0 && current_ticks == 0 {
+                    let _ = conn.execute("UPDATE items SET playback_ticks = ?1, updated_at = ?2 WHERE id = ?3", [ticks, now, item_id]);
+                }
                 println!("💾 [PROGRESS] 保存进度: ItemId={}, Ticks={}", item_id, ticks);
             }
         }
