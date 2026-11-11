@@ -552,13 +552,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                             }
                         }
                     }
-                    // 如果上面的没成，再用 nfo.rs 库里的解析兜底
-                    if let Some(meta) = crate::nfo::read_nfo(&nfo) {
-                        if let Some(ms) = meta.media_streams {
-                            media_streams_json_str = ms;
-                            break;
-                        }
-                    }
+
                 }
             }
         }
