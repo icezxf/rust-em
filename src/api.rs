@@ -611,7 +611,6 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path FROM items WHERE 1=1".to_string();
     
-    // 处理 ParentId 过滤，这样客户端才能获取每个媒体库的单独列表
     if let Some(pid) = query.get("ParentId") {
         if pid.starts_with("lib_") {
             if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); }
@@ -638,20 +637,40 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let runtime_mins: i32 = row.get(7).unwrap_or(0);
         let total_ticks: i64 = (runtime_mins as i64) * 60 * 10_000_000;
         let size: i64 = row.get(14).unwrap_or(0);
+        let mtime: i64 = row.get(15).unwrap_or(0);
         
         Ok(json!({
-            "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
+            "Name": row.get::<_, String>(1).unwrap_or_default(), 
+            "Id": id.to_string(), 
+            "ServerId": "rust-em-server",
             "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" },
-            "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
+            "IsFolder": false, 
+            "MediaType": "Video", 
+            "LocationType": "FileSystem",
+            "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
             "Overview": row.get::<_, String>(4).unwrap_or_default(), 
             "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0), 
             "RunTimeTicks": total_ticks,
             "Size": size,
+            "DateCreated": format_iso8601(mtime),
+            "PrimaryImageAspectRatio": 0.6666666666666666,
+            "Container": "mp4",
+            "CanDelete": false,
+            "CanDownload": false,
+            "Status": "Continuing",
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
-            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
-            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
+            "MediaSources": [{ 
+                "Id": id.to_string(), 
+                "Protocol": "Http", 
+                "SupportsDirectPlay": true, 
+                "Container": "mp4", 
+                "Size": size,
+                "Type": "Default",
+                "Name": "Direct Play"
+            }],
+            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 }
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response()
