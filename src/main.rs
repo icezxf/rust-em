@@ -91,6 +91,10 @@ fn emby_routes() -> Router<AppState> {
         .route("/Items", get(api::emby_items))
         .route("/Items/Counts", get(api::emby_item_counts))
         .route("/Genres", get(api::emby_genres))
+        .route("/Tags", get(api::emby_tags))
+        .route("/Years", get(api::emby_years))
+        .route("/Studios", get(api::emby_studios))
+        .route("/OfficialRatings", get(api::emby_official_ratings))
         .route("/Search/Hints", get(api::emby_search_hints))
         
         // 详情、元数据、人物与图片

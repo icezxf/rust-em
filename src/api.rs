@@ -2004,3 +2004,121 @@ pub async fn emby_unmark_favorite(
     let _ = conn.execute("UPDATE items SET is_favorite = 0 WHERE id = ?1", [item_id]);
     StatusCode::OK.into_response()
 }
+
+pub async fn emby_tags(
+    State(pool): State<Arc<Mutex<Connection>>>, 
+    Query(query): Query<HashMap<String, String>>
+) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut sql = "SELECT tags FROM items WHERE tags != ''".to_string();
+    if let Some(pid) = query.get("ParentId") {
+        if pid.starts_with("lib_") {
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
+                sql.push_str(&format!(" AND library_id = {}", lib_id));
+            }
+        }
+    }
+    let mut set = std::collections::HashSet::new();
+    if let Ok(mut stmt) = conn.prepare(&sql) {
+        if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+            for t_str in mapped.flatten() {
+                for t in t_str.split(" / ") {
+                    let name = t.trim();
+                    if !name.is_empty() { set.insert(name.to_string()); }
+                }
+            }
+        }
+    }
+    let items: Vec<Value> = set.into_iter().map(|name| json!({
+        "Name": name, "Id": format!("tag_{}", name), "ServerId": "rust-em-server",
+        "Type": "Tag", "IsFolder": false
+    })).collect();
+    Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
+}
+
+pub async fn emby_years(
+    State(pool): State<Arc<Mutex<Connection>>>, 
+    Query(query): Query<HashMap<String, String>>
+) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut sql = "SELECT DISTINCT year FROM items WHERE year != ''".to_string();
+    if let Some(pid) = query.get("ParentId") {
+        if pid.starts_with("lib_") {
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
+                sql.push_str(&format!(" AND library_id = {}", lib_id));
+            }
+        }
+    }
+    sql.push_str(" ORDER BY year DESC");
+    let mut items = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(&sql) {
+        if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+            for y in mapped.flatten() {
+                items.push(json!({
+                    "Name": y, "Id": format!("year_{}", y), "ServerId": "rust-em-server",
+                    "Type": "Year", "IsFolder": false
+                }));
+            }
+        }
+    }
+    Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
+}
+
+pub async fn emby_studios(
+    State(pool): State<Arc<Mutex<Connection>>>, 
+    Query(query): Query<HashMap<String, String>>
+) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut sql = "SELECT studios FROM items WHERE studios != ''".to_string();
+    if let Some(pid) = query.get("ParentId") {
+        if pid.starts_with("lib_") {
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
+                sql.push_str(&format!(" AND library_id = {}", lib_id));
+            }
+        }
+    }
+    let mut set = std::collections::HashSet::new();
+    if let Ok(mut stmt) = conn.prepare(&sql) {
+        if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+            for st_str in mapped.flatten() {
+                for st in st_str.split(" / ") {
+                    let name = st.trim();
+                    if !name.is_empty() { set.insert(name.to_string()); }
+                }
+            }
+        }
+    }
+    let items: Vec<Value> = set.into_iter().map(|name| json!({
+        "Name": name, "Id": format!("studio_{}", name), "ServerId": "rust-em-server",
+        "Type": "Studio", "IsFolder": false
+    })).collect();
+    Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
+}
+
+pub async fn emby_official_ratings(
+    State(pool): State<Arc<Mutex<Connection>>>, 
+    Query(query): Query<HashMap<String, String>>
+) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut sql = "SELECT DISTINCT mpaa FROM items WHERE mpaa != ''".to_string();
+    if let Some(pid) = query.get("ParentId") {
+        if pid.starts_with("lib_") {
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
+                sql.push_str(&format!(" AND library_id = {}", lib_id));
+            }
+        }
+    }
+    sql.push_str(" ORDER BY mpaa ASC");
+    let mut items = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(&sql) {
+        if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+            for m in mapped.flatten() {
+                items.push(json!({
+                    "Name": m, "Id": format!("mpaa_{}", m), "ServerId": "rust-em-server",
+                    "Type": "OfficialRating", "IsFolder": false
+                }));
+            }
+        }
+    }
+    Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
+}
