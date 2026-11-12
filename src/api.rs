@@ -269,7 +269,12 @@ fn get_allowed_libs(conn: &Connection, user_id: i64) -> Option<Vec<i64>> {
         Ok(s) => s,
         Err(_) => return Some(vec![]),
     };
-    let libs: Vec<i64> = stmt.query_map([user_id], |r| r.get(0)).unwrap_or_else(|_| Box::new(std::iter::empty())).filter_map(Result::ok).collect();
+    let mut libs = Vec::new();
+    if let Ok(mapped) = stmt.query_map([user_id], |r| r.get::<_, i64>(0)) {
+        for id in mapped.flatten() {
+            libs.push(id);
+        }
+    }
     Some(libs)
 }
 
@@ -2073,8 +2078,8 @@ pub async fn emby_studio(AxumPath(studio_id): AxumPath<String>) -> impl IntoResp
     Json(json!({ "Name": name, "ServerId": "rust-em-server", "Id": studio_id, "Type": "Studio", "IsFolder": false, "ImageTags": {}, "BackdropImageTags": [], "UserData": { "PlayCount": 0, "IsFavorite": false, "Played": false } }))
 }
 
-pub async fn emby_studio_items(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(studio_id): AxumPath<String>, Query(mut query): Query<EmbyItemsQuery>) -> impl IntoResponse {
-    query.studio_ids = Some(studio_id); query.studios = None; emby_items_inner(pool, query).await
+pub async fn emby_studio_items(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(studio_id): AxumPath<String>, Query(mut query): Query<EmbyItemsQuery>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
+    query.studio_ids = Some(studio_id); query.studios = None; emby_items_inner(pool, query, req_user_id).await
 }
 
 pub async fn emby_genres(
@@ -2086,14 +2091,14 @@ pub async fn emby_genres(
     let _ = headers;
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT genres FROM items WHERE genres != ''".to_string();
-    if let Some(pid) = query.get("ParentId") {
-        if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
-    }
-
     if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
         if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })); }
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
         sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+    }
+
+    if let Some(pid) = query.get("ParentId") {
+        if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
     }
 
     let mut set = std::collections::HashSet::new();
@@ -2121,14 +2126,14 @@ pub async fn emby_tags(
     let _ = headers;
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT tags FROM items WHERE tags != ''".to_string();
-    if let Some(pid) = query.get("ParentId") {
-        if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
-    }
-
     if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
         if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })); }
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
         sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+    }
+
+    if let Some(pid) = query.get("ParentId") {
+        if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
     }
 
     let mut set = std::collections::HashSet::new();
@@ -2154,14 +2159,14 @@ pub async fn emby_years(
     let _ = headers;
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT DISTINCT year FROM items WHERE year != ''".to_string();
-    if let Some(pid) = query.get("ParentId") {
-        if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
-    }
-
     if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
         if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })); }
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
         sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+    }
+
+    if let Some(pid) = query.get("ParentId") {
+        if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
     }
 
     sql.push_str(" ORDER BY year DESC");
@@ -2179,19 +2184,20 @@ pub async fn emby_years(
 pub async fn emby_official_ratings(
     State(pool): State<Arc<Mutex<Connection>>>, 
     Query(query): Query<HashMap<String, String>>,
-    headers: HeaderMap
+    headers: HeaderMap,
+    Extension(req_user_id): Extension<i64>
 ) -> impl IntoResponse {
     let _ = headers;
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT DISTINCT mpaa FROM items WHERE mpaa != ''".to_string();
-    if let Some(pid) = query.get("ParentId") {
-        if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
-    }
-
     if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
         if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })); }
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
         sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+    }
+
+    if let Some(pid) = query.get("ParentId") {
+        if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
     }
 
     sql.push_str(" ORDER BY mpaa ASC");
@@ -2215,14 +2221,14 @@ pub async fn emby_studios(
     let _ = headers;
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT studios FROM items WHERE studios != ''".to_string();
-    if let Some(pid) = query.get("ParentId") {
-        if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
-    }
-
     if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
         if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })); }
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
         sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+    }
+
+    if let Some(pid) = query.get("ParentId") {
+        if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
     }
 
     let mut set = std::collections::HashSet::new();
