@@ -93,7 +93,7 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
         if !paths.is_empty() {
             let mut h = Sha256::new(); h.update(boxset.as_bytes()); let hash = h.finalize();
             let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
-            let out_path = cache_dir.join("boxset").join(format!("boxset_{}.jpg", hash_hex));
+            let out_path = cache_dir.join("boxset").join(format!("boxset_{}_{}.jpg", hash_hex, sanitize_filename(&boxset)));
             generate_portrait_cover(&paths, &out_path);
         }
     }
@@ -110,25 +110,15 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
 fn generate_landscape_cover(paths: &[String], out_path: &std::path::Path) {
     let mut canvas = image::RgbImage::new(800, 450);
     let count = paths.len();
-
-    match count {
-        0 => {}
-        1 => { draw_to_region(&mut canvas, &paths[0], 0, 0, 800, 450); }
-        2 => {
-            draw_to_region(&mut canvas, &paths[0], 0, 0, 400, 450);
-            draw_to_region(&mut canvas, &paths[1], 400, 0, 400, 450);
-        }
-        3 => {
-            draw_to_region(&mut canvas, &paths[0], 0, 0, 400, 450);
-            draw_to_region(&mut canvas, &paths[1], 400, 0, 400, 225);
-            draw_to_region(&mut canvas, &paths[2], 400, 225, 400, 225);
-        }
-        _ => {
-            draw_to_region(&mut canvas, &paths[0], 0, 0, 400, 225);
-            draw_to_region(&mut canvas, &paths[1], 400, 0, 400, 225);
-            draw_to_region(&mut canvas, &paths[2], 0, 225, 400, 225);
-            draw_to_region(&mut canvas, &paths[3], 400, 225, 400, 225);
-        }
+    if count == 0 { return; }
+    
+    // 1xN 横向均匀平分
+    let cell_w = 800 / (count as u32);
+    for (i, path) in paths.iter().enumerate() {
+        let x = i as u32 * cell_w;
+        // 处理最后一个元素的余数，确保铺满 800
+        let w = if i == count - 1 { 800 - x } else { cell_w };
+        draw_to_region(&mut canvas, path, x, 0, w, 450);
     }
     if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
 }
