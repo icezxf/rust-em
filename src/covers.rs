@@ -78,27 +78,38 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
 
 
 
+
 fn generate_landscape_cover(paths: &[String], out_path: &std::path::Path) {
     let mut canvas = image::RgbImage::new(800, 450);
     let count = paths.len();
-
     if count == 0 { return; }
+
+    // 根据图片数量智能分配格子，绝不强行把 1 张图切成 4 块
     if count == 1 {
         draw_to_region(&mut canvas, &paths[0], 0, 0, 800, 450);
-        if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
-        return;
-    }
-
-    // 横版 3x3 网格，类似你截图右上角的密集拼接
-    let grid_size: u32 = 3;
-    let cell_w = 800 / grid_size;
-    let cell_h = 450 / grid_size;
-    
-    for i in 0..9 {
-        if i >= (count as u32) { break; }
-        let row = i / grid_size;
-        let col = i % grid_size;
-        draw_to_region(&mut canvas, &paths[i as usize], col * cell_w, row * cell_h, cell_w, cell_h);
+    } else if count == 2 {
+        draw_to_region(&mut canvas, &paths[0], 0, 0, 400, 450);
+        draw_to_region(&mut canvas, &paths[1], 400, 0, 400, 450);
+    } else if count == 3 {
+        draw_to_region(&mut canvas, &paths[0], 0, 0, 400, 450);
+        draw_to_region(&mut canvas, &paths[1], 400, 0, 400, 225);
+        draw_to_region(&mut canvas, &paths[2], 400, 225, 400, 225);
+    } else if count == 4 {
+        draw_to_region(&mut canvas, &paths[0], 0, 0, 400, 225);
+        draw_to_region(&mut canvas, &paths[1], 400, 0, 400, 225);
+        draw_to_region(&mut canvas, &paths[2], 0, 225, 400, 225);
+        draw_to_region(&mut canvas, &paths[3], 400, 225, 400, 225);
+    } else {
+        // 5 张及以上，使用 3x3 密集网格，不足 9 张循环补齐
+        let grid_size: u32 = 3;
+        let cell_w = 800 / grid_size;
+        let cell_h = 450 / grid_size;
+        for i in 0..9 {
+            let path = &paths[i % count];
+            let row = (i / grid_size) as u32;
+            let col = (i % grid_size) as u32;
+            draw_to_region(&mut canvas, path, col * cell_w, row * cell_h, cell_w, cell_h);
+        }
     }
     if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
 }
@@ -129,28 +140,28 @@ fn generate_portrait_cover(paths: &[String], out_path: &std::path::Path) {
     if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
 }
 
-// 核心：不裁剪，背景模糊填充，前景完整显示
+// 核心逻辑：绝不裁剪，完整等比缩放（Contain），背景用原图模糊垫底防黑边
 fn draw_to_region(canvas: &mut image::RgbImage, path: &str, x: u32, y: u32, w: u32, h: u32) {
     if let Ok(img) = image::open(path) {
         let (img_w, img_h) = img.dimensions();
         let target_ratio = w as f64 / h as f64;
         let img_ratio = img_w as f64 / img_h as f64;
 
-        // 1. 画背景（强行拉伸铺满，并高斯模糊）
-        let bg = img.resize_exact(w, h, image::imageops::FilterType::Gaussian).blur(15.0);
+        // 1. 画背景：将原图强行铺满格子，并使用高斯模糊（模拟沉浸式瀑布流质感）
+        let bg = img.resize_exact(w, h, image::imageops::FilterType::Gaussian).blur(20.0);
         let _ = canvas.copy_from(&bg.to_rgb8(), x, y);
 
-        // 2. 计算完整缩放后的尺寸 (Contain)
+        // 2. 算前景尺寸：保持原图比例，完整缩放到格子里（Contain）
         let (new_w, new_h) = if img_ratio > target_ratio {
             (w, (w as f64 / img_ratio) as u32) // 宽贴边，高留空
         } else {
             ((h as f64 * img_ratio) as u32, h) // 高贴边，宽留空
         };
 
-        // 3. 画前景
+        // 3. 画前景：高质量 Lanczos3 缩放，居中放置
         let thumb = img.resize_exact(new_w, new_h, image::imageops::FilterType::Lanczos3);
-        let offset_x = x + (w - new_w) / 2;
-        let offset_y = y + (h - new_h) / 2;
+        let offset_x = x + (w.saturating_sub(new_w)) / 2;
+        let offset_y = y + (h.saturating_sub(new_h)) / 2;
         let _ = canvas.copy_from(&thumb.to_rgb8(), offset_x, offset_y);
     }
 }
