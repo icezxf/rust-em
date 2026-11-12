@@ -1,6 +1,7 @@
 
 use image::{GenericImage, GenericImageView};
 use image::codecs::jpeg::JpegEncoder;
+use image::codecs::jpeg::JpegEncoder;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use rusqlite::Connection;
