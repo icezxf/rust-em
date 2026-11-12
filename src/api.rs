@@ -1433,7 +1433,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         let play_count: i32 = row.get(25).unwrap_or(0);
         let is_favorite: i32 = row.get(26).unwrap_or(0);
         let last_played_str: String = row.get(27).unwrap_or_default();
-        let played_pct = if total_ticks > 0 { (playback_ticks * 100 / total_ticks) as i32 } else { 0 };
+        let _played_pct = if total_ticks > 0 { (playback_ticks * 100 / total_ticks) as i32 } else { 0 };
         let date_str = format_iso8601(final_date_created);
         
         Ok(json!({
@@ -1917,7 +1917,7 @@ pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, E
                 let conn = pool.lock().unwrap();
                 
                 let mut runtime_mins: i32 = conn.query_row("SELECT runtime FROM items WHERE id = ?1", [item_id], |r| r.get(0)).unwrap_or(0);
-                let _current_ticks: i64 = conn.query_row("SELECT playback_position_ticks FROM user_data WHERE user_id = ?1 AND item_id = ?2", rusqlite::params!rusqlite::params![req_user_id, item_id.to_string()], |r| r.get(0)).unwrap_or(0);
+                let _current_ticks: i64 = conn.query_row("SELECT playback_position_ticks FROM user_data WHERE user_id = ?1 AND item_id = ?2", rusqlite::params![req_user_id, item_id.to_string()], |r| r.get(0)).unwrap_or(0);
                 
                 if let Some(client_ticks) = val["RunTimeTicks"].as_i64() {
                     if client_ticks > 0 {
