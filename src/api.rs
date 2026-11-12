@@ -501,14 +501,14 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                             if let Some(start) = nfo_text.find("<durationinseconds>") {
                                 let rest = &nfo_text[start + 19..];
                                 if let Some(end) = rest.find("</durationinseconds>") {
-                                    if let Ok(secs) = rest[..end].trim().parse::<i32>() { runtime = secs; }
+                                    if let Ok(secs) = rest[..end].trim().parse::<i32>() { runtime = (secs + 59) / 60; }
                                 }
                             }
                             if runtime <= 0 {
                                 if let Some(start) = nfo_text.find("<duration>") {
                                     let rest = &nfo_text[start + 10..];
                                     if let Some(end) = rest.find("</duration>") {
-                                        if let Ok(mins) = rest[..end].trim().parse::<i32>() { runtime = mins * 60; }
+                                        if let Ok(mins) = rest[..end].trim().parse::<i32>() { runtime = mins; }
                                     }
                                 }
                             }
@@ -559,7 +559,7 @@ fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, d
                 let ms = src.get("MediaStreams").cloned().unwrap_or(json!([]));
                 let ms_str = serde_json::to_string(&ms).unwrap_or_else(|_| "[]".to_string());
                 if let Some(rt_ticks) = src.get("RunTimeTicks").and_then(|v| v.as_i64()) {
-                    if rt_ticks > 0 { runtime = (rt_ticks / 10_000_000) as i32; }
+                    if rt_ticks > 0 { runtime = (rt_ticks / 10_000_000 / 60) as i32; }
                 }
                 (s, ms_str)
             } else { (0, "[]".to_string()) }
@@ -883,8 +883,8 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let hash_hexf: String = hashf.iter().map(|b| format!("{:02x}", b)).collect();
         let backdrop_tag = if has_fanart { format!("backdrop_{}_{}", id, &hash_hexf[..8]) } else { String::new() };
 
-        let runtime_secs: i32 = row.get(7).unwrap_or(0);
-        let total_ticks: i64 = (runtime_secs as i64) * 10_000_000;
+        let runtime_mins: i32 = row.get(7).unwrap_or(0);
+        let total_ticks: i64 = (runtime_mins as i64) * 60 * 10_000_000;
         let size: i64 = row.get(14).unwrap_or(0);
         let mtime = row.get::<_, i64>(15).unwrap_or(0);
         let date_str = format_iso8601(mtime);
@@ -950,12 +950,12 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let hash_hexf: String = hashf.iter().map(|b| format!("{:02x}", b)).collect();
         let backdrop_tag = if has_fanart { format!("backdrop_{}_{}", id, &hash_hexf[..8]) } else { String::new() };
 
-        let mut runtime_secs: i32 = row.get(7).unwrap_or(0);
-        if runtime_secs <= 0 {
-            let current_pct = playback_ticks / 10_000_000;
-            runtime_secs = if current_pct > 0 { current_pct as i32 + 1800 } else { 6000 };
+        let mut runtime_mins: i32 = row.get(7).unwrap_or(0);
+        if runtime_mins <= 0 {
+            let current_pct = playback_ticks / 10_000_000 / 60;
+            runtime_mins = if current_pct > 0 { current_pct as i32 + 30 } else { 100 };
         }
-        let total_ticks: i64 = (runtime_secs as i64) * 10_000_000;
+        let total_ticks: i64 = (runtime_mins as i64) * 60 * 10_000_000;
         let play_count: i32 = row.get(20).unwrap_or(0);
         let last_played_str: String = row.get(21).unwrap_or_default();
         
@@ -1428,8 +1428,8 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         let hash_hexf: String = hashf.iter().map(|b| format!("{:02x}", b)).collect();
         let backdrop_tag = if has_fanart { format!("backdrop_{}_{}", id, &hash_hexf[..8]) } else { String::new() };
         
-        let runtime_secs: i32 = row.get(7).unwrap_or(0);
-        let total_ticks: i64 = (runtime_secs as i64) * 10_000_000;
+        let runtime_mins: i32 = row.get(7).unwrap_or(0);
+        let total_ticks: i64 = (runtime_mins as i64) * 60 * 10_000_000;
         let size: i64 = row.get(14).unwrap_or(0);
         let mtime: i64 = row.get(15).unwrap_or(0);
         let date_created: i64 = row.get(20).unwrap_or(0);
@@ -1578,7 +1578,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
             }
 
             let date_created_ts = if date_created > 0 { date_created } else { mtime };
-            let run_time_ticks = (runtime as i64) * 10_000_000;
+            let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
             let est_bitrate = if size > 0 && run_time_ticks > 0 { (size * 8) / (run_time_ticks / 10_000_000) } else { 0 };
 
             let media_sources: Vec<Value> = if parts.is_empty() { vec![] } else {
@@ -1792,7 +1792,7 @@ pub async fn emby_playback_info(
         exts.push(ext);
     }
     let play_session_id = uuid::Uuid::new_v4().to_string();
-    let run_time_ticks = (runtime as i64) * 10_000_000;
+    let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
     
     let mut parsed_streams: Value = serde_json::from_str(&media_streams_json).unwrap_or(json!([]));
     sanitize_media_streams(&mut parsed_streams);
@@ -1940,13 +1940,13 @@ pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, E
                 
                 if let Some(client_ticks) = val["RunTimeTicks"].as_i64() {
                     if client_ticks > 0 {
-                        runtime_mins = (client_ticks / 10_000_000) as i32;
+                        runtime_mins = (client_ticks / 10_000_000 / 60) as i32;
                         let _ = conn.execute("UPDATE items SET runtime = ?1 WHERE id = ?2", rusqlite::params![runtime_mins, item_id]);
                     }
                 }
                 
                 if runtime_mins <= 0 && ticks > 0 {
-                    runtime_mins = (ticks / 10_000_000) as i32 + 1800;
+                    runtime_mins = (ticks / 10_000_000 / 60) as i32 + 30;
                     let _ = conn.execute("UPDATE items SET runtime = ?1 WHERE id = ?2", rusqlite::params![runtime_mins, item_id]);
                     
                     let pool_clone = pool.clone();
