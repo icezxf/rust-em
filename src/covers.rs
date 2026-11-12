@@ -160,7 +160,7 @@ pub async fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
             let _ = std::fs::write(&hash_path, current_hash);
             
             // 💡 非阻塞休眠 150ms，让出 CPU
-            tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         } else {
             skipped += 1;
         }
@@ -183,7 +183,13 @@ fn generate_landscape_cover(paths: &[String], out_path: &std::path::Path) {
     for (i, path) in paths.iter().take(count).enumerate() {
         draw_to_region(&mut canvas, path, i as u32 * cell_w, 0, cell_w, cell_h);
     }
-    if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
+    if let Ok(file) = std::fs::File::create(out_path) {
+        // 质量设为 75，编码速度极快，肉眼无损
+        let mut encoder = JpegEncoder::new_with_quality(file, 75);
+        if let Err(e) = encoder.encode_image(&canvas) {
+            println!("❌ [COVERS] 编码失败: {}", e);
+        }
+    }
 }
 
 fn generate_portrait_cover(paths: &[String], out_path: &std::path::Path) {
@@ -214,7 +220,13 @@ fn generate_portrait_cover(paths: &[String], out_path: &std::path::Path) {
         draw_to_region(&mut canvas, &paths[2], 0, cell_h, cell_w, cell_h);
         draw_to_region(&mut canvas, &paths[3], cell_w, cell_h, cell_w, cell_h);
     }
-    if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
+    if let Ok(file) = std::fs::File::create(out_path) {
+        // 质量设为 75，编码速度极快，肉眼无损
+        let mut encoder = JpegEncoder::new_with_quality(file, 75);
+        if let Err(e) = encoder.encode_image(&canvas) {
+            println!("❌ [COVERS] 编码失败: {}", e);
+        }
+    }
 }
 
 fn draw_to_region(canvas: &mut image::RgbImage, path: &str, x: u32, y: u32, w: u32, h: u32) {
