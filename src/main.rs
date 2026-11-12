@@ -1,5 +1,6 @@
-mod covers;
 #![recursion_limit = "256"]
+
+mod covers;
 
 use axum::{
     routing::{get, post, delete},
