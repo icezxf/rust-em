@@ -30,6 +30,43 @@ async fn main() {
     let _ = conn.execute("ALTER TABLE items ADD COLUMN play_count INTEGER DEFAULT 0", []);
     db::init_settings_table(&conn);
     
+    // 💡 强制建表 & 平滑迁移 (多用户系统)
+    let _ = conn.execute(
+        "CREATE TABLE IF NOT EXISTS user_library_access (
+            user_id INTEGER NOT NULL,
+            library_id INTEGER NOT NULL,
+            PRIMARY KEY (user_id, library_id)
+        )", []
+    );
+    let _ = conn.execute(
+        "CREATE TABLE IF NOT EXISTS user_data (
+            user_id INTEGER NOT NULL,
+            item_id TEXT NOT NULL,
+            is_favorite INTEGER DEFAULT 0,
+            play_count INTEGER DEFAULT 0,
+            playback_position_ticks INTEGER DEFAULT 0,
+            last_played_date TEXT,
+            PRIMARY KEY (user_id, item_id)
+        )", []
+    );
+    let _ = conn.execute(
+        "CREATE TABLE IF NOT EXISTS boxset_favorites (
+            user_id INTEGER NOT NULL,
+            boxset_id TEXT NOT NULL,
+            PRIMARY KEY (user_id, boxset_id)
+        )", []
+    );
+    
+    // 自动将 items 表里旧的收藏和进度迁移到 admin (user_id=1) 名下
+    let _ = conn.execute(
+        "INSERT OR IGNORE INTO user_data (user_id, item_id, is_favorite, play_count, playback_position_ticks)
+         SELECT 1, CAST(id AS TEXT), is_favorite, play_count, playback_ticks FROM items 
+         WHERE is_favorite > 0 OR play_count > 0 OR playback_ticks > 0",
+        [],
+    );
+    
+    println!("✅ [DB] 用户数据表已检查/创建完成");
+
     let state = Arc::new(Mutex::new(conn));
 
     // 2. 组装路由
