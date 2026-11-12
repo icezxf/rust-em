@@ -1,4 +1,4 @@
-use axum::{
+use axum::{Extension, 
     extract::{State, Request, Json, Query, Path as AxumPath},
     http::{StatusCode, header::{LOCATION, USER_AGENT, CONTENT_TYPE}, HeaderMap, Method},
     middleware::Next, response::{IntoResponse, Response}, body::Bytes,
@@ -260,6 +260,17 @@ fn get_cover_tag(folder: &str, prefix: &str, name: &str) -> String {
         }
     }
     tag
+}
+
+
+fn get_allowed_libs(conn: &Connection, user_id: i64) -> Option<Vec<i64>> {
+    if user_id == 1 { return None; } // 管理员，无限制
+    let mut stmt = match conn.prepare("SELECT library_id FROM user_library_access WHERE user_id = ?1") {
+        Ok(s) => s,
+        Err(_) => return Some(vec![]),
+    };
+    let libs: Vec<i64> = stmt.query_map([user_id], |r| r.get(0)).unwrap_or_else(|_| Box::new(std::iter::empty())).filter_map(Result::ok).collect();
+    Some(libs)
 }
 
 // ======= Web API =======
@@ -794,9 +805,15 @@ pub async fn emby_authenticate(State(pool): State<Arc<Mutex<Connection>>>, heade
     } else { (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid credentials" }))).into_response() }
 }
 
-pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>) -> impl IntoResponse {
+pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id, name, type FROM libraries").unwrap();
+    
+    let mut sql = "SELECT id, name, type FROM libraries".to_string();
+    if req_user_id != 1 {
+        sql.push_str(&format!(" WHERE id IN (SELECT library_id FROM user_library_access WHERE user_id = {})", req_user_id));
+    }
+    
+    let mut stmt = conn.prepare(&sql).unwrap();
     let items: Vec<Value> = stmt.query_map([], |row| {
         let id: i64 = row.get(0).unwrap_or_default(); let name: String = row.get(1).unwrap_or_default(); let lib_type: String = row.get(2).unwrap_or_default();
         Ok(json!({ "Name": name, "Id": format!("lib_{}", id), "ServerId": "rust-em-server", "Type": "CollectionFolder", "IsFolder": true, "MediaType": "Video", "CollectionType": if lib_type == "movies" { "movies" } else { "tvshows" }, "ImageTags": {"Primary": get_cover_tag("library", "lib", &id.to_string())}, "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false } }))
@@ -804,10 +821,20 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<HashMap<String, String>>) -> impl IntoResponse {
+pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<HashMap<String, String>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
+    let allowed_libs = get_allowed_libs(&conn, req_user_id);
+    if let Some(libs) = &allowed_libs {
+        if libs.is_empty() { return Json(json!([])).into_response(); }
+    }
+
     let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path FROM items WHERE 1=1".to_string();
     let mut params: Vec<String> = Vec::new();
+
+    if let Some(libs) = &allowed_libs {
+        let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+        sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+    }
     
     if let Some(pid) = query.get("ParentId") {
         if pid.starts_with("lib_") {
@@ -858,10 +885,20 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
     Json(items).into_response()
 }
 
-pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<HashMap<String, String>>) -> impl IntoResponse {
+pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<HashMap<String, String>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
+    let allowed_libs = get_allowed_libs(&conn, req_user_id);
+    if let Some(libs) = &allowed_libs {
+        if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
+    }
+
     let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path FROM items WHERE playback_ticks > 0".to_string();
     let mut params: Vec<String> = Vec::new();
+
+    if let Some(libs) = &allowed_libs {
+        let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+        sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+    }
     
     if let Some(pid) = query.get("ParentId") {
         if pid.starts_with("lib_") {
@@ -940,10 +977,10 @@ pub struct EmbyItemsQuery {
     search_term: Option<String>,
 }
 
-pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
-pub async fn emby_items_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<EmbyItemsQuery>) -> impl IntoResponse { emby_items_inner(pool, query).await }
+pub async fn emby_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<EmbyItemsQuery>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse { emby_items_inner(pool, query, req_user_id).await }
+pub async fn emby_items_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<EmbyItemsQuery>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse { emby_items_inner(pool, query, req_user_id).await }
 
-async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -> Response {
+async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, req_user_id: i64) -> Response {
     let conn = pool.lock().unwrap();
     
     if let Some(list_ids) = &query.list_item_ids {
@@ -1093,8 +1130,20 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         }
     }
 
+    let allowed_libs = get_allowed_libs(&conn, req_user_id);
+    if let Some(libs) = &allowed_libs {
+        if libs.is_empty() {
+            return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response();
+        }
+    }
+
     let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path, date_created, actors, directors, tags, studios, play_count, is_favorite FROM items WHERE 1=1".to_string();
     let mut params: Vec<String> = Vec::new();
+
+    if let Some(libs) = &allowed_libs {
+        let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+        sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+    }
 
     // 【核心修复 3】严格串台拦截
     if let Some(types) = &query.include_item_types {
@@ -2031,7 +2080,8 @@ pub async fn emby_studio_items(State(pool): State<Arc<Mutex<Connection>>>, AxumP
 pub async fn emby_genres(
     State(pool): State<Arc<Mutex<Connection>>>, 
     Query(query): Query<HashMap<String, String>>,
-    headers: HeaderMap
+    headers: HeaderMap,
+    Extension(req_user_id): Extension<i64>
 ) -> impl IntoResponse {
     let _ = headers;
     let conn = pool.lock().unwrap();
@@ -2039,6 +2089,13 @@ pub async fn emby_genres(
     if let Some(pid) = query.get("ParentId") {
         if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
     }
+
+    if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+        if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })); }
+        let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+        sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+    }
+
     let mut set = std::collections::HashSet::new();
     if let Ok(mut stmt) = conn.prepare(&sql) {
         if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
@@ -2058,7 +2115,8 @@ pub async fn emby_genres(
 pub async fn emby_tags(
     State(pool): State<Arc<Mutex<Connection>>>, 
     Query(query): Query<HashMap<String, String>>,
-    headers: HeaderMap
+    headers: HeaderMap,
+    Extension(req_user_id): Extension<i64>
 ) -> impl IntoResponse {
     let _ = headers;
     let conn = pool.lock().unwrap();
@@ -2066,6 +2124,13 @@ pub async fn emby_tags(
     if let Some(pid) = query.get("ParentId") {
         if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
     }
+
+    if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+        if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })); }
+        let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+        sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+    }
+
     let mut set = std::collections::HashSet::new();
     if let Ok(mut stmt) = conn.prepare(&sql) {
         if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
@@ -2083,7 +2148,8 @@ pub async fn emby_tags(
 pub async fn emby_years(
     State(pool): State<Arc<Mutex<Connection>>>, 
     Query(query): Query<HashMap<String, String>>,
-    headers: HeaderMap
+    headers: HeaderMap,
+    Extension(req_user_id): Extension<i64>
 ) -> impl IntoResponse {
     let _ = headers;
     let conn = pool.lock().unwrap();
@@ -2091,6 +2157,13 @@ pub async fn emby_years(
     if let Some(pid) = query.get("ParentId") {
         if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
     }
+
+    if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+        if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })); }
+        let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+        sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+    }
+
     sql.push_str(" ORDER BY year DESC");
     let mut items = Vec::new();
     if let Ok(mut stmt) = conn.prepare(&sql) {
@@ -2114,6 +2187,13 @@ pub async fn emby_official_ratings(
     if let Some(pid) = query.get("ParentId") {
         if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
     }
+
+    if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+        if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })); }
+        let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+        sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+    }
+
     sql.push_str(" ORDER BY mpaa ASC");
     let mut items = Vec::new();
     if let Ok(mut stmt) = conn.prepare(&sql) {
@@ -2129,7 +2209,8 @@ pub async fn emby_official_ratings(
 pub async fn emby_studios(
     State(pool): State<Arc<Mutex<Connection>>>, 
     Query(query): Query<HashMap<String, String>>,
-    headers: HeaderMap
+    headers: HeaderMap,
+    Extension(req_user_id): Extension<i64>
 ) -> impl IntoResponse {
     let _ = headers;
     let conn = pool.lock().unwrap();
@@ -2137,6 +2218,13 @@ pub async fn emby_studios(
     if let Some(pid) = query.get("ParentId") {
         if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
     }
+
+    if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+        if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })); }
+        let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+        sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+    }
+
     let mut set = std::collections::HashSet::new();
     if let Ok(mut stmt) = conn.prepare(&sql) {
         if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
