@@ -1851,17 +1851,6 @@ pub async fn emby_stream_with_source(State(pool): State<Arc<Mutex<Connection>>>,
 pub async fn emby_stream_with_source_ext(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, _source_id, _ext)): AxumPath<(i64, String, String)>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap) -> Response { emby_stream_inner(pool, item_id, query, headers).await }
 
 
-fn identify_pan(url: &str) -> &'static str {
-    if url.contains("115.com") || url.contains("115cdn.com") { "115网盘" }
-    else if url.contains("aliyundrive.com") || url.contains("alipan.com") { "阿里云盘" }
-    else if url.contains("baidu.com") { "百度网盘" }
-    else if url.contains("quark.cn") { "夸克网盘" }
-    else if url.contains("123pan.com") { "123云盘" }
-    else if url.contains("189.cn") { "天翼云盘" }
-    else if url.contains("139.com") { "移动云盘" }
-    else { "其他网盘" }
-}
-
 async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: HashMap<String, String>, headers: HeaderMap) -> Response {
     let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
@@ -1890,7 +1879,7 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
         let cache_lock = cache.lock().unwrap(); 
         if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) { 
             if Instant::now() < *expire_at { 
-                println!("⚡ [CACHE] 秒开播放 -> {} (ID: {}, 片名: {})", identify_pan(cached_url), item_id, item_title);
+                println!("⚡ [CACHE] 秒开播放 (ID: {}, 片名: {})", item_id, item_title);
                 return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); 
             } 
         }
@@ -1914,7 +1903,7 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
 
     { let mut cache_lock = cache.lock().unwrap(); cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(300))); }
     
-    println!("🔗 [302] 重新解析真实网盘 (ID: {}, 片名: {})\n     -> URL: {}", item_id, item_title, final_url);
+    println!("▶️ [PLAY] 重新解析直链并返回 302 (ID: {}, 片名: {})", item_id, item_title);
     
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
 }
