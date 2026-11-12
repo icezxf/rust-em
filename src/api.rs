@@ -1757,12 +1757,76 @@ pub async fn emby_hide_from_resume(AxumPath((_user_id, _item_id)): AxumPath<(Str
 
 pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path, rating FROM items WHERE id != ?1 ORDER BY RANDOM() LIMIT 6").unwrap();
-    let items: Vec<Value> = stmt.query_map([item_id], |row| {
+
+    // 1. 读取种子条目的 genres / tags
+    let (genres_str, tags_str): (String, String) = conn.query_row(
+        "SELECT genres, tags FROM items WHERE id = ?1",
+        [item_id],
+        |r| Ok((r.get::<_, String>(0).unwrap_or_default(), r.get::<_, String>(1).unwrap_or_default())),
+    ).unwrap_or_default();
+
+    // 2. 收集 term：tags 权重 2，genres 权重 1；各取前 8 个，避免 SQL 过长
+    let mut terms: Vec<(String, i64)> = Vec::new();
+    for t in tags_str.split(" / ").map(str::trim).filter(|s| !s.is_empty()).take(8) {
+        terms.push((t.to_string(), 2));
+    }
+    for g in genres_str.split(" / ").map(str::trim).filter(|s| !s.is_empty()).take(8) {
+        terms.push((g.to_string(), 1));
+    }
+
+    // 3. 没有 genres/tags 时回退随机 6 条
+    if terms.is_empty() {
+        let mut stmt = conn.prepare(
+            "SELECT id, title, type, year, plot, poster_path, rating FROM items WHERE id != ?1 ORDER BY RANDOM() LIMIT 6"
+        ).unwrap();
+        let items: Vec<Value> = stmt.query_map([item_id], |row| {
+            let id: i64 = row.get(0).unwrap_or_default();
+            let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
+            Ok(json!({ "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" }, "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0), "Overview": row.get::<_, String>(4).unwrap_or_default(), "CommunityRating": row.get::<_, f64>(6).unwrap_or(0.0), "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) }, "BackdropImageTags": [] }))
+        }).unwrap().filter_map(Result::ok).collect();
+        return Json(json!({ "Items": items, "TotalRecordCount": items.len() }));
+    }
+
+    // 4. 用编号参数 ?1=seed_id, ?2..=每个 term 的 pattern
+    //    SQL 中 score 和 where 都用同一个 ?N，只绑定一次
+    let mut score_expr = String::new();
+    let mut where_expr = String::new();
+    for (i, (_term, weight)) in terms.iter().enumerate() {
+        let p = i + 2;
+        if i > 0 {
+            score_expr.push_str(" + ");
+            where_expr.push_str(" OR ");
+        }
+        score_expr.push_str(&format!(
+            "((CASE WHEN tags LIKE ?{} THEN {} ELSE 0 END) + (CASE WHEN genres LIKE ?{} THEN {} ELSE 0 END))",
+            p, weight * 2, p, weight
+        ));
+        where_expr.push_str(&format!("genres LIKE ?{} OR tags LIKE ?{}", p, p));
+    }
+
+    let sql = format!(
+        "SELECT id, title, type, year, plot, poster_path, rating, ({}) AS score FROM items WHERE id != ?1 AND ({}) ORDER BY score DESC, RANDOM() LIMIT 6",
+        score_expr, where_expr
+    );
+
+    // 5. 参数：?1=seed_id, ?2..=pattern
+    let mut params_vec: Vec<rusqlite::types::Value> = Vec::with_capacity(terms.len() + 1);
+    params_vec.push(rusqlite::types::Value::Integer(item_id));
+    for (term, _) in &terms {
+        params_vec.push(rusqlite::types::Value::Text(format!("%{}%", term)));
+    }
+
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(_) => return Json(json!({ "Items": [], "TotalRecordCount": 0 })),
+    };
+
+    let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(params_vec.iter()), |row| {
         let id: i64 = row.get(0).unwrap_or_default();
         let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
         Ok(json!({ "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" }, "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0), "Overview": row.get::<_, String>(4).unwrap_or_default(), "CommunityRating": row.get::<_, f64>(6).unwrap_or(0.0), "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) }, "BackdropImageTags": [] }))
     }).unwrap().filter_map(Result::ok).collect();
+
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
