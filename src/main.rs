@@ -19,72 +19,19 @@ pub type AppState = Arc<Mutex<Connection>>;
 
 #[tokio::main]
 async fn main() {
-    // 1. 初始化数据库 (完美兼容 Docker 挂载路径)
+    // 1. 初始化数据库
     let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "/app/data/data.db".to_string());
     if let Some(parent) = std::path::Path::new(&db_path).parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     let conn = Connection::open(&db_path).expect("无法打开数据库");
+    
+    // 💡 所有底层建表、初始管理员全部交给 db.rs
     db::init_db(&conn);
     db::ensure_extra_columns(&conn);
-    let _ = conn.execute("ALTER TABLE items ADD COLUMN play_count INTEGER DEFAULT 0", []);
     db::init_settings_table(&conn);
     
-    // 💡 强制建表 & 平滑迁移 (多用户系统)
-    let _ = conn.execute(
-        "CREATE TABLE IF NOT EXISTS user_library_access (
-            user_id INTEGER NOT NULL,
-            library_id INTEGER NOT NULL,
-            PRIMARY KEY (user_id, library_id)
-        )", []
-    );
-    let _ = conn.execute(
-        "CREATE TABLE IF NOT EXISTS user_data (
-            user_id INTEGER NOT NULL,
-            item_id TEXT NOT NULL,
-            is_favorite INTEGER DEFAULT 0,
-            play_count INTEGER DEFAULT 0,
-            playback_position_ticks INTEGER DEFAULT 0,
-            last_played_date TEXT,
-            PRIMARY KEY (user_id, item_id)
-        )", []
-    );
-    let _ = conn.execute(
-        "CREATE TABLE IF NOT EXISTS boxset_favorites (
-            user_id INTEGER NOT NULL,
-            boxset_id TEXT NOT NULL,
-            PRIMARY KEY (user_id, boxset_id)
-        )", []
-    );
-    
-    // 自动将 items 表里旧的收藏和进度迁移到 admin (user_id=1) 名下
-    let _ = conn.execute(
-        "INSERT OR IGNORE INTO user_data (user_id, item_id, is_favorite, play_count, playback_position_ticks)
-         SELECT 1, CAST(id AS TEXT), is_favorite, play_count, playback_ticks FROM items 
-         WHERE is_favorite > 0 OR play_count > 0 OR playback_ticks > 0",
-        [],
-    );
-    
-    // 💡 自动补全历史播放时间 (用原来的更新时间填补空缺)
-    let _ = conn.execute(
-        "UPDATE user_data 
-         SET last_played_date = (SELECT CAST(updated_at AS TEXT) FROM items WHERE CAST(items.id AS TEXT) = user_data.item_id)
-         WHERE (last_played_date IS NULL OR last_played_date = '') 
-         AND (play_count > 0 OR playback_position_ticks > 0)",
-        [],
-    );
-    
-    // 💡 终极防呆：只有在 users 表完全为空时，才初始化默认 admin/admin
-    let user_count: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0)).unwrap_or(0);
-    if user_count == 0 {
-        let _ = conn.execute(
-            "INSERT INTO users (id, username, password) VALUES (1, 'admin', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918')",
-            [],
-        );
-        println!("✅ [DB] 已初始化默认管理员账号: admin / admin");
-    }
-
-    println!("✅ [DB] 用户数据表已检查/创建完成，多用户系统就绪");
+    println!("✅ [DB] 数据库初始化完成");
 
     let state = Arc::new(Mutex::new(conn));
 
@@ -125,22 +72,17 @@ async fn main() {
 
 fn emby_routes() -> Router<AppState> {
     Router::new()
-        // 服务发现与公共认证
         .route("/System/Info/Public", get(api::emby_public_info))
         .route("/System/Info", get(api::emby_info))
         .route("/System/ActivityLog/Entries", get(api::emby_activity_log))
         .route("/System/Ping", get(api::emby_ping).post(api::emby_ping))
         .route("/Users/Public", get(api::emby_public_users))
         .route("/Users/AuthenticateByName", post(api::emby_authenticate))
-        
-        // 用户与鉴权
         .route("/Auth/Keys", get(api::emby_auth_keys))
         .route("/ScheduledTasks", get(api::emby_scheduled_tasks))
         .route("/ScheduledTasks/Running/RefreshLibrary", post(api::emby_refresh_library))
         .route("/Users/{user_id}", get(api::emby_user))
         .route("/DisplayPreferences/{id}", get(api::emby_display_preferences))
-        
-        // 媒体库、浏览与搜索
         .route("/Library/VirtualFolders", get(api::emby_virtual_folders))
         .route("/Users/{user_id}/Views", get(api::emby_views))
         .route("/Users/{user_id}/Items/Root", get(api::emby_items)) 
@@ -158,29 +100,20 @@ fn emby_routes() -> Router<AppState> {
         .route("/Studios", get(api::emby_studios))
         .route("/OfficialRatings", get(api::emby_official_ratings))
         .route("/Search/Hints", get(api::emby_search_hints))
-        
-        // 详情、元数据、人物与图片
         .route("/Users/{user_id}/Items/{item_id}", get(api::emby_item_detail_with_user))
         .route("/Items/{item_id}", get(api::emby_item_detail).head(api::emby_item_detail))
         .route("/Items/{item_id}/Similar", get(api::emby_similar))
         .route("/Items/{item_id}/ThumbnailSet", get(api::emby_thumbnail_set))
         .route("/Persons/{person_id}", get(api::emby_person))
         .route("/Persons/{person_id}/Images/{image_type}", get(api::emby_person_image))
-        .route("/Items/{item_id}/Images/{image_type}", 
-            get(api::emby_item_image).head(api::emby_item_image))
-        .route("/Items/{item_id}/Images/{image_type}/{index}", 
-            get(api::emby_item_image_with_index).head(api::emby_item_image_with_index))
+        .route("/Items/{item_id}/Images/{image_type}", get(api::emby_item_image).head(api::emby_item_image))
+        .route("/Items/{item_id}/Images/{image_type}/{index}", get(api::emby_item_image_with_index).head(api::emby_item_image_with_index))
         .route("/Users/{user_id}/Images/{image_type}", get(api::emby_item_image_user_only))
-        
-        // 剧集相关
         .route("/Shows/NextUp", get(api::emby_shows_next_up))
         .route("/Shows/{series_id}/Seasons", get(api::emby_shows_seasons))
         .route("/Shows/{series_id}/Episodes", get(api::emby_shows_episodes))
-        
-        // 播放与视频流
         .route("/Items/{item_id}/PlaybackInfo", get(api::emby_playback_info).post(api::emby_playback_info))
         .route("/Items/{item_id}/Download", get(api::emby_download).head(api::emby_download))
-        
         .route("/Videos/{item_id}/stream", get(api::emby_stream).head(api::emby_stream))
         .route("/Videos/{item_id}/original.mp4", get(api::emby_stream).head(api::emby_stream))
         .route("/Videos/{item_id}/original.strm", get(api::emby_stream).head(api::emby_stream))
@@ -188,8 +121,6 @@ fn emby_routes() -> Router<AppState> {
         .route("/Videos/{item_id}/stream.{ext}", get(api::emby_stream_with_ext).head(api::emby_stream_with_ext))
         .route("/Videos/{item_id}/{source_id}/stream", get(api::emby_stream_with_source).head(api::emby_stream_with_source))
         .route("/Videos/{item_id}/{source_id}/stream.{ext}", get(api::emby_stream_with_source_ext).head(api::emby_stream_with_source_ext))
-        
-        // 小写路由兼容
         .route("/videos/{item_id}/stream", get(api::emby_stream).head(api::emby_stream))
         .route("/videos/{item_id}/original.mp4", get(api::emby_stream).head(api::emby_stream))
         .route("/videos/{item_id}/original.strm", get(api::emby_stream).head(api::emby_stream))
@@ -197,19 +128,13 @@ fn emby_routes() -> Router<AppState> {
         .route("/videos/{item_id}/stream.{ext}", get(api::emby_stream_with_ext).head(api::emby_stream_with_ext))
         .route("/videos/{item_id}/{source_id}/stream", get(api::emby_stream_with_source).head(api::emby_stream_with_source))
         .route("/videos/{item_id}/{source_id}/stream.{ext}", get(api::emby_stream_with_source_ext).head(api::emby_stream_with_source_ext))
-        
-        // 字幕
         .route("/Videos/{item_id}/{source_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream_with_source))
         .route("/Items/{item_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream))
-        
-        // 会话与进度
         .route("/Sessions", get(api::emby_sessions))
         .route("/Sessions/Playing", post(api::emby_playing))
         .route("/Sessions/Playing/Progress", post(api::emby_playing_progress))
         .route("/Sessions/Playing/Stopped", post(api::emby_playing_stopped))
         .route("/Users/{user_id}/Items/{item_id}/HideFromResume", post(api::emby_hide_from_resume))
-        
-        // 杂项操作
         .route("/Items/{item_id}/Refresh", post(api::emby_action))
         .route("/Users/{user_id}/PlayedItems/{item_id}", post(api::emby_action).delete(api::emby_action))
         .route("/Users/{user_id}/FavoriteItems/{item_id}", post(api::emby_mark_favorite).delete(api::emby_unmark_favorite))
