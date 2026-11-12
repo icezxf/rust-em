@@ -214,26 +214,9 @@ fn generate_portrait_cover(paths: &[String], out_path: &std::path::Path) {
 }
 
 fn draw_to_region(canvas: &mut image::RgbImage, path: &str, x: u32, y: u32, w: u32, h: u32) {
-    // 直接使用 image::open，稳定且高效
     if let Ok(img) = image::open(path) {
-        let (img_w, img_h) = img.dimensions();
-        let target_ratio = w as f64 / h as f64;
-        let img_ratio = img_w as f64 / img_h as f64;
-
-        // 极速生成纯色背景，替代双重 for 循环
-        let bg = image::RgbImage::from_pixel(w, h, image::Rgb([22, 25, 31]));
-        let _ = canvas.copy_from(&bg, x, y);
-
-        let (new_w, new_h) = if img_ratio > target_ratio {
-            (w, (w as f64 / img_ratio) as u32)
-        } else {
-            ((h as f64 * img_ratio) as u32, h)
-        };
-
-        // 极速缩放
-        let thumb = img.thumbnail(new_w, new_h).to_rgb8();
-        let offset_x = x + (w.saturating_sub(new_w)) / 2;
-        let offset_y = y + (h.saturating_sub(new_h)) / 2;
-        let _ = canvas.copy_from(&thumb, offset_x, offset_y);
+        // 💡 核心优化：强行拉伸填满（Stretch），不留任何黑边，同时速度最快
+        let thumb = img.resize_exact(w, h, image::imageops::FilterType::Triangle).to_rgb8();
+        let _ = canvas.copy_from(&thumb, x, y);
     }
 }
