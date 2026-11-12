@@ -1781,8 +1781,14 @@ pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(i
         ).unwrap();
         let items: Vec<Value> = stmt.query_map([item_id], |row| {
             let id: i64 = row.get(0).unwrap_or_default();
-            let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
-            Ok(json!({ "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" }, "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0), "Overview": row.get::<_, String>(4).unwrap_or_default(), "CommunityRating": row.get::<_, f64>(6).unwrap_or(0.0), "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) }, "BackdropImageTags": [] }))
+            let poster_path: String = row.get(5).unwrap_or_default();
+            let has_poster = !poster_path.is_empty();
+            let poster_tag = if has_poster {
+                let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
+                let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+                format!("tag_{}_{}", id, &hash_hex[..8])
+            } else { String::new() };
+            Ok(json!({ "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" }, "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0), "Overview": row.get::<_, String>(4).unwrap_or_default(), "CommunityRating": row.get::<_, f64>(6).unwrap_or(0.0), "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) }, "BackdropImageTags": [] }))
         }).unwrap().filter_map(Result::ok).collect();
         return Json(json!({ "Items": items, "TotalRecordCount": items.len() }));
     }
@@ -1823,8 +1829,14 @@ pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(i
 
     let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(params_vec.iter()), |row| {
         let id: i64 = row.get(0).unwrap_or_default();
-        let has_poster = !row.get::<_, String>(5).unwrap_or_default().is_empty();
-        Ok(json!({ "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" }, "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0), "Overview": row.get::<_, String>(4).unwrap_or_default(), "CommunityRating": row.get::<_, f64>(6).unwrap_or(0.0), "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) }, "BackdropImageTags": [] }))
+        let poster_path: String = row.get(5).unwrap_or_default();
+            let has_poster = !poster_path.is_empty();
+            let poster_tag = if has_poster {
+                let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
+                let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+                format!("tag_{}_{}", id, &hash_hex[..8])
+            } else { String::new() };
+        Ok(json!({ "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" }, "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0), "Overview": row.get::<_, String>(4).unwrap_or_default(), "CommunityRating": row.get::<_, f64>(6).unwrap_or(0.0), "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) }, "BackdropImageTags": [] }))
     }).unwrap().filter_map(Result::ok).collect();
 
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
