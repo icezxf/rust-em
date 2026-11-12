@@ -897,8 +897,9 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
     }
 
-    let mut sql = "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ?1 WHERE ud.playback_position_ticks > 0".to_string();
-    let mut params: Vec<String> = vec![req_user_id.to_string()];
+    let mut sql = "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE ud.playback_position_ticks > 0".to_string();
+    let mut params: Vec<String> = Vec::new();
+    params.push(req_user_id.to_string());
 
     if let Some(libs) = &allowed_libs {
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
@@ -1142,8 +1143,9 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         }
     }
 
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, IFNULL(ud.playback_position_ticks, 0), fanart_path, date_created, actors, directors, tags, studios, IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0) FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ?1 WHERE 1=1".to_string();
-    let mut params: Vec<String> = vec![req_user_id.to_string()];
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, IFNULL(ud.playback_position_ticks, 0), fanart_path, date_created, actors, directors, tags, studios, IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0) FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE 1=1".to_string();
+    let mut params: Vec<String> = Vec::new();
+    params.push(req_user_id.to_string());
 
     if let Some(libs) = &allowed_libs {
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
@@ -1158,9 +1160,9 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     }
 
     if let Some(filters) = &query.filters {
-        if filters.contains("IsPlayed") { sql.push_str(" AND play_count > 0"); } 
-        else if filters.contains("IsUnplayed") { sql.push_str(" AND play_count = 0"); }
-        if filters.contains("IsFavorite") { sql.push_str(" AND is_favorite = 1"); }
+        if filters.contains("IsPlayed") { sql.push_str(" AND ud.play_count > 0"); } 
+        else if filters.contains("IsUnplayed") { sql.push_str(" AND IFNULL(ud.play_count, 0) = 0"); }
+        if filters.contains("IsFavorite") { sql.push_str(" AND ud.is_favorite = 1"); }
     }
 
     if let Some(pid) = &query.parent_id {
@@ -1484,7 +1486,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let req_user_id = req_user_id; // 确保变量在作用域内
     let item_opt = conn.query_row(
-        "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.studios, items.parts, items.runtime, items.actors, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.series, items.label, items.set_name, items.tagline, items.tags, items.directors, items.num, items.stills, items.releasedate, items.original_title, items.sort_title, items.country, items.language, items.writers, items.trailer, items.media_streams, items.date_created, items.primary_image_aspect_ratio, items.original_language, items.fanart_path, items.logo_path, items.thumb_path, items.banner_path, items.strm_content, IFNULL(ud.playback_position_ticks, 0), IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0) FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ?2 WHERE items.id = ?1",
+        "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.studios, items.parts, items.runtime, items.actors, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.series, items.label, items.set_name, items.tagline, items.tags, items.directors, items.num, items.stills, items.releasedate, items.original_title, items.sort_title, items.country, items.language, items.writers, items.trailer, items.media_streams, items.date_created, items.primary_image_aspect_ratio, items.original_language, items.fanart_path, items.logo_path, items.thumb_path, items.banner_path, items.strm_content, IFNULL(ud.playback_position_ticks, 0), IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0) FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE items.id = ?",
         [id, req_user_id],
         |row| {
             let title: String = row.get(1).unwrap_or_default(); let typ: String = row.get(2).unwrap_or_default();
