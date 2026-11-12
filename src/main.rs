@@ -65,7 +65,7 @@ async fn main() {
         [],
     );
     
-    // 💡 自动补全历史播放时间：如果 user_data 里没记录时间，但以前播过，就用 items.updated_at 填上
+    // 💡 自动补全历史播放时间 (用原来的更新时间填补空缺)
     let _ = conn.execute(
         "UPDATE user_data 
          SET last_played_date = (SELECT CAST(updated_at AS TEXT) FROM items WHERE CAST(items.id AS TEXT) = user_data.item_id)
@@ -74,7 +74,7 @@ async fn main() {
         [],
     );
     
-    println!("✅ [DB] 用户数据表已检查/创建完成");
+    println!("✅ [DB] 用户数据表已检查/创建完成，多用户系统就绪");
 
     let state = Arc::new(Mutex::new(conn));
 
@@ -99,7 +99,7 @@ async fn main() {
         .nest("/emby", emby_routes())
         .merge(emby_routes())
 
-        // 3. 静态文件服务（网页端）
+        // 3. 静态文件服务
         .fallback_service(tower_http::services::ServeDir::new("public").append_index_html_on_directories(true))
 
         // 4. 中间件挂载
@@ -167,7 +167,7 @@ fn emby_routes() -> Router<AppState> {
         .route("/Shows/{series_id}/Seasons", get(api::emby_shows_seasons))
         .route("/Shows/{series_id}/Episodes", get(api::emby_shows_episodes))
         
-        // 播放与视频流 (含 HEAD 支持)
+        // 播放与视频流
         .route("/Items/{item_id}/PlaybackInfo", get(api::emby_playback_info).post(api::emby_playback_info))
         .route("/Items/{item_id}/Download", get(api::emby_download).head(api::emby_download))
         
@@ -199,7 +199,7 @@ fn emby_routes() -> Router<AppState> {
         .route("/Sessions/Playing/Stopped", post(api::emby_playing_stopped))
         .route("/Users/{user_id}/Items/{item_id}/HideFromResume", post(api::emby_hide_from_resume))
         
-        // 杂项操作 (统一返回 OK)
+        // 杂项操作
         .route("/Items/{item_id}/Refresh", post(api::emby_action))
         .route("/Users/{user_id}/PlayedItems/{item_id}", post(api::emby_action).delete(api::emby_action))
         .route("/Users/{user_id}/FavoriteItems/{item_id}", post(api::emby_mark_favorite).delete(api::emby_unmark_favorite))

@@ -1,7 +1,8 @@
-use axum::{Extension, 
+use axum::{
     extract::{State, Request, Json, Query, Path as AxumPath},
     http::{StatusCode, header::{LOCATION, USER_AGENT, CONTENT_TYPE}, HeaderMap, Method},
     middleware::Next, response::{IntoResponse, Response}, body::Bytes,
+    Extension,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -77,11 +78,9 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
             }
         }
         if let Some(user_id) = user_id_opt {
-            // 💡 核心安全控制：普通用户绝对不能访问 /api 接口（网页端管理接口）
             if path.starts_with("/api/") && user_id != 1 {
                 return Err(StatusCode::FORBIDDEN);
             }
-            // 把 user_id 注入到 request extensions 中
             let mut req = req;
             req.extensions_mut().insert(user_id);
             return Ok(next.run(req).await);
@@ -138,7 +137,6 @@ fn extract_extension_from_url(url: &str) -> String {
 }
 
 pub async fn resolve_qmediasync_url(client: &reqwest::Client, url: &str, ua: &str) -> Option<String> {
-    // 【绝对死守】：使用传入的客户端真实 UA，绝不伪造，防止 115 等网盘风控失效
     let resp = client.get(url).header(USER_AGENT, ua).send().await.ok()?;
     let status = resp.status();
     if status.is_redirection() {
@@ -219,7 +217,6 @@ fn sanitize_media_streams(streams: &mut Value) {
     replace_null(streams);
 }
 
-
 fn get_cover_tag(folder: &str, prefix: &str, name: &str) -> String {
     let mut sanitized_name = String::new();
     for c in name.chars() {
@@ -262,9 +259,8 @@ fn get_cover_tag(folder: &str, prefix: &str, name: &str) -> String {
     tag
 }
 
-
 fn get_allowed_libs(conn: &Connection, user_id: i64) -> Option<Vec<i64>> {
-    if user_id == 1 { return None; } // 管理员，无限制
+    if user_id == 1 { return None; }
     let mut stmt = match conn.prepare("SELECT library_id FROM user_library_access WHERE user_id = ?1") {
         Ok(s) => s,
         Err(_) => return Some(vec![]),
@@ -287,7 +283,6 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
     if conn.prepare("SELECT id FROM users WHERE username = ?1 AND password = ?2").unwrap().exists([&payload.username, &format!("{:x}", hasher.finalize())]).unwrap() {
         let user_id: i64 = conn.query_row("SELECT id FROM users WHERE username = ?1", [&payload.username], |r| r.get(0)).unwrap_or(0);
         
-        // 💡 网页端：只有 id = 1 (admin) 才能登录
         if user_id != 1 {
             return (StatusCode::FORBIDDEN, Json(json!({ "error": "只有管理员可以登录网页端" }))).into_response();
         }
@@ -373,7 +368,6 @@ fn get_base_stem(stem: &str) -> String {
     stem.to_string()
 }
 
-// 【核心修复 4】文本强行解析 NFO 的 <streamdetails>
 fn parse_nfo_stream_details(nfo_text: &str) -> Value {
     let mut streams = Vec::new();
     let extract_tag = |text: &str, tag: &str| -> Option<String> {
@@ -806,7 +800,6 @@ pub async fn emby_authenticate(State(pool): State<Arc<Mutex<Connection>>>, heade
     if let Some((id, name)) = user_opt {
         let token = uuid::Uuid::new_v4().to_string();
         TOKENS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap().insert(token.clone(), id);
-        // 返回完整的 User 对象，包含客户端可能依赖的所有字段
         (StatusCode::OK, Json(json!({
             "User": {
                 "Id": id.to_string(),
@@ -841,7 +834,6 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
 pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<HashMap<String, String>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     
-    // 1. 权限过滤
     let allowed_libs = get_allowed_libs(&conn, req_user_id);
     if let Some(libs) = &allowed_libs {
         if libs.is_empty() { return Json(json!([])).into_response(); }
@@ -855,7 +847,6 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
     }
 
-    // 2. 媒体库过滤
     if let Some(pid) = query.get("ParentId") {
         if pid.starts_with("lib_") {
             if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
@@ -910,7 +901,6 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         }))
     }).unwrap().filter_map(Result::ok).collect();
     
-    // 【绝对死守】：最新添加接口返回裸数组
     Json(items).into_response()
 }
 
@@ -982,7 +972,9 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
                 "IsFavorite": false,
                 "Played": play_count > 0,
                 "PlayedPercentage": if total_ticks > 0 { (playback_ticks as f64 / total_ticks as f64) * 100.0 } else { 0.0 },
-                "LastPlayedDate": json!(format_iso8601(row.get::<_, i64>(15).unwrap_or(0))),
+                "LastPlayedDate": if !last_played_str.is_empty() {
+                    if let Ok(ts) = last_played_str.parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
+                } else { json!(null) },
                 "UnplayedItemCount": 0
             }
         }))
@@ -1028,7 +1020,8 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             for name in set_name_str.split(" / ").filter(|s| !s.trim().is_empty()) {
                 let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
                 let boxset_id = format!("boxset_{:x}", hash);
-                boxsets.push(json!({ "Name": name, "Id": boxset_id, "ServerId": "rust-em-server", "Type": "BoxSet", "IsFolder": true, "MediaType": "Video", "ImageTags": {"Primary": "tag_boxset"}, "BackdropImageTags": [], "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false } }));
+                let is_fav = if let Ok(count) = conn.query_row("SELECT COUNT(1) FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", [req_user_id, &item_id.to_string()], |r| r.get::<_, i64>(0)) { count > 0 } else { false };
+                boxsets.push(json!({ "Name": name, "Id": boxset_id, "ServerId": "rust-em-server", "Type": "BoxSet", "IsFolder": true, "MediaType": "Video", "ImageTags": {"Primary": format!("{}_cover", boxset_id)}, "BackdropImageTags": [], "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": is_fav, "Played": false } }));
             }
             return Json(json!({ "Items": boxsets, "TotalRecordCount": boxsets.len() })).into_response();
         }
@@ -1041,6 +1034,11 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
 
         if is_dict_only && t_lower.contains("tag") {
             let mut sql = "SELECT tags FROM items WHERE tags != ''".to_string();
+            if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+                if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
+                let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+                sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+            }
             if let Some(pid) = &query.parent_id {
                 if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
             }
@@ -1060,6 +1058,11 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         
         if is_dict_only && t_lower.contains("genre") {
             let mut sql = "SELECT genres FROM items WHERE genres != ''".to_string();
+            if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+                if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
+                let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+                sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+            }
             if let Some(pid) = &query.parent_id {
                 if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
             }
@@ -1079,6 +1082,11 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
 
         if is_dict_only && t_lower.contains("year") {
             let mut sql = "SELECT DISTINCT year FROM items WHERE year != ''".to_string();
+            if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+                if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
+                let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+                sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+            }
             if let Some(pid) = &query.parent_id {
                 if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
             }
@@ -1096,6 +1104,11 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
 
         if is_dict_only && t_lower.contains("officialrating") {
             let mut sql = "SELECT DISTINCT mpaa FROM items WHERE mpaa != ''".to_string();
+            if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+                if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
+                let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+                sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+            }
             if let Some(pid) = &query.parent_id {
                 if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
             }
@@ -1113,6 +1126,11 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
 
         if types.to_lowercase().contains("boxset") {
             let mut sql = "SELECT set_name FROM items WHERE set_name != ''".to_string();
+            if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+                if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
+                let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+                sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+            }
             if let Some(pid) = &query.parent_id {
                 if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
             }
@@ -1121,11 +1139,19 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
                 if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
                     let mut set_names = std::collections::HashSet::new();
                     for s in mapped.flatten() { for name in s.split(" / ").filter(|s| !s.trim().is_empty()) { set_names.insert(name.to_string()); } }
+                    let is_fav_query = query.filters.as_deref().map_or(false, |f| f.contains("IsFavorite"));
                     for name in set_names {
                         let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
                         let hash_hex = format!("{:x}", hash);
                         let boxset_id = format!("boxset_{}", hash_hex);
-                        boxsets.push(json!({ "Name": name, "Id": boxset_id, "ServerId": "rust-em-server", "Type": "BoxSet", "IsFolder": true, "MediaType": "Video", "ImageTags": {"Primary": get_cover_tag("boxset", "boxset", &hash_hex)}, "BackdropImageTags": [], "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false } }));
+                        
+                        let is_fav = if let Ok(count) = conn.query_row("SELECT COUNT(1) FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", [req_user_id, &boxset_id], |r| r.get::<_, i64>(0)) { count > 0 } else { false };
+                        
+                        if is_fav_query && !is_fav {
+                            continue;
+                        }
+
+                        boxsets.push(json!({ "Name": name, "Id": boxset_id, "ServerId": "rust-em-server", "Type": "BoxSet", "IsFolder": true, "MediaType": "Video", "ImageTags": {"Primary": get_cover_tag("boxset", "boxset", &hash_hex)}, "BackdropImageTags": [], "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": is_fav, "Played": false } }));
                     }
                 }
             }
@@ -1133,12 +1159,16 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         }
     }
 
-    // 【核心修复 1】虚拟文件夹递归
+    // 虚拟文件夹递归
     let is_folder_view = query.recursive == Some(false) || query.sort_by.as_deref().map_or(false, |s| s.contains("IsFolder")) || query.include_item_types.as_deref().map_or(false, |t| t.to_lowercase().contains("folder"));
     if is_folder_view {
         let base_path = if let Some(pid) = &query.parent_id {
             if pid.starts_with("lib_") {
                 if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
+                    if req_user_id != 1 {
+                        let is_allowed = conn.query_row("SELECT COUNT(1) FROM user_library_access WHERE user_id = ?1 AND library_id = ?2", [req_user_id, lib_id], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0;
+                        if !is_allowed { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
+                    }
                     if let Ok(path_json) = conn.query_row("SELECT path FROM libraries WHERE id = ?1", [lib_id], |r| r.get::<_, String>(0)) { serde_json::from_str::<Vec<String>>(&path_json).ok().and_then(|p| p.first().cloned()) } else { None }
                 } else { None }
             } else if pid.starts_with("folder_") { from_hex(pid.trim_start_matches("folder_")) } else { None }
@@ -1184,7 +1214,6 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
     }
 
-    // 【核心修复 3】严格串台拦截
     if let Some(types) = &query.include_item_types {
         let t = types.to_lowercase();
         if t.contains("movie") { sql.push_str(" AND type = 'movies'"); } 
@@ -1237,7 +1266,6 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         }
     }
 
-    // ===== SearchTerm 搜索（参数化，不建 people 表） =====
     let search_term_raw = query.search_term.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let mut search_person_items: Vec<Value> = Vec::new();
     let mut is_search = false;
@@ -1251,16 +1279,8 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         is_search = true;
 
         let pattern = format!("%{}%", term);
-
-        // 媒体项匹配：标题/原名/标签/演员/导演
-        sql.push_str(
-            " AND (title LIKE ? OR original_title LIKE ? OR tags LIKE ? OR actors LIKE ? OR directors LIKE ?)"
-        );
-        params.push(pattern.clone());
-        params.push(pattern.clone());
-        params.push(pattern.clone());
-        params.push(pattern.clone());
-        params.push(pattern.clone());
+        sql.push_str(" AND (title LIKE ? OR original_title LIKE ? OR tags LIKE ? OR actors LIKE ? OR directors LIKE ?)");
+        params.push(pattern.clone()); params.push(pattern.clone()); params.push(pattern.clone()); params.push(pattern.clone()); params.push(pattern.clone());
 
         let types_lower = query.include_item_types.as_deref().map(|t| t.to_lowercase()).unwrap_or_default();
         let wants_person = types_lower.contains("person");
@@ -1268,35 +1288,18 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         let only_person = wants_person && !wants_media;
 
         if wants_person {
-            let lib_id_opt = query.parent_id.as_deref()
-                .filter(|p| p.starts_with("lib_"))
-                .and_then(|p| p.trim_start_matches("lib_").parse::<i64>().ok());
-
-            let mut person_sql = String::from(
-                "SELECT actors, directors FROM items WHERE (actors LIKE ? OR directors LIKE ?)"
-            );
-            if lib_id_opt.is_some() {
-                person_sql.push_str(" AND library_id = ?");
-            }
+            let lib_id_opt = query.parent_id.as_deref().filter(|p| p.starts_with("lib_")).and_then(|p| p.trim_start_matches("lib_").parse::<i64>().ok());
+            let mut person_sql = String::from("SELECT actors, directors FROM items WHERE (actors LIKE ? OR directors LIKE ?)");
+            if lib_id_opt.is_some() { person_sql.push_str(" AND library_id = ?"); }
             person_sql.push_str(" LIMIT 500");
 
             if let Ok(mut pstmt) = conn.prepare(&person_sql) {
                 let mut names_set: HashSet<String> = HashSet::new();
-                let mut p_params: Vec<Box<dyn rusqlite::ToSql>> = vec![
-                    Box::new(pattern.clone()),
-                    Box::new(pattern.clone()),
-                ];
-                if let Some(lid) = lib_id_opt {
-                    p_params.push(Box::new(lid));
-                }
+                let mut p_params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(pattern.clone()), Box::new(pattern.clone())];
+                if let Some(lid) = lib_id_opt { p_params.push(Box::new(lid)); }
                 let p_refs: Vec<&dyn rusqlite::ToSql> = p_params.iter().map(|b| b.as_ref()).collect();
 
-                if let Ok(mapped) = pstmt.query_map(rusqlite::params_from_iter(p_refs), |r| {
-                    Ok((
-                        r.get::<_, String>(0).unwrap_or_default(),
-                        r.get::<_, String>(1).unwrap_or_default(),
-                    ))
-                }) {
+                if let Ok(mapped) = pstmt.query_map(rusqlite::params_from_iter(p_refs), |r| Ok((r.get::<_, String>(0).unwrap_or_default(), r.get::<_, String>(1).unwrap_or_default()))) {
                     for (actors, directors) in mapped.flatten() {
                         if let Ok(arr) = serde_json::from_str::<Vec<Value>>(&actors) {
                             for a in arr {
@@ -1311,23 +1314,10 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
                         }
                     }
                 }
-
                 for name in names_set {
                     search_person_items.push(json!({
-                        "Name": name,
-                        "Id": format!("person_{}", name),
-                        "ServerId": "rust-em-server",
-                        "Type": "Person",
-                        "IsFolder": false,
-                        "MediaType": "Video",
-                        "ImageTags": {},
-                        "BackdropImageTags": [],
-                        "UserData": {
-                            "PlaybackPositionTicks": 0,
-                            "PlayCount": 0,
-                            "IsFavorite": false,
-                            "Played": false
-                        }
+                        "Name": name, "Id": format!("person_{}", name), "ServerId": "rust-em-server", "Type": "Person", "IsFolder": false, "MediaType": "Video",
+                        "ImageTags": {}, "BackdropImageTags": [], "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
                     }));
                 }
             }
@@ -1338,22 +1328,12 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             return Json(json!({ "Items": search_person_items, "TotalRecordCount": final_total })).into_response();
         }
     }
-    // ===== SearchTerm 搜索结束 =====
 
-    // 【核心修复 2】智能分发与精准匹配
-    // 【核心修复】支持按逗号或竖线拆分，并严格使用 AND 关系
-    // 【核心优化】分离 OR 和 AND 逻辑
     let split_ids = |val: &str| -> Vec<String> {
-        decode_url(val).split(|c| c == ',' || c == '|')
-            .map(|x| x.trim().to_string())
-            .filter(|x| !x.is_empty())
-            .collect()
+        decode_url(val).split(|c| c == ',' || c == '|').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()
     };
 
-    let mut genre_filters = Vec::new();
-    let mut studio_filters = Vec::new();
-    let mut person_filters = Vec::new();
-    let mut tag_filters = Vec::new();
+    let mut genre_filters = Vec::new(); let mut studio_filters = Vec::new(); let mut person_filters = Vec::new(); let mut tag_filters = Vec::new();
 
     if let Some(p) = &query.person_ids { person_filters.extend(split_ids(p)); }
     if let Some(g) = &query.genre_ids { genre_filters.extend(split_ids(g)); }
@@ -1363,7 +1343,6 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     if let Some(s) = &query.studio_ids { studio_filters.extend(split_ids(s)); }
     if let Some(s) = &query.studios { studio_filters.extend(split_ids(s)); }
 
-    // 1. 处理 Genres (同一维度 OR)
     if !genre_filters.is_empty() {
         let mut or_clauses = Vec::new();
         for raw_id in genre_filters {
@@ -1372,12 +1351,9 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             or_clauses.push("(genres = ? OR genres LIKE ? OR genres LIKE ? OR genres LIKE ?)");
             params.push(name.clone()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name));
         }
-        if !or_clauses.is_empty() {
-            sql.push_str(&format!(" AND ({})", or_clauses.join(" OR ")));
-        }
+        if !or_clauses.is_empty() { sql.push_str(&format!(" AND ({})", or_clauses.join(" OR "))); }
     }
 
-    // 2. 处理 Studios (同一维度 OR)
     if !studio_filters.is_empty() {
         let mut or_clauses = Vec::new();
         for raw_id in studio_filters {
@@ -1386,12 +1362,9 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             or_clauses.push("(studios = ? OR studios LIKE ? OR studios LIKE ? OR studios LIKE ?)");
             params.push(name.clone()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name));
         }
-        if !or_clauses.is_empty() {
-            sql.push_str(&format!(" AND ({})", or_clauses.join(" OR ")));
-        }
+        if !or_clauses.is_empty() { sql.push_str(&format!(" AND ({})", or_clauses.join(" OR "))); }
     }
 
-    // 3. 处理 Person (同一维度 OR)
     if !person_filters.is_empty() {
         let mut or_clauses = Vec::new();
         for raw_id in person_filters {
@@ -1400,12 +1373,9 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             or_clauses.push("(directors = ? OR directors LIKE ? OR directors LIKE ? OR directors LIKE ? OR actors LIKE ? OR actors LIKE ?)");
             params.push(name.clone()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name)); params.push(format!("%\"name\":\"{}\"%", name)); params.push(format!("%\"name\": \"{}\"%", name));
         }
-        if !or_clauses.is_empty() {
-            sql.push_str(&format!(" AND ({})", or_clauses.join(" OR ")));
-        }
+        if !or_clauses.is_empty() { sql.push_str(&format!(" AND ({})", or_clauses.join(" OR "))); }
     }
 
-    // 4. 处理 Tags (同一维度 AND，要求每个选中的标签都必须存在)
     for raw_id in tag_filters {
         let name = raw_id.replace("tag_", "").trim().to_string();
         if name.is_empty() { continue; }
@@ -1484,7 +1454,9 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
                 "IsFavorite": is_favorite > 0,
                 "Played": play_count > 0,
                 "PlayedPercentage": if total_ticks > 0 { (playback_ticks as f64 / total_ticks as f64) * 100.0 } else { 0.0 },
-                "LastPlayedDate": json!(if play_count > 0 { format_iso8601(mtime) } else { String::new() }),
+                "LastPlayedDate": if !last_played_str.is_empty() {
+                    if let Ok(ts) = last_played_str.parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
+                } else { json!(null) },
                 "UnplayedItemCount": 0
             }
         }))
@@ -1492,9 +1464,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     items.extend(search_person_items);
     let final_total = if is_search {
         if search_term_len < 4 { 0 } else { items.len() as i64 }
-    } else {
-        total
-    };
+    } else { total };
     Json(json!({ "Items": items, "TotalRecordCount": final_total })).into_response()
 }
 
@@ -1520,15 +1490,15 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
         }
         if found_set_name.is_empty() { return StatusCode::NOT_FOUND.into_response(); }
         
+        let is_fav = if let Ok(count) = conn.query_row("SELECT COUNT(1) FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", [req_user_id, &item_id], |r| r.get::<_, i64>(0)) { count > 0 } else { false };
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE (set_name = ?1 OR set_name LIKE ?2 OR set_name LIKE ?3 OR set_name LIKE ?4)", [&found_set_name, &format!("{} / %", found_set_name), &format!("% / {}", found_set_name), &format!("% / {} / %", found_set_name)], |r| r.get(0)).unwrap_or(0);
-        return Json(json!({ "Name": found_set_name, "Id": item_id, "ServerId": "rust-em-server", "Type": "BoxSet", "IsFolder": true, "MediaType": "Video", "ChildCount": count, "RecursiveItemCount": count, "ImageTags": {"Primary": "tag_boxset"}, "BackdropImageTags": [], "Overview": "合集", "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false } })).into_response();
+        return Json(json!({ "Name": found_set_name, "Id": item_id, "ServerId": "rust-em-server", "Type": "BoxSet", "IsFolder": true, "MediaType": "Video", "ChildCount": count, "RecursiveItemCount": count, "ImageTags": {"Primary": format!("{}_cover", item_id)}, "BackdropImageTags": [], "Overview": "合集", "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": is_fav, "Played": false } })).into_response();
     }
 
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
-    let req_user_id = req_user_id; // 确保变量在作用域内
     let item_opt = conn.query_row(
         "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.studios, items.parts, items.runtime, items.actors, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.series, items.label, items.set_name, items.tagline, items.tags, items.directors, items.num, items.stills, items.releasedate, items.original_title, items.sort_title, items.country, items.language, items.writers, items.trailer, items.media_streams, items.date_created, items.primary_image_aspect_ratio, items.original_language, items.fanart_path, items.logo_path, items.thumb_path, items.banner_path, items.strm_content, IFNULL(ud.playback_position_ticks, 0), IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0), IFNULL(ud.last_played_date, '') FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE items.id = ?",
-        [id, req_user_id],
+        rusqlite::params![req_user_id, id],
         |row| {
             let title: String = row.get(1).unwrap_or_default(); let typ: String = row.get(2).unwrap_or_default();
             let year_str: String = row.get(3).unwrap_or_default(); let plot: String = row.get(4).unwrap_or_default();
@@ -1635,14 +1605,14 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
                 "Path": decode_url(&real_path), "Container": "mp4", "MediaSourceCount": media_sources.len(), "MediaSources": media_sources,
                 "ProbeEngine": "rust-native", "LocationType": "FileSystem", "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
                 "UserData": { 
-                "ItemId": id.to_string(), "Key": id.to_string(), 
-                "PlaybackPositionTicks": playback_ticks, "PlayCount": play_count, 
-                "IsFavorite": is_favorite > 0, "Played": play_count > 0, 
-                "PlayedPercentage": if run_time_ticks > 0 { playback_ticks * 100 / run_time_ticks } else { 0 },
-                "LastPlayedDate": if !last_played_str.is_empty() {
-                    if let Ok(ts) = last_played_str.parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
-                } else { json!(null) }
-            }
+                    "ItemId": id.to_string(), "Key": id.to_string(), 
+                    "PlaybackPositionTicks": playback_ticks, "PlayCount": play_count, 
+                    "IsFavorite": is_favorite > 0, "Played": play_count > 0, 
+                    "PlayedPercentage": if run_time_ticks > 0 { playback_ticks * 100 / run_time_ticks } else { 0 },
+                    "LastPlayedDate": if !last_played_str.is_empty() {
+                        if let Ok(ts) = last_played_str.parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
+                    } else { json!(null) }
+                }
             }))
         }
     ).ok();
@@ -1677,33 +1647,62 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
             ("tag", "tag")
         };
         let raw_name = clean_id.trim_start_matches(&format!("{}_", prefix));
-        let path = std::path::PathBuf::from("data/cache/covers").join(folder).join(format!("{}_{}.jpg", prefix, raw_name));
-        if path.exists() {
-            if let Ok(mut bytes) = tokio::fs::read(&path).await {
-                // 检查客户端是否要求了特定的宽高（例如列表页的方形卡片，或者宽屏卡片）
-                let req_w = query.get("maxWidth").or_else(|| query.get("width")).and_then(|s| s.parse::<u32>().ok());
-                let req_h = query.get("maxHeight").or_else(|| query.get("height")).and_then(|s| s.parse::<u32>().ok());
-                
-                // 如果客户端明确要求了宽和高，我们直接强行拉伸，完美贴合客户端 UI
-                if let (Some(w), Some(h)) = (req_w, req_h) {
-                    if w > 0 && h > 0 {
-                        if let Ok(img) = image::load_from_memory(&bytes) {
-                            // 用极速的 Triangle 算法直接拉伸到客户端要求的大小
-                            let resized = img.resize_exact(w, h, image::imageops::FilterType::Triangle);
-                            let mut out = std::io::Cursor::new(Vec::new());
-                            let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 80);
-                            if encoder.encode_image(&resized).is_ok() {
-                                bytes = out.into_inner();
-                            }
+        
+        let mut sanitized_name = String::new();
+        for c in raw_name.chars() {
+            if c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' {
+                sanitized_name.push('_');
+            } else {
+                sanitized_name.push(c);
+            }
+        }
+
+        if prefix == "boxset" {
+            let dir = std::path::PathBuf::from("data/cache/covers").join(folder);
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                let match_prefix = format!("boxset_{}_", sanitized_name.trim());
+                for entry in entries.flatten() {
+                    let fname = entry.file_name().to_string_lossy().to_string();
+                    if fname.starts_with(&match_prefix) && fname.ends_with(".jpg") {
+                        if let Ok(mut bytes) = tokio::fs::read(entry.path()).await {
+                            return (StatusCode::OK, [(CONTENT_TYPE, "image/jpeg")], bytes).into_response();
                         }
                     }
                 }
-
-                return (StatusCode::OK, [(CONTENT_TYPE, "image/jpeg")], bytes).into_response();
+            }
+        } else {
+            let path = std::path::PathBuf::from("data/cache/covers").join(folder).join(format!("{}_{}.jpg", prefix, sanitized_name.trim()));
+            if path.exists() {
+                if let Ok(mut bytes) = tokio::fs::read(&path).await {
+                    let req_w = query.get("maxWidth").or_else(|| query.get("width")).and_then(|s| s.parse::<u32>().ok());
+                    let req_h = query.get("maxHeight").or_else(|| query.get("height")).and_then(|s| s.parse::<u32>().ok());
+                    
+                    if let (Some(w), Some(h)) = (req_w, req_h) {
+                        if w > 0 && h > 0 {
+                            if let Ok(img) = image::load_from_memory(&bytes) {
+                                let resized = img.resize_exact(w, h, image::imageops::FilterType::Triangle);
+                                let mut out = std::io::Cursor::new(Vec::new());
+                                let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 80);
+                                if encoder.encode_image(&resized).is_ok() {
+                                    bytes = out.into_inner();
+                                }
+                            }
+                        }
+                    }
+                    return (StatusCode::OK, [(CONTENT_TYPE, "image/jpeg")], bytes).into_response();
+                }
             }
         }
+        
         if !item_id.starts_with("boxset_") {
-            return StatusCode::NOT_FOUND.into_response();
+            let png_bytes: [u8; 67] = [
+                0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+                0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+                0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+                0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+                0x42, 0x60, 0x82
+            ];
+            return (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response();
         }
     }
 
@@ -1949,7 +1948,6 @@ pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, E
                 }
                 
                 let total_ticks = (runtime_mins as i64) * 60 * 10_000_000;
-                // 只要上报了进度，就更新最后播放时间 (Unix时间戳)
                 if total_ticks > 0 && ticks > (total_ticks * 90 / 100) {
                     let _ = conn.execute("INSERT INTO user_data (user_id, item_id, play_count, playback_position_ticks, last_played_date) VALUES (?1, ?2, 1, 0, ?3) ON CONFLICT(user_id, item_id) DO UPDATE SET play_count = play_count + 1, playback_position_ticks = 0, last_played_date = excluded.last_played_date", rusqlite::params![req_user_id, item_id.to_string(), now.to_string()]);
                 } else if ticks > 0 {
@@ -1978,27 +1976,18 @@ pub async fn emby_hide_from_resume(AxumPath((_user_id, _item_id)): AxumPath<(Str
 pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
 
-    // 1. 读取种子条目的 genres / tags
     let (genres_str, tags_str): (String, String) = conn.query_row(
         "SELECT genres, tags FROM items WHERE id = ?1",
         [item_id],
         |r| Ok((r.get::<_, String>(0).unwrap_or_default(), r.get::<_, String>(1).unwrap_or_default())),
     ).unwrap_or_default();
 
-    // 2. 收集 term：tags 权重 2，genres 权重 1；各取前 8 个，避免 SQL 过长
     let mut terms: Vec<(String, i64)> = Vec::new();
-    for t in tags_str.split(" / ").map(str::trim).filter(|s| !s.is_empty()).take(8) {
-        terms.push((t.to_string(), 2));
-    }
-    for g in genres_str.split(" / ").map(str::trim).filter(|s| !s.is_empty()).take(8) {
-        terms.push((g.to_string(), 1));
-    }
+    for t in tags_str.split(" / ").map(str::trim).filter(|s| !s.is_empty()).take(8) { terms.push((t.to_string(), 2)); }
+    for g in genres_str.split(" / ").map(str::trim).filter(|s| !s.is_empty()).take(8) { terms.push((g.to_string(), 1)); }
 
-    // 3. 没有 genres/tags 时回退随机 6 条
     if terms.is_empty() {
-        let mut stmt = conn.prepare(
-            "SELECT id, title, type, year, plot, poster_path, rating FROM items WHERE id != ?1 ORDER BY RANDOM() LIMIT 6"
-        ).unwrap();
+        let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path, rating FROM items WHERE id != ?1 ORDER BY RANDOM() LIMIT 6").unwrap();
         let items: Vec<Value> = stmt.query_map([item_id], |row| {
             let id: i64 = row.get(0).unwrap_or_default();
             let poster_path: String = row.get(5).unwrap_or_default();
@@ -2013,8 +2002,6 @@ pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(i
         return Json(json!({ "Items": items, "TotalRecordCount": items.len() }));
     }
 
-    // 4. 用编号参数 ?1=seed_id, ?2..=每个 term 的 pattern
-    //    SQL 中 score 和 where 都用同一个 ?N，只绑定一次
     let mut score_expr = String::new();
     let mut where_expr = String::new();
     for (i, (_term, weight)) in terms.iter().enumerate() {
@@ -2023,24 +2010,15 @@ pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(i
             score_expr.push_str(" + ");
             where_expr.push_str(" OR ");
         }
-        score_expr.push_str(&format!(
-            "((CASE WHEN tags LIKE ?{} THEN {} ELSE 0 END) + (CASE WHEN genres LIKE ?{} THEN {} ELSE 0 END))",
-            p, weight * 2, p, weight
-        ));
+        score_expr.push_str(&format!("((CASE WHEN tags LIKE ?{} THEN {} ELSE 0 END) + (CASE WHEN genres LIKE ?{} THEN {} ELSE 0 END))", p, weight * 2, p, weight));
         where_expr.push_str(&format!("genres LIKE ?{} OR tags LIKE ?{}", p, p));
     }
 
-    let sql = format!(
-        "SELECT id, title, type, year, plot, poster_path, rating, ({}) AS score FROM items WHERE id != ?1 AND ({}) ORDER BY score DESC, RANDOM() LIMIT 6",
-        score_expr, where_expr
-    );
+    let sql = format!("SELECT id, title, type, year, plot, poster_path, rating, ({}) AS score FROM items WHERE id != ?1 AND ({}) ORDER BY score DESC, RANDOM() LIMIT 6", score_expr, where_expr);
 
-    // 5. 参数：?1=seed_id, ?2..=pattern
     let mut params_vec: Vec<rusqlite::types::Value> = Vec::with_capacity(terms.len() + 1);
     params_vec.push(rusqlite::types::Value::Integer(item_id));
-    for (term, _) in &terms {
-        params_vec.push(rusqlite::types::Value::Text(format!("%{}%", term)));
-    }
+    for (term, _) in &terms { params_vec.push(rusqlite::types::Value::Text(format!("%{}%", term))); }
 
     let mut stmt = match conn.prepare(&sql) {
         Ok(s) => s,
@@ -2050,12 +2028,12 @@ pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(i
     let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(params_vec.iter()), |row| {
         let id: i64 = row.get(0).unwrap_or_default();
         let poster_path: String = row.get(5).unwrap_or_default();
-            let has_poster = !poster_path.is_empty();
-            let poster_tag = if has_poster {
-                let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
-                let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
-                format!("tag_{}_{}", id, &hash_hex[..8])
-            } else { String::new() };
+        let has_poster = !poster_path.is_empty();
+        let poster_tag = if has_poster {
+            let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
+            let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+            format!("tag_{}_{}", id, &hash_hex[..8])
+        } else { String::new() };
         Ok(json!({ "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "Type": if row.get::<_, String>(2).unwrap_or_default() == "movies" { "Movie" } else { "Series" }, "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0), "Overview": row.get::<_, String>(4).unwrap_or_default(), "CommunityRating": row.get::<_, f64>(6).unwrap_or(0.0), "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) }, "BackdropImageTags": [] }))
     }).unwrap().filter_map(Result::ok).collect();
 
@@ -2302,11 +2280,19 @@ pub async fn emby_studios(
 
 pub async fn emby_items_filters(
     State(pool): State<Arc<Mutex<Connection>>>, 
-    Query(query): Query<HashMap<String, String>>
+    Query(query): Query<HashMap<String, String>>,
+    Extension(req_user_id): Extension<i64>
 ) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT genres, tags, mpaa, year FROM items WHERE 1=1".to_string();
     let mut params = Vec::new();
+    
+    if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+        if libs.is_empty() { return Json(json!({ "Genres": [], "Tags": [], "OfficialRatings": [], "Years": [] })); }
+        let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+        sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+    }
+    
     if let Some(pid) = query.get("ParentId") {
         if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(" AND library_id = ?"); params.push(lib_id.to_string()); } }
     }
@@ -2368,7 +2354,7 @@ pub async fn emby_refresh_library(State(pool): State<Arc<Mutex<Connection>>>) ->
             let mut stmt = match conn.prepare("SELECT id, path, type FROM libraries") { Ok(s) => s, Err(_) => return };
             let libs: Vec<(i64, String, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().filter_map(Result::ok).collect();
             libs
-        }; // 锁在此处释放，防止死锁
+        }; 
         for (id, path_json, lib_type) in libs {
             if let Ok(paths) = serde_json::from_str::<Vec<String>>(&path_json) {
                 for path in paths { scan_directory(pool_clone.clone(), id, lib_type.clone(), path); }
@@ -2383,16 +2369,24 @@ pub async fn emby_refresh_library(State(pool): State<Arc<Mutex<Connection>>>) ->
     StatusCode::NO_CONTENT.into_response()
 }
 
-pub async fn emby_mark_favorite(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, i64)>) -> impl IntoResponse {
+pub async fn emby_mark_favorite(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let _ = conn.execute("UPDATE items SET is_favorite = 1 WHERE id = ?1", [item_id]);
-    Json(json!({ "IsFavorite": true, "ItemId": item_id.to_string() })).into_response()
+    if item_id.starts_with("boxset_") {
+        let _ = conn.execute("INSERT OR IGNORE INTO boxset_favorites (user_id, boxset_id) VALUES (?1, ?2)", [req_user_id, &item_id]);
+    } else if let Ok(_numeric_id) = item_id.parse::<i64>() {
+        let _ = conn.execute("INSERT INTO user_data (user_id, item_id, is_favorite) VALUES (?1, ?2, 1) ON CONFLICT(user_id, item_id) DO UPDATE SET is_favorite = 1", [req_user_id, &item_id]);
+    }
+    Json(json!({ "IsFavorite": true, "ItemId": item_id })).into_response()
 }
 
-pub async fn emby_unmark_favorite(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, i64)>) -> impl IntoResponse {
+pub async fn emby_unmark_favorite(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let _ = conn.execute("UPDATE items SET is_favorite = 0 WHERE id = ?1", [item_id]);
-    Json(json!({ "IsFavorite": false, "ItemId": item_id.to_string() })).into_response()
+    if item_id.starts_with("boxset_") {
+        let _ = conn.execute("DELETE FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", [req_user_id, &item_id]);
+    } else if let Ok(_numeric_id) = item_id.parse::<i64>() {
+        let _ = conn.execute("INSERT INTO user_data (user_id, item_id, is_favorite) VALUES (?1, ?2, 0) ON CONFLICT(user_id, item_id) DO UPDATE SET is_favorite = 0", [req_user_id, &item_id]);
+    }
+    Json(json!({ "IsFavorite": false, "ItemId": item_id })).into_response()
 }
 
 
@@ -2426,17 +2420,14 @@ pub struct CreateUserReq { username: String, password: String, libraries: Vec<i6
 pub async fn api_create_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<CreateUserReq>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     
-    // 检查用户是否已存在
     let user_id: i64 = conn.query_row("SELECT id FROM users WHERE username = ?1", [&payload.username], |r| r.get(0)).unwrap_or(0);
     
     if user_id == 0 {
-        // 新建用户：必须提供密码
         if payload.password.is_empty() { return (StatusCode::BAD_REQUEST, "新建用户密码不能为空").into_response(); }
         let mut hasher = Sha256::new(); hasher.update(&payload.password);
         let hash = format!("{:x}", hasher.finalize());
         let _ = conn.execute("INSERT INTO users (username, password) VALUES (?1, ?2)", [&payload.username, &hash]);
     } else if user_id > 1 {
-        // 编辑用户：如果密码不为空才更新密码
         if !payload.password.is_empty() {
             let mut hasher = Sha256::new(); hasher.update(&payload.password);
             let hash = format!("{:x}", hasher.finalize());
