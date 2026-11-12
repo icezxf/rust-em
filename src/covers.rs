@@ -169,58 +169,68 @@ pub async fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
     println!("✅ [COVERS] 封面检查完毕。实际生成: {} 个，跳过(未变化): {} 个。", generated, skipped);
 }
 
+
 fn generate_landscape_cover(paths: &[String], out_path: &std::path::Path) {
-    let mut canvas = image::RgbImage::new(800, 450);
-    let count = paths.len();
+    let count = paths.len().min(4);
     if count == 0 { return; }
-    let cell_w = 800 / (count as u32);
-    for (i, path) in paths.iter().enumerate() {
-        let x = i as u32 * cell_w;
-        let w = if i == count - 1 { 800 - x } else { cell_w };
-        draw_to_region(&mut canvas, path, x, 0, w, 450);
+
+    // 单张图固定高度 600，宽度按 2:3 比例算为 400
+    let cell_w = 400;
+    let cell_h = 600;
+    let canvas_w = cell_w * count as u32;
+    
+    // 动态创建超宽画布，完全没有多余留白
+    let mut canvas = image::RgbImage::new(canvas_w, cell_h);
+
+    for (i, path) in paths.iter().take(count).enumerate() {
+        // 强行缩放到格子大小（因为格子也是 2:3，所以不会变形），然后贴图
+        draw_to_region(&mut canvas, path, i as u32 * cell_w, 0, cell_w, cell_h);
     }
-    if let Ok(file) = std::fs::File::create(out_path) {
-        let mut encoder = JpegEncoder::new_with_quality(file, 80); // 质量 80，肉眼无损且极速
-        if let Err(e) = encoder.encode_image(&canvas) { println!("❌ [COVERS] 编码失败: {}", e); }
-    }
+    if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
 }
 
 fn generate_portrait_cover(paths: &[String], out_path: &std::path::Path) {
-    let mut canvas = image::RgbImage::new(400, 600);
     let count = paths.len().min(4);
+    if count == 0 { return; }
+
+    let cell_w = 400;
+    let cell_h = 600;
+
+    // 根据图片数量动态决定画布大小
+    let (canvas_w, canvas_h) = match count {
+        1 => (cell_w, cell_h),
+        2 => (cell_w * 2, cell_h),
+        3 => (cell_w * 2, cell_h * 2),
+        _ => (cell_w * 2, cell_h * 2),
+    };
+
+    let mut canvas = image::RgbImage::new(canvas_w, canvas_h);
+
     match count {
-        0 => {}
-        1 => { draw_to_region(&mut canvas, &paths[0], 0, 0, 400, 600); }
+        1 => { draw_to_region(&mut canvas, &paths[0], 0, 0, cell_w, cell_h); }
         2 => {
-            draw_to_region(&mut canvas, &paths[0], 0, 0, 200, 600);
-            draw_to_region(&mut canvas, &paths[1], 200, 0, 200, 600);
+            draw_to_region(&mut canvas, &paths[0], 0, 0, cell_w, cell_h);
+            draw_to_region(&mut canvas, &paths[1], cell_w, 0, cell_w, cell_h);
         }
         3 => {
-            draw_to_region(&mut canvas, &paths[0], 0, 0, 200, 600);
-            draw_to_region(&mut canvas, &paths[1], 200, 0, 200, 300);
-            draw_to_region(&mut canvas, &paths[2], 200, 300, 200, 300);
+            draw_to_region(&mut canvas, &paths[0], 0, 0, cell_w, cell_h);
+            draw_to_region(&mut canvas, &paths[1], cell_w, 0, cell_w, cell_h / 2);
+            draw_to_region(&mut canvas, &paths[2], cell_w, cell_h / 2, cell_w, cell_h / 2);
         }
         _ => {
-            draw_to_region(&mut canvas, &paths[0], 0, 0, 200, 300);
-            draw_to_region(&mut canvas, &paths[1], 200, 0, 200, 300);
-            draw_to_region(&mut canvas, &paths[2], 0, 300, 200, 300);
-            draw_to_region(&mut canvas, &paths[3], 200, 300, 200, 300);
+            draw_to_region(&mut canvas, &paths[0], 0, 0, cell_w, cell_h);
+            draw_to_region(&mut canvas, &paths[1], cell_w, 0, cell_w, cell_h);
+            draw_to_region(&mut canvas, &paths[2], 0, cell_h, cell_w, cell_h);
+            draw_to_region(&mut canvas, &paths[3], cell_w, cell_h, cell_w, cell_h);
         }
     }
-    if let Ok(file) = std::fs::File::create(out_path) {
-        let mut encoder = JpegEncoder::new_with_quality(file, 80); // 质量 80，肉眼无损且极速
-        if let Err(e) = encoder.encode_image(&canvas) { println!("❌ [COVERS] 编码失败: {}", e); }
-    }
+    if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
 }
 
 fn draw_to_region(canvas: &mut image::RgbImage, path: &str, x: u32, y: u32, w: u32, h: u32) {
     if let Ok(img) = image::open(path) {
-        // 💡 完全等比例缩放，绝不强行拉伸变形
+        // 因为格子的比例（比如 400x600）就是标准海报比例（2:3），所以直接缩放不会变形，也不会有留白！
         let thumb = img.thumbnail(w, h).to_rgb8();
-        
-        // 居中放置（如果不填满，四周会露出一点点画布的深色底色，下发时客户端会统一自适应）
-        let offset_x = x + (w.saturating_sub(thumb.width())) / 2;
-        let offset_y = y + (h.saturating_sub(thumb.height())) / 2;
-        let _ = canvas.copy_from(&thumb, offset_x, offset_y);
+        let _ = canvas.copy_from(&thumb, x, y);
     }
 }
