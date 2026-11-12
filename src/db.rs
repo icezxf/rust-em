@@ -121,6 +121,20 @@ pub fn ensure_extra_columns(conn: &rusqlite::Connection) {
 }
 
 pub fn init_settings_table(conn: &rusqlite::Connection) {
-    let _ = conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)", []);
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS user_library_access (
+            user_id INTEGER NOT NULL,
+            library_id INTEGER NOT NULL,
+            PRIMARY KEY (user_id, library_id)
+        );
+        CREATE TABLE IF NOT EXISTS user_data (
+            user_id INTEGER NOT NULL,
+            item_id TEXT NOT NULL,
+            is_favorite INTEGER DEFAULT 0,
+            play_count INTEGER DEFAULT 0,
+            playback_position_ticks INTEGER DEFAULT 0,
+            last_played_date TEXT,
+            PRIMARY KEY (user_id, item_id)
+        );
+        CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)", []);
     let _ = conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('prefetch_playback', 'false')", []);
 }

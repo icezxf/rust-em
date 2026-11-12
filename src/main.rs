@@ -44,6 +44,8 @@ async fn main() {
         .route("/api/images/{id}/{img_type}", get(api::get_image).head(api::get_image))
         .route("/api/user/update", post(api::update_user))
         .route("/api/settings", get(api::get_settings).post(api::update_settings))
+        .route("/api/users", get(api::api_get_users).post(api::api_create_user))
+        .route("/api/users/:id", delete(api::api_delete_user))
         .route("/api/generate_covers", post(api::api_generate_covers))
         .route("/api/probe/scan", post(api::probe_scan))
         

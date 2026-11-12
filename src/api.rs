@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncReadExt;
 
-static TOKENS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+static TOKENS: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
 static STRM_CACHE: OnceLock<Mutex<HashMap<String, (String, Instant)>>> = OnceLock::new();
 static GLOBAL_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static SCAN_STATUS: OnceLock<Mutex<bool>> = OnceLock::new();
@@ -70,8 +70,24 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     }
 
     if let Some(token) = token_opt {
+        let mut user_id_opt = None;
         if let Some(tokens) = TOKENS.get() {
-            if tokens.lock().unwrap().contains(&token) { return Ok(next.run(req).await); }
+            if let Some(uid) = tokens.lock().unwrap().get(&token).cloned() {
+                user_id_opt = Some(uid);
+            }
+        }
+        
+        if let Some(user_id) = user_id_opt {
+            // 💡 核心安全控制：普通用户绝对不能访问 /api 接口（网页端管理接口）
+            // 只有 /api/login 是放行的（上面已经 return 了）
+            if path.starts_with("/api/") && user_id != 1 {
+                return Err(StatusCode::FORBIDDEN);
+            }
+            
+            // 把 user_id 注入到 request extensions 中，方便后续 Handler 提取
+            let mut req = req;
+            req.extensions_mut().insert(user_id);
+            return Ok(next.run(req).await);
         }
     }
     Err(StatusCode::UNAUTHORIZED)
@@ -257,9 +273,12 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
     let conn = pool.lock().unwrap();
     if conn.prepare("SELECT id FROM users WHERE username = ?1 AND password = ?2").unwrap().exists([&payload.username, &format!("{:x}", hasher.finalize())]).unwrap() {
         let token = uuid::Uuid::new_v4().to_string();
-        TOKENS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap().push(token.clone());
-        (StatusCode::OK, Json(json!({ "token": token })))
-    } else { (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid credentials" }))) }
+        let user_id: i64 = conn.query_row("SELECT id FROM users WHERE username = ?1", [&payload.username], |r| r.get(0)).unwrap_or(0);
+        if user_id != 1 {
+            return (StatusCode::FORBIDDEN, Json(json!({ "error": "只有管理员可以登录网页端" }))).into_response();
+        }
+        TOKENS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap().insert(token.clone(), user_id);
+        (StatusCode::OK, Json(json!({ "token": token }))).into_response()
 }
 
 #[derive(Deserialize)]
@@ -766,7 +785,7 @@ pub async fn emby_authenticate(State(pool): State<Arc<Mutex<Connection>>>, heade
     let user_opt = stmt.query_row([&username, &format!("{:x}", hasher.finalize())], |row| Ok((row.get::<_, i64>(0).unwrap(), row.get::<_, String>(1).unwrap()))).ok();
     if let Some((id, name)) = user_opt {
         let token = uuid::Uuid::new_v4().to_string();
-        TOKENS.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap().push(token.clone());
+        TOKENS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap().insert(token.clone(), id);
         (StatusCode::OK, Json(json!({ "User": { "Id": id.to_string(), "Name": name, "ServerId": "rust-em-server", "HasPassword": true, "Policy": { "IsAdministrator": true, "EnableAllFolders": true } }, "SessionInfo": { "Id": uuid::Uuid::new_v4().to_string(), "UserId": id.to_string() }, "AccessToken": token, "ServerId": "rust-em-server" }))).into_response()
     } else { (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid credentials" }))).into_response() }
 }
@@ -2230,4 +2249,50 @@ pub async fn api_generate_covers(State(pool): State<Arc<Mutex<Connection>>>) -> 
         crate::covers::generate_all_covers(pool_clone).await;
     });
     Json(json!({"status": "started"}))
+}
+
+
+pub async fn api_get_users(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT id, username FROM users WHERE id != 1").unwrap();
+    let users: Vec<Value> = stmt.query_map([], |r| {
+        let id: i64 = r.get(0).unwrap_or_default();
+        let name: String = r.get(1).unwrap_or_default();
+        Ok((id, name))
+    }).unwrap().filter_map(Result::ok).map(|(id, name)| {
+        let mut access_stmt = conn.prepare("SELECT library_id FROM user_library_access WHERE user_id = ?1").unwrap();
+        let libs: Vec<i64> = access_stmt.query_map([id], |r| r.get(0)).unwrap().filter_map(Result::ok).collect();
+        json!({ "id": id, "username": name, "libraries": libs })
+    }).collect();
+    Json(users)
+}
+
+#[derive(Deserialize)]
+pub struct CreateUserReq { username: String, password: String, libraries: Vec<i64> }
+
+pub async fn api_create_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<CreateUserReq>) -> impl IntoResponse {
+    let mut hasher = Sha256::new(); hasher.update(&payload.password);
+    let hash = format!("{:x}", hasher.finalize());
+    let conn = pool.lock().unwrap();
+    
+    let res = conn.execute("INSERT INTO users (username, password) VALUES (?1, ?2) ON CONFLICT(username) DO UPDATE SET password=excluded.password", [&payload.username, &hash]);
+    if res.is_err() { return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
+    
+    let user_id: i64 = conn.query_row("SELECT id FROM users WHERE username = ?1", [&payload.username], |r| r.get(0)).unwrap_or(0);
+    
+    if user_id > 1 {
+        let _ = conn.execute("DELETE FROM user_library_access WHERE user_id = ?1", [user_id]);
+        for lib_id in payload.libraries {
+            let _ = conn.execute("INSERT INTO user_library_access (user_id, library_id) VALUES (?1, ?2)", [user_id, lib_id]);
+        }
+    }
+    StatusCode::OK.into_response()
+}
+
+pub async fn api_delete_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(id): AxumPath<i64>) -> impl IntoResponse {
+    if id == 1 { return StatusCode::BAD_REQUEST.into_response(); }
+    let conn = pool.lock().unwrap();
+    let _ = conn.execute("DELETE FROM users WHERE id = ?1", [id]);
+    let _ = conn.execute("DELETE FROM user_library_access WHERE user_id = ?1", [id]);
+    StatusCode::OK.into_response()
 }
