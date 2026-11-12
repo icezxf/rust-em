@@ -834,7 +834,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
     }
 
     let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path FROM items WHERE 1=1".to_string();
-    let mut params: Vec<String> = Vec::new();
+    let mut params: Vec<String> = vec![req_user_id.to_string()];
 
     if let Some(libs) = &allowed_libs {
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
@@ -897,8 +897,8 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
     }
 
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path FROM items WHERE playback_ticks > 0".to_string();
-    let mut params: Vec<String> = Vec::new();
+    let mut sql = "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ?1 WHERE ud.playback_position_ticks > 0".to_string();
+    let mut params: Vec<String> = vec![req_user_id.to_string()];
 
     if let Some(libs) = &allowed_libs {
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
@@ -1142,8 +1142,8 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         }
     }
 
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path, date_created, actors, directors, tags, studios, play_count, is_favorite FROM items WHERE 1=1".to_string();
-    let mut params: Vec<String> = Vec::new();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, IFNULL(ud.playback_position_ticks, 0), fanart_path, date_created, actors, directors, tags, studios, IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0) FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ?1 WHERE 1=1".to_string();
+    let mut params: Vec<String> = vec![req_user_id.to_string()];
 
     if let Some(libs) = &allowed_libs {
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
@@ -1455,10 +1455,10 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     Json(json!({ "Items": items, "TotalRecordCount": final_total })).into_response()
 }
 
-pub async fn emby_item_detail(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<String>) -> Response { emby_item_detail_inner(pool, item_id).await }
-pub async fn emby_item_detail_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>) -> Response { emby_item_detail_inner(pool, item_id).await }
+pub async fn emby_item_detail(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<String>, Extension(req_user_id): Extension<i64>) -> Response { emby_item_detail_inner(pool, item_id, req_user_id).await }
+pub async fn emby_item_detail_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> Response { emby_item_detail_inner(pool, item_id, req_user_id).await }
 
-async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -> Response {
+async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, req_user_id: i64) -> Response {
     if item_id.starts_with("person_") { return emby_person(AxumPath(item_id)).await.into_response(); } 
     else if item_id.starts_with("studio_") { return emby_studio(AxumPath(item_id)).await.into_response(); }
     let conn = pool.lock().unwrap();
@@ -1482,9 +1482,10 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
     }
 
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
+    let req_user_id = req_user_id; // 确保变量在作用域内
     let item_opt = conn.query_row(
-        "SELECT id, title, type, year, plot, poster_path, file_path, studios, parts, runtime, actors, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, series, label, set_name, tagline, tags, directors, num, stills, releasedate, original_title, sort_title, country, language, writers, trailer, media_streams, date_created, primary_image_aspect_ratio, original_language, fanart_path, logo_path, thumb_path, banner_path, strm_content, playback_ticks, play_count, is_favorite FROM items WHERE id = ?1",
-        [id],
+        "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.studios, items.parts, items.runtime, items.actors, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.series, items.label, items.set_name, items.tagline, items.tags, items.directors, items.num, items.stills, items.releasedate, items.original_title, items.sort_title, items.country, items.language, items.writers, items.trailer, items.media_streams, items.date_created, items.primary_image_aspect_ratio, items.original_language, items.fanart_path, items.logo_path, items.thumb_path, items.banner_path, items.strm_content, IFNULL(ud.playback_position_ticks, 0), IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0) FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ?2 WHERE items.id = ?1",
+        [id, req_user_id],
         |row| {
             let title: String = row.get(1).unwrap_or_default(); let typ: String = row.get(2).unwrap_or_default();
             let year_str: String = row.get(3).unwrap_or_default(); let plot: String = row.get(4).unwrap_or_default();
@@ -1855,7 +1856,7 @@ pub async fn emby_sessions() -> impl IntoResponse { Json(json!([])) }
 pub async fn emby_playing() -> impl IntoResponse { StatusCode::OK.into_response() }
 pub async fn emby_playing_stopped() -> impl IntoResponse { StatusCode::OK.into_response() }
 
-pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, body: Bytes) -> impl IntoResponse {
+pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, body: Bytes, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     if let Ok(val) = serde_json::from_slice::<Value>(&body) {
         let item_id_str = val["ItemId"].as_str().map(|s| s.to_string()).or_else(|| val["ItemId"].as_i64().map(|i| i.to_string()));
         if let Some(item_id_str) = item_id_str {
@@ -1864,7 +1865,8 @@ pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, b
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
                 let conn = pool.lock().unwrap();
                 
-                let (mut runtime_mins, current_ticks): (i32, i64) = conn.query_row("SELECT runtime, playback_ticks FROM items WHERE id = ?1", [item_id], |r| Ok((r.get(0).unwrap_or(0), r.get(1).unwrap_or(0)))).unwrap_or((0, 0));
+                let mut runtime_mins: i32 = conn.query_row("SELECT runtime FROM items WHERE id = ?1", [item_id], |r| r.get(0)).unwrap_or(0);
+                let current_ticks: i64 = conn.query_row("SELECT playback_position_ticks FROM user_data WHERE user_id = ?1 AND item_id = ?2", [req_user_id, &item_id.to_string()], |r| r.get(0)).unwrap_or(0);
                 
                 if let Some(client_ticks) = val["RunTimeTicks"].as_i64() {
                     if client_ticks > 0 {
@@ -1896,9 +1898,9 @@ pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, b
                 
                 let total_ticks = (runtime_mins as i64) * 60 * 10_000_000;
                 if total_ticks > 0 && ticks > (total_ticks * 90 / 100) {
-                    let _ = conn.execute("UPDATE items SET play_count = play_count + 1, playback_ticks = 0, updated_at = ?1 WHERE id = ?2", rusqlite::params![now, item_id]);
+                    let _ = conn.execute("INSERT INTO user_data (user_id, item_id, play_count, playback_position_ticks, last_played_date) VALUES (?1, ?2, 1, 0, ?3) ON CONFLICT(user_id, item_id) DO UPDATE SET play_count = play_count + 1, playback_position_ticks = 0, last_played_date = excluded.last_played_date", rusqlite::params![req_user_id, &item_id.to_string(), now.to_string()]);
                 } else if ticks > 10_000_000 || (ticks == 0 && current_ticks == 0) {
-                    let _ = conn.execute("UPDATE items SET playback_ticks = ?1, updated_at = ?2 WHERE id = ?3", rusqlite::params![ticks, now, item_id]);
+                    let _ = conn.execute("INSERT INTO user_data (user_id, item_id, playback_position_ticks, last_played_date) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(user_id, item_id) DO UPDATE SET playback_position_ticks = excluded.playback_position_ticks, last_played_date = excluded.last_played_date", rusqlite::params![req_user_id, &item_id.to_string(), ticks, now.to_string()]);
                 }
             }
         }

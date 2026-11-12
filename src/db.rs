@@ -121,6 +121,15 @@ pub fn ensure_extra_columns(conn: &rusqlite::Connection) {
 }
 
 pub fn init_settings_table(conn: &rusqlite::Connection) {
+    
+    // 平滑迁移旧数据到 user_data 表 (仅执行一次)
+    let _ = conn.execute(
+        "INSERT OR IGNORE INTO user_data (user_id, item_id, is_favorite, play_count, playback_position_ticks)
+         SELECT 1, CAST(id AS TEXT), is_favorite, play_count, playback_ticks FROM items 
+         WHERE is_favorite > 0 OR play_count > 0 OR playback_ticks > 0",
+        [],
+    );
+
     let _ = conn.execute("CREATE TABLE IF NOT EXISTS user_library_access (
             user_id INTEGER NOT NULL,
             library_id INTEGER NOT NULL,
