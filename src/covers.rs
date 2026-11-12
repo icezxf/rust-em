@@ -4,8 +4,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use rusqlite::Connection;
 use std::path::PathBuf;
-use std::collections::HashSet;
-use std::hash::{Hash, Hasher};
 use sha2::{Digest, Sha256};
 
 
@@ -242,7 +240,7 @@ fn draw_to_region(canvas: &mut image::RgbImage, path: &str, x: u32, y: u32, w: u
         };
 
         // 3. 使用 thumbnail（专为缩小优化的极速算法）
-        let thumb = image::imageops::thumbnail(&img, new_w, new_h);
+        let thumb = img.thumbnail(new_w, new_h).to_rgb8();
         let offset_x = x + (w.saturating_sub(new_w)) / 2;
         let offset_y = y + (h.saturating_sub(new_h)) / 2;
         let _ = canvas.copy_from(&thumb, offset_x, offset_y);

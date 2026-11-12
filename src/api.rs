@@ -217,7 +217,7 @@ fn get_cover_tag(folder: &str, prefix: &str, name: &str) -> String {
         }
     }
     let name_trimmed = sanitized_name.trim();
-    let mut tag = format!("{}_{}_cover", prefix, name_trimmed);
+    let tag = format!("{}_{}_cover", prefix, name_trimmed);
 
     if prefix == "boxset" {
         let dir = std::path::PathBuf::from("data/cache/covers").join(folder);
