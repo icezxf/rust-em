@@ -170,20 +170,17 @@ pub async fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
 }
 
 
+
 fn generate_landscape_cover(paths: &[String], out_path: &std::path::Path) {
     let count = paths.len().min(4);
     if count == 0 { return; }
 
-    // 单张图固定高度 600，宽度按 2:3 比例算为 400
+    // 媒体库（横版）：全部横向无缝拼接 1×N (N为实际图片数)
     let cell_w = 400;
     let cell_h = 600;
-    let canvas_w = cell_w * count as u32;
-    
-    // 动态创建超宽画布，完全没有多余留白
-    let mut canvas = image::RgbImage::new(canvas_w, cell_h);
+    let mut canvas = image::RgbImage::new(cell_w * count as u32, cell_h);
 
     for (i, path) in paths.iter().take(count).enumerate() {
-        // 强行缩放到格子大小（因为格子也是 2:3，所以不会变形），然后贴图
         draw_to_region(&mut canvas, path, i as u32 * cell_w, 0, cell_w, cell_h);
     }
     if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
@@ -193,44 +190,38 @@ fn generate_portrait_cover(paths: &[String], out_path: &std::path::Path) {
     let count = paths.len().min(4);
     if count == 0 { return; }
 
+    // 类型/标签（竖版）：也是无缝拼接
     let cell_w = 400;
     let cell_h = 600;
-
-    // 根据图片数量动态决定画布大小
+    
+    // 动态决定画布大小，保证一像素的留白都不会有
     let (canvas_w, canvas_h) = match count {
         1 => (cell_w, cell_h),
         2 => (cell_w * 2, cell_h),
-        3 => (cell_w * 2, cell_h * 2),
-        _ => (cell_w * 2, cell_h * 2),
+        3 => (cell_w * 3, cell_h),
+        _ => (cell_w * 2, cell_h * 2), // 4张拼 2x2 完美正方形
     };
 
     let mut canvas = image::RgbImage::new(canvas_w, canvas_h);
 
-    match count {
-        1 => { draw_to_region(&mut canvas, &paths[0], 0, 0, cell_w, cell_h); }
-        2 => {
-            draw_to_region(&mut canvas, &paths[0], 0, 0, cell_w, cell_h);
-            draw_to_region(&mut canvas, &paths[1], cell_w, 0, cell_w, cell_h);
+    if count <= 3 {
+        for (i, path) in paths.iter().take(count).enumerate() {
+            draw_to_region(&mut canvas, path, i as u32 * cell_w, 0, cell_w, cell_h);
         }
-        3 => {
-            draw_to_region(&mut canvas, &paths[0], 0, 0, cell_w, cell_h);
-            draw_to_region(&mut canvas, &paths[1], cell_w, 0, cell_w, cell_h / 2);
-            draw_to_region(&mut canvas, &paths[2], cell_w, cell_h / 2, cell_w, cell_h / 2);
-        }
-        _ => {
-            draw_to_region(&mut canvas, &paths[0], 0, 0, cell_w, cell_h);
-            draw_to_region(&mut canvas, &paths[1], cell_w, 0, cell_w, cell_h);
-            draw_to_region(&mut canvas, &paths[2], 0, cell_h, cell_w, cell_h);
-            draw_to_region(&mut canvas, &paths[3], cell_w, cell_h, cell_w, cell_h);
-        }
+    } else {
+        draw_to_region(&mut canvas, &paths[0], 0, 0, cell_w, cell_h);
+        draw_to_region(&mut canvas, &paths[1], cell_w, 0, cell_w, cell_h);
+        draw_to_region(&mut canvas, &paths[2], 0, cell_h, cell_w, cell_h);
+        draw_to_region(&mut canvas, &paths[3], cell_w, cell_h, cell_w, cell_h);
     }
     if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
 }
 
 fn draw_to_region(canvas: &mut image::RgbImage, path: &str, x: u32, y: u32, w: u32, h: u32) {
     if let Ok(img) = image::open(path) {
-        // 因为格子的比例（比如 400x600）就是标准海报比例（2:3），所以直接缩放不会变形，也不会有留白！
-        let thumb = img.thumbnail(w, h).to_rgb8();
+        // 因为设定的格子 (400x600) 就是标准海报比例 (2:3)
+        // 所以直接 resize_exact 不会导致拉伸变形，且绝对填满不留底
+        let thumb = img.resize_exact(w, h, image::imageops::FilterType::Triangle).to_rgb8();
         let _ = canvas.copy_from(&thumb, x, y);
     }
 }
