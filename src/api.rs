@@ -1519,10 +1519,10 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
     if let Some(item) = item_opt { Json(item).into_response() } else { StatusCode::NOT_FOUND.into_response() }
 }
 
-pub async fn emby_item_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type)): AxumPath<(String, String)>) -> Response { emby_item_image_inner(pool, item_id, image_type, 0).await }
-pub async fn emby_item_image_with_index(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type, index)): AxumPath<(String, String, String)>) -> Response { emby_item_image_inner(pool, item_id, image_type, index.parse::<usize>().unwrap_or(0)).await }
+pub async fn emby_item_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type)): AxumPath<(String, String)>, Query(query): Query<HashMap<String, String>>) -> Response { emby_item_image_inner(pool, item_id, image_type, 0, query).await }
+pub async fn emby_item_image_with_index(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type, index)): AxumPath<(String, String, String)>, Query(query): Query<HashMap<String, String>>) -> Response { emby_item_image_inner(pool, item_id, image_type, index.parse::<usize>().unwrap_or(0), query).await }
 
-async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize) -> Response {
+async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize, query: HashMap<String, String>) -> Response {
     if item_id.starts_with("person_") || item_id.starts_with("studio_") {
         let png_bytes: [u8; 67] = [
             0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
@@ -1548,7 +1548,26 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
         let raw_name = clean_id.trim_start_matches(&format!("{}_", prefix));
         let path = std::path::PathBuf::from("data/cache/covers").join(folder).join(format!("{}_{}.jpg", prefix, raw_name));
         if path.exists() {
-            if let Ok(bytes) = tokio::fs::read(&path).await {
+            if let Ok(mut bytes) = tokio::fs::read(&path).await {
+                // 检查客户端是否要求了特定的宽高（例如列表页的方形卡片，或者宽屏卡片）
+                let req_w = query.get("maxWidth").or_else(|| query.get("width")).and_then(|s| s.parse::<u32>().ok());
+                let req_h = query.get("maxHeight").or_else(|| query.get("height")).and_then(|s| s.parse::<u32>().ok());
+                
+                // 如果客户端明确要求了宽和高，我们直接强行拉伸，完美贴合客户端 UI
+                if let (Some(w), Some(h)) = (req_w, req_h) {
+                    if w > 0 && h > 0 {
+                        if let Ok(img) = image::load_from_memory(&bytes) {
+                            // 用极速的 Triangle 算法直接拉伸到客户端要求的大小
+                            let resized = img.resize_exact(w, h, image::imageops::FilterType::Triangle);
+                            let mut out = std::io::Cursor::new(Vec::new());
+                            let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 80);
+                            if encoder.encode_image(&resized).is_ok() {
+                                bytes = out.into_inner();
+                            }
+                        }
+                    }
+                }
+
                 return (StatusCode::OK, [(CONTENT_TYPE, "image/jpeg")], bytes).into_response();
             }
         }
