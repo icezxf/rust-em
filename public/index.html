@@ -126,7 +126,10 @@
                         <p class="text-xs text-gray-400 mb-4">普通用户只能通过 App 登录，无法进入此网页后台。</p>
                         <div id="user-list" class="mb-4 text-sm text-gray-400">加载中...</div>
                         <div class="border-t border-gray-800 pt-4">
-                            <h4 class="font-bold text-gray-300 mb-3 text-sm">添加/修改普通用户</h4>
+                            <div class="flex justify-between items-center mb-3">
+                                <h4 class="font-bold text-gray-300 text-sm">添加/修改普通用户</h4>
+                                <button onclick="resetUserForm()" id="btn-reset-user" class="text-xs text-blue-400 bg-blue-500/10 px-2 py-1 rounded transition">取消编辑</button>
+                            </div>
                             <input id="new-username" placeholder="用户名" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none text-white focus:border-indigo-500">
                             <input id="new-user-pwd" type="password" placeholder="密码" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none text-white focus:border-indigo-500">
                             <div class="mb-4">
@@ -786,6 +789,29 @@
             await loadUsers();
         }
         
+        function resetUserForm() {
+            document.getElementById('new-username').value = '';
+            document.getElementById('new-username').disabled = false;
+            document.getElementById('new-user-pwd').value = '';
+            document.getElementById('new-user-pwd').placeholder = '密码';
+            document.querySelectorAll('.user-lib-cb').forEach(cb => cb.checked = false);
+            document.querySelector('button[onclick="saveUser()"]').innerText = '保存用户';
+        }
+
+        function editUser(username, libs) {
+            document.getElementById('new-username').value = username;
+            document.getElementById('new-username').disabled = true; // 编辑时禁用用户名
+            document.getElementById('new-user-pwd').value = ''; // 留空
+            document.getElementById('new-user-pwd').placeholder = '留空则不修改密码';
+            
+            // 勾选媒体库
+            document.querySelectorAll('.user-lib-cb').forEach(cb => {
+                cb.checked = libs.includes(parseInt(cb.value)) || libs.includes(cb.value);
+            });
+            
+            document.querySelector('button[onclick="saveUser()"]').innerText = '保存修改';
+        }
+
         async function loadUsers() {
             const container = document.getElementById('user-list');
             const boxContainer = document.getElementById('user-libs-checkboxes');
@@ -809,7 +835,10 @@
                     container.innerHTML = users.map(u => `
                         <div class="flex justify-between items-center bg-[#0f1115] border border-gray-800 p-3 rounded-xl mb-2">
                             <span class="font-medium text-gray-200">${u.username}</span>
-                            <button onclick="deleteUser(${u.id})" class="text-red-400 bg-red-500/10 px-3 py-1.5 rounded-lg text-sm">删除</button>
+                            <div class="flex gap-2">
+                                <button onclick="editUser('${u.username}', [${u.libraries.map(id => `'${id}'`).join(',')}])" class="text-blue-400 bg-blue-500/10 px-3 py-1.5 rounded-lg text-sm">编辑</button>
+                                <button onclick="deleteUser(${u.id})" class="text-red-400 bg-red-500/10 px-3 py-1.5 rounded-lg text-sm">删除</button>
+                            </div>
                         </div>
                     `).join('');
                 }
@@ -832,7 +861,10 @@
         async function saveUser() {
             const username = document.getElementById('new-username').value.trim();
             const pwd = document.getElementById('new-user-pwd').value.trim();
-            if (!username || !pwd) return alert('请填写用户名和密码');
+            const isEdit = document.getElementById('new-username').disabled;
+            
+            if (!username) return alert('请填写用户名');
+            if (!isEdit && !pwd) return alert('新建用户必须填写密码');
             
             const libs = Array.from(document.querySelectorAll('.user-lib-cb:checked')).map(cb => parseInt(cb.value));
             
@@ -842,8 +874,7 @@
                     alert('保存失败: ' + res.error);
                 } else {
                     alert('保存成功');
-                    document.getElementById('new-username').value = '';
-                    document.getElementById('new-user-pwd').value = '';
+                    resetUserForm();
                     await loadUsers();
                 }
             } catch (e) {

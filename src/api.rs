@@ -2275,12 +2275,27 @@ pub async fn api_get_users(State(pool): State<Arc<Mutex<Connection>>>) -> impl I
 pub struct CreateUserReq { username: String, password: String, libraries: Vec<i64> }
 
 pub async fn api_create_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<CreateUserReq>) -> impl IntoResponse {
-    let mut hasher = Sha256::new(); hasher.update(&payload.password);
-    let hash = format!("{:x}", hasher.finalize());
     let conn = pool.lock().unwrap();
     
-    let res = conn.execute("INSERT INTO users (username, password) VALUES (?1, ?2) ON CONFLICT(username) DO UPDATE SET password=excluded.password", [&payload.username, &hash]);
-    if res.is_err() { return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
+    // 检查用户是否已存在
+    let user_id: i64 = conn.query_row("SELECT id FROM users WHERE username = ?1", [&payload.username], |r| r.get(0)).unwrap_or(0);
+    
+    if user_id == 0 {
+        // 新建用户：必须提供密码
+        if payload.password.is_empty() { return (StatusCode::BAD_REQUEST, "新建用户密码不能为空").into_response(); }
+        let mut hasher = Sha256::new(); hasher.update(&payload.password);
+        let hash = format!("{:x}", hasher.finalize());
+        let _ = conn.execute("INSERT INTO users (username, password) VALUES (?1, ?2)", [&payload.username, &hash]);
+    } else if user_id > 1 {
+        // 编辑用户：如果密码不为空才更新密码
+        if !payload.password.is_empty() {
+            let mut hasher = Sha256::new(); hasher.update(&payload.password);
+            let hash = format!("{:x}", hasher.finalize());
+            let _ = conn.execute("UPDATE users SET password = ?1 WHERE id = ?2", [&hash, &user_id.to_string()]);
+        }
+    } else {
+        return (StatusCode::FORBIDDEN, "不能修改管理员").into_response();
+    }
     
     let user_id: i64 = conn.query_row("SELECT id FROM users WHERE username = ?1", [&payload.username], |r| r.get(0)).unwrap_or(0);
     
