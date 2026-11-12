@@ -74,6 +74,16 @@ async fn main() {
         [],
     );
     
+    // 💡 终极防呆：只有在 users 表完全为空时，才初始化默认 admin/admin
+    let user_count: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0)).unwrap_or(0);
+    if user_count == 0 {
+        let _ = conn.execute(
+            "INSERT INTO users (id, username, password) VALUES (1, 'admin', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918')",
+            [],
+        );
+        println!("✅ [DB] 已初始化默认管理员账号: admin / admin");
+    }
+
     println!("✅ [DB] 用户数据表已检查/创建完成，多用户系统就绪");
 
     let state = Arc::new(Mutex::new(conn));

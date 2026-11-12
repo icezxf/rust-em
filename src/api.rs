@@ -719,11 +719,15 @@ pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
     let mut hasher_old = Sha256::new(); hasher_old.update(&payload.old_password);
     let mut hasher_new = Sha256::new(); hasher_new.update(&payload.new_password);
     let conn = pool.lock().unwrap();
-    if conn.prepare("SELECT id FROM users WHERE username = 'admin' AND password = ?1").unwrap().exists([&format!("{:x}", hasher_old.finalize())]).unwrap() {
-        conn.execute("UPDATE users SET username = ?1, password = ?2 WHERE username = 'admin'", [&payload.new_username, &format!("{:x}", hasher_new.finalize())]).unwrap();
+    
+    // 💡 核心修复：改用 id = 1 来验证，这样哪怕管理员改了名字，只要旧密码对，就能继续修改
+    if conn.prepare("SELECT id FROM users WHERE id = 1 AND password = ?1").unwrap().exists([&format!("{:x}", hasher_old.finalize())]).unwrap() {
+        conn.execute("UPDATE users SET username = ?1, password = ?2 WHERE id = 1", [&payload.new_username, &format!("{:x}", hasher_new.finalize())]).unwrap();
         if let Some(tokens) = TOKENS.get() { tokens.lock().unwrap().clear(); }
         (StatusCode::OK, Json(json!({"status": "success"})))
-    } else { (StatusCode::BAD_REQUEST, Json(json!({"error": "旧密码错误"}))) }
+    } else { 
+        (StatusCode::BAD_REQUEST, Json(json!({"error": "旧密码错误"}))) 
+    }
 }
 
 pub async fn get_settings(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {

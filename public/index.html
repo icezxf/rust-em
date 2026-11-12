@@ -16,8 +16,6 @@
         .snap-start { scroll-snap-align: start; }
         .sidebar-transition { transition: width 0.3s ease-in-out, opacity 0.2s ease-in-out; }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
-        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-        .animate-slide-up { animation: slideUp 0.3s ease-out forwards; }
     </style>
 </head>
 <body class="bg-[#0f1115] text-gray-200 font-sans h-screen flex flex-col overflow-hidden">
@@ -25,8 +23,8 @@
     <div id="login-view" class="fixed inset-0 z-[100] flex items-center justify-center bg-[#0f1115] px-4">
         <div class="bg-[#1a1d24] p-8 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-800">
             <h2 class="text-2xl mb-8 text-center font-bold text-white tracking-wider">RUST-EM</h2>
-            <input id="username" type="text" placeholder="用户名" class="w-full p-3 mb-4 bg-[#0f1115] rounded-lg outline-none text-white border border-gray-700 focus:border-blue-500 transition-colors">
-            <input id="password" type="password" placeholder="密码" class="w-full p-3 mb-6 bg-[#0f1115] rounded-lg outline-none text-white border border-gray-700 focus:border-blue-500 transition-colors">
+            <input id="username" type="text" placeholder="用户名 (默认 admin)" class="w-full p-3 mb-4 bg-[#0f1115] rounded-lg outline-none text-white border border-gray-700 focus:border-blue-500 transition-colors">
+            <input id="password" type="password" placeholder="密码 (默认 admin)" class="w-full p-3 mb-6 bg-[#0f1115] rounded-lg outline-none text-white border border-gray-700 focus:border-blue-500 transition-colors">
             <button onclick="login()" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-lg font-bold text-white transition-colors">登录</button>
         </div>
     </div>
@@ -66,29 +64,26 @@
         <!-- 右侧内容区 -->
         <div class="flex-1 flex flex-col h-full overflow-hidden bg-[#0f1115] relative w-full min-w-0">
             
-            <!-- 顶栏 (移动端只有标签栏，PC端有折叠按钮和标题) -->
+            <!-- 顶栏 -->
             <div id="top-bar" class="px-3 py-2 md:px-6 md:py-4 flex flex-col md:flex-row md:items-center shadow-sm z-[60] shrink-0 border-b border-gray-800/50 bg-[#0f1115]/90 backdrop-blur-md">
-                <!-- PC 端标题和按钮 -->
                 <div class="hidden md:flex items-center w-full mb-0">
                     <button id="desktop-sidebar-btn" onclick="toggleSidebar()" class="text-gray-400 hover:text-white mr-4 transition">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
                     </button>
                     <div id="top-bar-title" class="text-lg font-bold text-white tracking-wide truncate">媒体库</div>
                 </div>
-                <!-- 移动端横向媒体库标签栏 -->
                 <div id="mobile-lib-tabs" class="md:hidden flex overflow-x-auto no-scrollbar gap-2 w-full"></div>
             </div>
 
             <!-- 主页 (媒体列表) -->
             <div id="tab-library" class="hidden flex-1 overflow-y-auto p-3 pb-24 md:px-8 md:py-6 md:pb-6">
-                <!-- 筛选提示条 -->
                 <div id="filter-banner" class="hidden mb-4 bg-blue-600/20 border border-blue-500/50 rounded-lg p-3 flex justify-between items-center">
                     <div class="text-sm text-blue-300">
                         当前筛选: <span id="filter-text" class="font-bold text-white"></span>
                     </div>
                     <button onclick="clearFilter()" class="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded transition shadow">清除筛选</button>
                 </div>
-                <!-- 继续播放模块 -->
+                
                 <div id="resume-section" class="hidden mb-6">
                     <h3 class="text-sm text-gray-500 font-bold mb-3 uppercase tracking-wider flex items-center gap-2">
                         <svg class="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
@@ -131,7 +126,7 @@
                                 <button onclick="resetUserForm()" id="btn-reset-user" class="text-xs text-blue-400 bg-blue-500/10 px-2 py-1 rounded transition">取消编辑</button>
                             </div>
                             <input id="new-username" placeholder="用户名" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none text-white focus:border-indigo-500">
-                            <input id="new-user-pwd" type="password" placeholder="密码" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none text-white focus:border-indigo-500">
+                            <input id="new-user-pwd" type="password" placeholder="密码 (编辑时留空则不修改)" class="p-3 mb-3 bg-[#0f1115] border border-gray-700 rounded-lg w-full outline-none text-white focus:border-indigo-500">
                             <div class="mb-4">
                                 <label class="block text-sm text-gray-400 mb-2">允许访问的媒体库:</label>
                                 <div id="user-libs-checkboxes" class="flex flex-col gap-1 p-2 bg-[#0f1115] border border-gray-700 rounded-lg"></div>
@@ -180,7 +175,7 @@
                 </div>
             </div>
 
-            <!-- 详情页 (绝对定位在右侧区域) -->
+            <!-- 详情页 -->
             <div id="detail-modal" class="hidden absolute inset-0 z-[70] overflow-y-auto bg-[#0b0e14]">
                 <div id="detail-fanart" class="fixed top-0 bottom-0 right-0 left-0 bg-cover bg-top backdrop-blur-heavy opacity-20 pointer-events-none"></div>
                 <div class="fixed top-0 bottom-0 right-0 left-0 bg-gradient-to-b from-black/80 via-black/60 to-[#0b0e14] z-[1] pointer-events-none"></div>
@@ -192,12 +187,10 @@
 
                     <div class="w-full max-w-5xl flex flex-col gap-3 md:gap-4 mt-4 md:mt-6">
                         <div class="flex flex-col md:flex-row gap-5 md:gap-6 items-start">
-                            <!-- 移动端 Fanart -->
                             <div class="w-full md:hidden mb-2 rounded-2xl overflow-hidden aspect-video relative shadow-2xl border border-gray-600/30 bg-gray-800">
                                 <img id="detail-mobile-fanart" src="" class="w-full h-full object-cover">
                                 <div class="absolute inset-0 bg-gradient-to-t from-[#0b0e14] via-transparent to-transparent"></div>
                             </div>
-                            <!-- 桌面端海报 -->
                             <div class="hidden md:block w-64 shrink-0 aspect-[2/3] bg-gray-800 rounded-2xl overflow-hidden shadow-2xl border border-gray-600/30 md:sticky md:top-6 mb-2">
                                 <img id="detail-poster" src="" class="w-full h-full object-cover">
                             </div>
@@ -229,13 +222,11 @@
                             </div>
                         </div>
 
-                        <!-- 演员区 -->
                         <div class="w-full mt-4">
                             <h3 class="text-sm text-gray-500 font-bold mb-2 uppercase tracking-wider">演职人员 CAST & CREW</h3>
                             <div id="detail-actors-list" class="flex gap-3 overflow-x-auto pb-2 no-scrollbar snap-x-mandatory min-w-0"></div>
                         </div>
 
-                        <!-- 剧照区 -->
                         <div class="w-full mt-2">
                             <div class="flex items-center justify-between mb-2">
                                 <h3 class="text-sm text-gray-500 font-bold uppercase tracking-wider">剧照 STILLS</h3>
@@ -247,7 +238,6 @@
                             <div id="detail-stills-list" class="flex gap-3 overflow-x-auto pb-2 no-scrollbar snap-x-mandatory min-w-0 scroll-smooth"></div>
                         </div>
 
-                        <!-- 媒体文件区 -->
                         <div class="w-full mt-2 mb-16">
                             <h3 class="text-sm text-gray-500 font-bold mb-2 uppercase tracking-wider">媒体文件 MEDIA FILES</h3>
                             <div class="bg-[#16191f]/80 backdrop-blur-md border border-gray-800 rounded-xl p-4 shadow-lg">
@@ -336,31 +326,37 @@
         function toggleSidebar() {
             const sidebar = document.getElementById('desktop-sidebar');
             const isOpen = sidebar.classList.contains('w-56');
-            if (isOpen) {
-                sidebar.classList.remove('w-56'); sidebar.classList.add('w-0');
-            } else {
-                sidebar.classList.remove('w-0'); sidebar.classList.add('w-56');
-            }
+            if (isOpen) { sidebar.classList.remove('w-56'); sidebar.classList.add('w-0'); }
+            else { sidebar.classList.remove('w-0'); sidebar.classList.add('w-56'); }
         }
 
         async function api(path, method = 'GET', body = null) {
             const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
-            const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : null });
-            const text = await res.text();
-            if (!res.ok) {
-                if (res.status === 401) logout();
-                return { error: `HTTP ${res.status}: ${text || '无返回内容'}` };
+            try {
+                const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : null });
+                const text = await res.text();
+                if (!res.ok) {
+                    // 💡 遇到 401 不再无脑踢人，而是提示
+                    if (res.status === 401) { return { error: "登录凭证已过期，请手动退出重登" }; }
+                    return { error: `HTTP ${res.status}: ${text || '无返回内容'}` };
+                }
+                if (!text) return {};
+                return JSON.parse(text);
+            } catch (e) {
+                return { error: "网络请求异常: " + e.message };
             }
-            if (!text) return {};
-            try { return JSON.parse(text); } catch(e) { return { error: "解析 JSON 失败" }; }
         }
 
         async function login() {
             const u = document.getElementById('username').value;
             const p = document.getElementById('password').value;
-            const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ username: u, password: p }) });
-            if (res.ok) { const data = await res.json(); token = data.token; localStorage.setItem('token', token); showMain(); } else alert('登录失败');
+            try {
+                const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ username: u, password: p }) });
+                if (res.ok) { const data = await res.json(); token = data.token; localStorage.setItem('token', token); showMain(); } 
+                else { alert('登录失败，请检查账号密码'); }
+            } catch(e) { alert('网络错误'); }
         }
+        
         function logout() { localStorage.removeItem('token'); location.reload(); }
 
         async function showMain() {
@@ -396,7 +392,7 @@
 
         async function fetchLibraries() {
             const data = await api('/api/libraries');
-            if (data.libraries) { 
+            if (data && data.libraries) { 
                 allLibraries = data.libraries; 
                 renderSidebarLibraries(); 
                 renderMobileLibTabs();
@@ -415,9 +411,7 @@
         function renderMobileLibTabs() {
             const container = document.getElementById('mobile-lib-tabs');
             if (!container) return;
-            
             let html = `<button onclick="setLibraryFilter('all')" class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium transition ${currentLibId === 'all' ? 'bg-blue-600 text-white shadow-sm' : 'bg-[#16191f] text-gray-400 border border-gray-800'}">全部</button>`;
-            
             allLibraries.forEach(lib => {
                 const cls = currentLibId === lib.id ? 'bg-blue-600 text-white shadow-sm' : 'bg-[#16191f] text-gray-400 border border-gray-800';
                 html += `<button onclick="setLibraryFilter(${lib.id})" class="whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium transition ${cls}">${lib.name}</button>`;
@@ -436,59 +430,49 @@
         async function loadMedia() {
             try {
                 const banner = document.getElementById('filter-banner');
-                const filterText = document.getElementById('filter-text');
-                if (currentFilter.type) {
-                    banner.classList.remove('hidden');
-                    filterText.innerText = currentFilter.value;
-                } else {
-                    banner.classList.add('hidden');
-                }
+                if (currentFilter.type) { banner.classList.remove('hidden'); document.getElementById('filter-text').innerText = currentFilter.value; } 
+                else { banner.classList.add('hidden'); }
 
                 const resumeRes = await fetch('/emby/Users/1/Items/Resume', { headers: { 'Authorization': `Bearer ${token}` } });
-                const resumeData = await resumeRes.json();
-                const resumeSection = document.getElementById('resume-section');
-                const resumeGrid = document.getElementById('resume-grid');
-                
-                if (resumeData.Items && resumeData.Items.length > 0) {
-                    resumeSection.classList.remove('hidden');
-                    resumeGrid.innerHTML = resumeData.Items.map(item => {
-                        const hasPoster = item.ImageTags && item.ImageTags.Primary;
-                        const imgUrl = hasPoster ? `/emby/Items/${item.Id}/Images/Primary?tag=${item.ImageTags.Primary}&maxWidth=400&token=${token}` : defaultPosterSvg;
-                        const playedTicks = item.UserData.PlaybackPositionTicks || 0;
-                        const totalTicks = item.RunTimeTicks || 1;
-                        const percent = Math.min(100, Math.max(0, (playedTicks / totalTicks) * 100));
-                        const leftMins = Math.floor((totalTicks - playedTicks) / 10000000 / 60);
-                        
-                        return `
-                        <div onclick="openDetailFromResume('${item.Id}')" class="media-card flex flex-col cursor-pointer transition-all duration-300 group relative">
-                            <div class="bg-[#16191f] rounded-lg md:rounded-xl overflow-hidden aspect-[2/3] relative border border-gray-800/50">
-                                <img src="${imgUrl}" class="media-poster w-full h-full object-cover transition-transform duration-500" onerror="this.src='${defaultPosterSvg}'">
-                                <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2 pt-6">
-                                    <div class="h-1.5 w-full bg-gray-600/50 rounded-full overflow-hidden">
-                                        <div class="h-full bg-blue-500 rounded-full" style="width: ${percent}%"></div>
+                if (resumeRes.ok) {
+                    const resumeData = await resumeRes.json();
+                    const resumeSection = document.getElementById('resume-section');
+                    const resumeGrid = document.getElementById('resume-grid');
+                    if (resumeData.Items && resumeData.Items.length > 0) {
+                        resumeSection.classList.remove('hidden');
+                        resumeGrid.innerHTML = resumeData.Items.map(item => {
+                            const hasPoster = item.ImageTags && item.ImageTags.Primary;
+                            const imgUrl = hasPoster ? `/emby/Items/${item.Id}/Images/Primary?tag=${item.ImageTags.Primary}&maxWidth=400&token=${token}` : defaultPosterSvg;
+                            const playedTicks = item.UserData.PlaybackPositionTicks || 0;
+                            const totalTicks = item.RunTimeTicks || 1;
+                            const percent = Math.min(100, Math.max(0, (playedTicks / totalTicks) * 100));
+                            const leftMins = Math.floor((totalTicks - playedTicks) / 10000000 / 60);
+                            return `
+                            <div onclick="openDetailFromResume('${item.Id}')" class="media-card flex flex-col cursor-pointer transition-all duration-300 group relative">
+                                <div class="bg-[#16191f] rounded-lg md:rounded-xl overflow-hidden aspect-[2/3] relative border border-gray-800/50">
+                                    <img src="${imgUrl}" class="media-poster w-full h-full object-cover transition-transform duration-500" onerror="this.src='${defaultPosterSvg}'">
+                                    <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2 pt-6">
+                                        <div class="h-1.5 w-full bg-gray-600/50 rounded-full overflow-hidden"><div class="h-full bg-blue-500 rounded-full" style="width: ${percent}%"></div></div>
+                                        <div class="text-[10px] text-gray-300 mt-1 text-right">剩余 ${leftMins} 分钟</div>
                                     </div>
-                                    <div class="text-[10px] text-gray-300 mt-1 text-right">剩余 ${leftMins} 分钟</div>
                                 </div>
-                            </div>
-                            <div class="p-1 md:p-2">
-                                <div class="font-bold text-white text-xs md:text-sm truncate drop-shadow-md">${item.Name || '未知'}</div>
-                            </div>
-                        </div>`;
-                    }).join('');
-                } else {
-                    resumeSection.classList.add('hidden');
+                                <div class="p-1 md:p-2"><div class="font-bold text-white text-xs md:text-sm truncate drop-shadow-md">${item.Name || '未知'}</div></div>
+                            </div>`;
+                        }).join('');
+                    } else { resumeSection.classList.add('hidden'); }
                 }
 
                 let url = `/api/items?`;
                 if (currentLibId !== 'all') url += `library_id=${currentLibId}`;
-                if (currentFilter.type && currentFilter.value) {
-                    url += `&${currentFilter.type}=${encodeURIComponent(currentFilter.value)}`;
-                }
+                if (currentFilter.type && currentFilter.value) url += `&${currentFilter.type}=${encodeURIComponent(currentFilter.value)}`;
+                
                 const grid = document.getElementById('media-grid');
                 grid.innerHTML = Array(12).fill(`<div class="animate-pulse bg-[#16191f] rounded-xl overflow-hidden aspect-[2/3]"><div class="w-full h-full bg-gray-800/50"></div></div>`).join('');
                 
                 const data = await api(url);
-                if (!data.items || data.items.length === 0) { grid.innerHTML = `<div class="col-span-full text-center text-gray-500 mt-20">暂无媒体内容</div>`; cachedItems = []; return; }
+                if (data && data.error) { grid.innerHTML = `<div class="col-span-full text-center text-red-500 mt-20">${data.error}</div>`; return; }
+                if (!data || !data.items || data.items.length === 0) { grid.innerHTML = `<div class="col-span-full text-center text-gray-500 mt-20">暂无媒体内容</div>`; cachedItems = []; return; }
+                
                 cachedItems = data.items;
                 grid.innerHTML = data.items.map(item => {
                     const imgUrl = item.has_poster ? `/api/images/${item.id}/poster?token=${token}&t=${Date.now()}` : defaultPosterSvg;
@@ -499,7 +483,6 @@
                         <div class="bg-[#16191f] rounded-lg md:rounded-xl overflow-hidden aspect-[2/3] relative border border-gray-800/50">
                             <img src="${imgUrl}" class="media-poster w-full h-full object-cover transition-transform duration-500" onerror="this.src='${defaultPosterSvg}'">
                             ${ratingHtml}
-                            <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                         </div>
                         <div class="p-1 md:p-2">
                             <div class="font-bold text-white text-xs md:text-sm truncate drop-shadow-md group-hover:text-blue-400 transition-colors">${item.title || '未知'}</div>
@@ -524,7 +507,6 @@
             const item = cachedItems.find(i => String(i.id) === String(itemId));
             if (!item) return;
             currentPlayingItemId = item.id;
-
             fetch(`/emby/Items/${item.id}/PlaybackInfo?IsPlayback=false`, { method: "POST", headers: { "X-Emby-Token": token } }).catch(() => {});
 
             document.getElementById('detail-plot').innerText = item.plot || '暂无简介...';
@@ -566,13 +548,8 @@
             const mobileFanart = document.getElementById('detail-mobile-fanart');
             if (item.has_poster) {
                 mobileFanart.src = `/api/images/${item.id}/fanart?token=${token}&t=${Date.now()}`;
-                mobileFanart.onerror = () => {
-                    mobileFanart.onerror = null;
-                    mobileFanart.src = `/api/images/${item.id}/poster?token=${token}&t=${Date.now()}`;
-                };
-            } else {
-                mobileFanart.src = defaultPosterSvg;
-            }
+                mobileFanart.onerror = () => { mobileFanart.onerror = null; mobileFanart.src = `/api/images/${item.id}/poster?token=${token}&t=${Date.now()}`; };
+            } else { mobileFanart.src = defaultPosterSvg; }
 
             const actorsContainer = document.getElementById('detail-actors-list');
             if (item.actors && item.actors.length > 0) {
@@ -585,9 +562,7 @@
                         ${role ? `<div class="text-[10px] text-gray-400 text-center w-full truncate">${role}</div>` : ''}
                     </div>`;
                 }).join('');
-            } else {
-                actorsContainer.innerHTML = `<div class="text-sm text-gray-500 py-2">暂无演员信息</div>`;
-            }
+            } else { actorsContainer.innerHTML = `<div class="text-sm text-gray-500 py-2">暂无演员信息</div>`; }
 
             const stillsContainer = document.getElementById('detail-stills-list');
             const stillsArr = Array.isArray(item.stills) ? item.stills : [];
@@ -597,9 +572,7 @@
                         <img src="/api/images/${item.id}/stills?token=${token}&index=${i}&t=${Date.now()}" class="w-full h-full object-cover" loading="lazy" onerror="this.parentElement.style.display='none'">
                     </div>`
                 ).join('');
-            } else {
-                stillsContainer.innerHTML = `<div class="text-sm text-gray-500 py-2">暂无剧照</div>`;
-            }
+            } else { stillsContainer.innerHTML = `<div class="text-sm text-gray-500 py-2">暂无剧照</div>`; }
 
             const sizeVal = Number(item.size) || 0;
             document.getElementById('detail-file-size').innerText = sizeVal > 0 ? `${(sizeVal / (1024 * 1024 * 1024)).toFixed(2)} GB` : '未知';
@@ -626,9 +599,7 @@
                     }
                 });
                 mediaStreamsBox.innerHTML = html;
-            } else {
-                mediaStreamsBox.innerHTML = `<div class="col-span-full text-sm text-gray-500 py-2">暂无探测信息</div>`;
-            }
+            } else { mediaStreamsBox.innerHTML = `<div class="col-span-full text-sm text-gray-500 py-2">暂无探测信息</div>`; }
 
             document.getElementById('detail-strm-path').innerText = item.file_path || '暂无路径';
             document.getElementById('detail-strm-content').innerText = item.strm_content || '暂无内容';
@@ -678,9 +649,7 @@
                         if ((s.Type === 'Audio' || s.Type === 'AUDIO') && !aInfo) aInfo = s.DisplayTitle || `${s.Codec.toUpperCase()} ${s.Channels}ch`;
                     });
                     infoEl.innerHTML = `<span>🎬 ${vInfo}</span> <span>🎵 ${aInfo}</span>`;
-                } else {
-                    infoEl.innerHTML = `<span class="text-gray-500">暂无详细媒体参数</span>`;
-                }
+                } else { infoEl.innerHTML = `<span class="text-gray-500">暂无详细媒体参数</span>`; }
             }
             
             playerModal.classList.remove('hidden');
@@ -688,9 +657,7 @@
             loading.innerHTML = `<div class="w-10 h-10 border-4 border-gray-600 border-t-blue-500 rounded-full animate-spin mb-4"></div><div class="text-sm text-gray-300">正在解析网盘直链...</div>`;
             
             video.src = `/Videos/${currentPlayingItemId}/stream?token=${token}&part=${partIndex}`;
-            video.play().then(() => { 
-                loading.classList.add('hidden'); 
-            }).catch(e => {
+            video.play().then(() => { loading.classList.add('hidden'); }).catch(e => {
                 loading.innerHTML = `<div class="text-red-400 font-bold">播放失败</div><div class="text-sm text-gray-300 mt-2">浏览器可能不支持该格式，或网盘风控拦截。</div>`;
             });
         }
@@ -721,18 +688,7 @@
         async function rescanLibrary(id) { const btn = event.target; btn.innerText = '扫描中...'; btn.disabled = true; await api(`/api/libraries/${id}/scan`, 'POST'); setTimeout(() => { btn.innerText = '刷新'; btn.disabled = false; alert('扫描任务已启动'); }, 1000); }
 
         async function openPathPicker() { isProbeSelecting = false; document.getElementById('path-modal').classList.remove('hidden'); await browseDir(currentPath); }
-        async function openProbePathPicker() { isProbeSelecting = true; document.getElementById('path-modal').classList.remove('hidden'); await browseDir(currentPath); }
         function closePathPicker() { document.getElementById('path-modal').classList.add('hidden'); }
-
-        async function startProbe() {
-            const path = document.getElementById('probe-dir-path').value;
-            if (!path) return alert('请先选择要探测的目录');
-            const btn = event.target; const text = btn.innerText;
-            btn.innerText = "任务已下发..."; btn.disabled = true;
-            await api("/api/probe/scan", "POST", { path: path, interval_ms: 1000 });
-            alert("探测任务已在后台启动，请留意容器终端日志。");
-            btn.innerText = text; btn.disabled = false;
-        }
 
         async function browseDir(path) {
             const list = document.getElementById('dir-list'); list.innerHTML = `<div class="p-4 text-center text-gray-500 animate-pulse">加载中...</div>`;
@@ -754,8 +710,7 @@
         function togglePath(path, isChecked) { if (isChecked) { if (!selectedPaths.includes(path)) selectedPaths.push(path); } else { selectedPaths = selectedPaths.filter(p => p !== path); } renderSelectedPaths(); }
         
         function selectCurrentPath() {
-            if (isProbeSelecting) document.getElementById('probe-dir-path').value = currentPath;
-            else { if (!selectedPaths.includes(currentPath)) { selectedPaths.push(currentPath); renderSelectedPaths(); } }
+            if (!selectedPaths.includes(currentPath)) { selectedPaths.push(currentPath); renderSelectedPaths(); }
             closePathPicker();
         }
 
@@ -780,15 +735,17 @@
             const oldPwd = document.getElementById('old-pwd').value; const newUser = document.getElementById('new-user').value; const newPwd = document.getElementById('new-pwd').value;
             if (!oldPwd || !newUser || !newPwd) return alert('请填写完整所有选项');
             const res = await api('/api/user/update', 'POST', { old_password: oldPwd, new_username: newUser, new_password: newPwd });
-            if (res && res.status === 'success') { alert('账号修改成功！'); logout(); } else if (res && res.error) alert(res.error);
+            if (res && res.status === 'success') { alert('账号修改成功！请重新登录'); logout(); } else if (res && res.error) alert(res.error);
         }
 
         async function loadSettings() {
             const data = await api("/api/settings");
-            document.getElementById("prefetch-toggle").checked = (data && data.prefetch_playback === "true");
+            if (data && !data.error) {
+                document.getElementById("prefetch-toggle").checked = (data.prefetch_playback === "true");
+            }
             await loadUsers();
         }
-        
+
         function resetUserForm() {
             document.getElementById('new-username').value = '';
             document.getElementById('new-username').disabled = false;
@@ -800,15 +757,10 @@
 
         function editUser(username, libs) {
             document.getElementById('new-username').value = username;
-            document.getElementById('new-username').disabled = true; // 编辑时禁用用户名
-            document.getElementById('new-user-pwd').value = ''; // 留空
+            document.getElementById('new-username').disabled = true;
+            document.getElementById('new-user-pwd').value = '';
             document.getElementById('new-user-pwd').placeholder = '留空则不修改密码';
-            
-            // 勾选媒体库
-            document.querySelectorAll('.user-lib-cb').forEach(cb => {
-                cb.checked = libs.includes(parseInt(cb.value)) || libs.includes(cb.value);
-            });
-            
+            document.querySelectorAll('.user-lib-cb').forEach(cb => { cb.checked = libs.includes(parseInt(cb.value)) || libs.includes(cb.value); });
             document.querySelector('button[onclick="saveUser()"]').innerText = '保存修改';
         }
 
@@ -821,17 +773,14 @@
             boxContainer.innerHTML = '';
 
             try {
-                const [usersRes, libsRes] = await Promise.all([
-                    api('/api/users'),
-                    api('/api/libraries')
-                ]);
+                const [usersRes, libsRes] = await Promise.all([ api('/api/users'), api('/api/libraries') ]);
+                if (usersRes.error) { container.innerHTML = `<div class="text-red-400">加载失败: ${usersRes.error}</div>`; return; }
 
                 const users = Array.isArray(usersRes) ? usersRes : [];
                 const libs = (libsRes && libsRes.libraries) ? libsRes.libraries : [];
 
-                if (users.length === 0) {
-                    container.innerHTML = '<div class="text-gray-500">暂无普通用户</div>';
-                } else {
+                if (users.length === 0) { container.innerHTML = '<div class="text-gray-500">暂无普通用户</div>'; } 
+                else {
                     container.innerHTML = users.map(u => `
                         <div class="flex justify-between items-center bg-[#0f1115] border border-gray-800 p-3 rounded-xl mb-2">
                             <span class="font-medium text-gray-200">${u.username}</span>
@@ -843,9 +792,8 @@
                     `).join('');
                 }
 
-                if (libs.length === 0) {
-                    boxContainer.innerHTML = '<div class="text-gray-500 text-sm">暂无媒体库，请先去上方添加</div>';
-                } else {
+                if (libs.length === 0) { boxContainer.innerHTML = '<div class="text-gray-500 text-sm">暂无媒体库，请先去上方添加</div>'; } 
+                else {
                     boxContainer.innerHTML = libs.map(lib => `
                         <label class="flex items-center gap-3 cursor-pointer p-2 hover:bg-gray-800/50 rounded-lg transition">
                             <input type="checkbox" value="${lib.id}" class="user-lib-cb w-5 h-5 accent-indigo-500">
@@ -853,76 +801,47 @@
                         </label>
                     `).join('');
                 }
-            } catch (e) {
-                container.innerHTML = '<div class="text-red-400">数据加载失败，请刷新重试</div>';
-            }
+            } catch (e) { container.innerHTML = '<div class="text-red-400">数据加载失败，请刷新重试</div>'; }
         }
 
         async function saveUser() {
             const username = document.getElementById('new-username').value.trim();
             const pwd = document.getElementById('new-user-pwd').value.trim();
             const isEdit = document.getElementById('new-username').disabled;
-            
             if (!username) return alert('请填写用户名');
             if (!isEdit && !pwd) return alert('新建用户必须填写密码');
             
             const libs = Array.from(document.querySelectorAll('.user-lib-cb:checked')).map(cb => parseInt(cb.value));
-            
             try {
                 const res = await api('/api/users', 'POST', { username, password: pwd, libraries: libs });
-                if (res && res.error) {
-                    alert('保存失败: ' + res.error);
-                } else {
-                    alert('保存成功');
-                    resetUserForm();
-                    await loadUsers();
-                }
-            } catch (e) {
-                alert('网络请求失败，请检查控制台或重试');
-            }
+                if (res && res.error) { alert('保存失败: ' + res.error); } 
+                else { alert('保存成功'); resetUserForm(); await loadUsers(); }
+            } catch (e) { alert('网络请求失败'); }
         }
 
-        async function deleteUser(id) {
-            if (confirm('确定删除该用户吗？')) {
-                await api(`/api/users/${id}`, 'DELETE');
-                await loadUsers();
-            }
-        }
+        async function deleteUser(id) { if (confirm('确定删除该用户吗？')) { await api(`/api/users/${id}`, 'DELETE'); await loadUsers(); } }
 
-        async function togglePrefetch() {
-            await api("/api/settings", "POST", { prefetch_playback: document.getElementById("prefetch-toggle").checked });
-        }
+        async function togglePrefetch() { await api("/api/settings", "POST", { prefetch_playback: document.getElementById("prefetch-toggle").checked }); }
 
         async function generateCovers() {
             const btn = document.getElementById('btn-gen-covers');
             if(!btn) return alert("未找到按钮元素");
             const originalText = btn.innerText;
-            btn.innerText = '正在后台生成...';
-            btn.disabled = true;
-            btn.classList.add('opacity-50');
+            btn.innerText = '正在后台生成...'; btn.disabled = true; btn.classList.add('opacity-50');
             try {
-                const response = await fetch('/api/generate_covers', { 
-                    method: 'POST', 
-                    headers: { 'Authorization': `Bearer ${token}` } 
-                });
+                const response = await fetch('/api/generate_covers', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
                 if (response.ok) {
                     setTimeout(() => {
                         alert('任务已在后台启动！大约需要几秒到十几秒。\n完成后请刷新客户端或清除 App 缓存查看。');
-                        btn.innerText = '重新生成封面';
-                        btn.disabled = false;
-                        btn.classList.remove('opacity-50');
+                        btn.innerText = '重新生成封面'; btn.disabled = false; btn.classList.remove('opacity-50');
                     }, 1000);
                 } else {
                     alert('启动失败，状态码: ' + response.status);
-                    btn.innerText = originalText;
-                    btn.disabled = false;
-                    btn.classList.remove('opacity-50');
+                    btn.innerText = originalText; btn.disabled = false; btn.classList.remove('opacity-50');
                 }
             } catch (e) {
                 alert('网络请求异常: ' + e.message);
-                btn.innerText = originalText;
-                btn.disabled = false;
-                btn.classList.remove('opacity-50');
+                btn.innerText = originalText; btn.disabled = false; btn.classList.remove('opacity-50');
             }
         }
     </script>
