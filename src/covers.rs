@@ -11,7 +11,7 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
     let _ = std::fs::create_dir_all(cache_dir.join("tag"));
 
     let conn = match pool.lock() { Ok(c) => c, Err(_) => return };
-    
+    println!("🎨 [COVERS] 开始生成媒体库封面...");
     // 1. 生成媒体库封面 (16:9)
     if let Ok(mut stmt) = conn.prepare("SELECT id FROM libraries") {
         if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, i64>(0)) {
@@ -28,6 +28,7 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
         }
     }
 
+    println!("🎨 [COVERS] 开始生成类型封面...");
     // 2. 生成类型封面 (2:3)
     let mut all_genres = std::collections::HashSet::new();
     if let Ok(mut stmt) = conn.prepare("SELECT genres FROM items WHERE genres != ''") {
@@ -49,6 +50,7 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
         }
     }
 
+    println!("🎨 [COVERS] 开始生成标签封面...");
     // 3. 生成标签封面 (2:3)
     let mut all_tags = std::collections::HashSet::new();
     if let Ok(mut stmt) = conn.prepare("SELECT tags FROM items WHERE tags != ''") {
