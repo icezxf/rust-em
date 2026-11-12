@@ -2206,8 +2206,8 @@ pub async fn emby_unmark_favorite(State(pool): State<Arc<Mutex<Connection>>>, Ax
 
 pub async fn api_generate_covers(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
     let pool_clone = pool.clone();
-    tokio::task::spawn_blocking(move || {
-        crate::covers::generate_all_covers(pool_clone);
+    tokio::spawn(async move {
+        crate::covers::generate_all_covers(pool_clone).await;
     });
     Json(json!({"status": "started"}))
 }
