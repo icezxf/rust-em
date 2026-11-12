@@ -1816,6 +1816,7 @@ pub async fn emby_playback_info(
                             let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
                             let mut lock = cache.lock().unwrap();
                             lock.insert(cache_key, (final_url, Instant::now() + Duration::from_secs(300)));
+                            println!("🔥 [PREFETCH] 成功预热直链 (ID: {})", item_id);
                         }
                     }
                 }
@@ -1857,6 +1858,7 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
         let cache_lock = cache.lock().unwrap(); 
         if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) { 
             if Instant::now() < *expire_at { 
+                println!("⚡ [CACHE] 命中预热缓存，秒开播放！(ID: {})", item_id);
                 return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); 
             } 
         }
