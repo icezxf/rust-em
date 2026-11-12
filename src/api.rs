@@ -806,7 +806,19 @@ pub async fn emby_authenticate(State(pool): State<Arc<Mutex<Connection>>>, heade
     if let Some((id, name)) = user_opt {
         let token = uuid::Uuid::new_v4().to_string();
         TOKENS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap().insert(token.clone(), id);
-        (StatusCode::OK, Json(json!({ "User": { "Id": id.to_string(), "Name": name, "ServerId": "rust-em-server", "HasPassword": true, "Policy": { "IsAdministrator": true, "EnableAllFolders": true } }, "SessionInfo": { "Id": uuid::Uuid::new_v4().to_string(), "UserId": id.to_string() }, "AccessToken": token, "ServerId": "rust-em-server" }))).into_response()
+        // 返回完整的 User 对象，包含客户端可能依赖的所有字段
+        (StatusCode::OK, Json(json!({
+            "User": {
+                "Id": id.to_string(),
+                "Name": name,
+                "ServerId": "rust-em-server",
+                "HasPassword": true,
+                "Policy": { "IsAdministrator": id == 1, "EnableAllFolders": id == 1 }
+            },
+            "SessionInfo": { "Id": uuid::Uuid::new_v4().to_string(), "UserId": id.to_string() },
+            "AccessToken": token,
+            "ServerId": "rust-em-server"
+        }))).into_response()
     } else { (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid credentials" }))).into_response() }
 }
 
@@ -897,23 +909,24 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
     }
 
-    let mut sql = "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE ud.playback_position_ticks > 0".to_string();
-    let mut params: Vec<String> = Vec::new();
-    params.push(req_user_id.to_string());
+    let mut sql = "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path, ud.play_count FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE ud.playback_position_ticks > 0".to_string();
+    let mut params: Vec<String> = vec![req_user_id.to_string()];
 
     if let Some(libs) = &allowed_libs {
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
-        sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+        sql.push_str(&format!(" AND items.library_id IN ({})", libs_str.join(",")));
     }
-    
     if let Some(pid) = query.get("ParentId") {
         if pid.starts_with("lib_") {
-            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(" AND library_id = ?"); params.push(lib_id.to_string()); }
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
+                sql.push_str(" AND items.library_id = ?");
+                params.push(lib_id.to_string());
+            }
         }
     }
-    sql.push_str(" ORDER BY updated_at DESC LIMIT 30");
+    sql.push_str(" ORDER BY ud.last_played_date DESC LIMIT 30");
     
-    let mut stmt = conn.prepare(&sql).unwrap();
+    let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
     
     let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
@@ -937,9 +950,7 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             runtime_mins = if current_pct > 0 { current_pct as i32 + 30 } else { 100 };
         }
         let total_ticks: i64 = (runtime_mins as i64) * 60 * 10_000_000;
-        let mut played_pct = (playback_ticks * 100 / total_ticks) as i32;
-        if played_pct >= 100 { played_pct = 99; }
-        if played_pct <= 0 && playback_ticks > 0 { played_pct = 1; }
+        let play_count: i32 = row.get(20).unwrap_or(0);
         
         Ok(json!({
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
@@ -952,7 +963,15 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
-            "UserData": { "PlaybackPositionTicks": playback_ticks, "PlayCount": 1, "IsFavorite": false, "Played": false, "PlayedPercentage": played_pct }
+            "UserData": {
+                "PlaybackPositionTicks": playback_ticks,
+                "PlayCount": play_count,
+                "IsFavorite": false,
+                "Played": play_count > 0,
+                "PlayedPercentage": if total_ticks > 0 { (playback_ticks as f64 / total_ticks as f64) * 100.0 } else { 0.0 },
+                "LastPlayedDate": json!(format_iso8601(row.get::<_, i64>(15).unwrap_or(0))),
+                "UnplayedItemCount": 0
+            }
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response()
@@ -1445,7 +1464,15 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
-            "UserData": { "PlaybackPositionTicks": playback_ticks, "PlayCount": play_count, "IsFavorite": is_favorite > 0, "Played": play_count > 0, "PlayedPercentage": played_pct }
+            "UserData": {
+                "PlaybackPositionTicks": playback_ticks,
+                "PlayCount": play_count,
+                "IsFavorite": is_favorite > 0,
+                "Played": play_count > 0,
+                "PlayedPercentage": if total_ticks > 0 { (playback_ticks as f64 / total_ticks as f64) * 100.0 } else { 0.0 },
+                "LastPlayedDate": json!(if play_count > 0 { format_iso8601(mtime) } else { String::new() }),
+                "UnplayedItemCount": 0
+            }
         }))
     }).unwrap().filter_map(Result::ok).collect();
     items.extend(search_person_items);
