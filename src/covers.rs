@@ -233,7 +233,7 @@ fn draw_to_region(canvas: &mut image::RgbImage, path: &str, x: u32, y: u32, w: u
     if let Ok(img) = image::open(path) {
         // 因为设定的格子 (400x600) 就是标准海报比例 (2:3)
         // 所以直接 resize_exact 不会导致拉伸变形，且绝对填满不留底
-        let thumb = img.resize_exact(w, h, image::imageops::FilterType::Triangle).to_rgb8();
+        let thumb = img.resize_exact(w, h, image::imageops::FilterType::Nearest).to_rgb8();
         let _ = canvas.copy_from(&thumb, x, y);
     }
 }
