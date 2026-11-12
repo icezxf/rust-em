@@ -840,27 +840,38 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
 
 pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<HashMap<String, String>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
+    
+    // 1. 权限过滤
     let allowed_libs = get_allowed_libs(&conn, req_user_id);
     if let Some(libs) = &allowed_libs {
         if libs.is_empty() { return Json(json!([])).into_response(); }
     }
 
     let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path FROM items WHERE 1=1".to_string();
-    let mut params: Vec<String> = vec![req_user_id.to_string()];
+    let mut params: Vec<String> = Vec::new();
 
     if let Some(libs) = &allowed_libs {
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
         sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
     }
-    
+
+    // 2. 媒体库过滤
     if let Some(pid) = query.get("ParentId") {
         if pid.starts_with("lib_") {
-            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(" AND library_id = ?"); params.push(lib_id.to_string()); }
+            if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
+                sql.push_str(" AND library_id = ?");
+                params.push(lib_id.to_string());
+            }
         }
     }
+    
     sql.push_str(" ORDER BY id DESC LIMIT 16"); 
     
-    let mut stmt = conn.prepare(&sql).unwrap();
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(_) => return Json(json!([])).into_response(),
+    };
+    
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
     
     let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
@@ -889,16 +900,17 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
             "Overview": row.get::<_, String>(4).unwrap_or_default(), 
             "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0), "RunTimeTicks": total_ticks, "Size": size,
-            "DateCreated": date_str.clone(), "PrimaryImageAspectRatio": 0.6666666666666666,
+            "DateCreated": date_str.clone(), "EndDate": date_str, "PrimaryImageAspectRatio": 0.6666666666666666,
             "Container": "mp4", "CanDelete": false, "CanDownload": false, "LocationType": "FileSystem", "Status": "Released",
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
-            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 }
+            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0.0 }
         }))
     }).unwrap().filter_map(Result::ok).collect();
-    // 【绝对死守】：必须返回裸数组
+    
+    // 【绝对死守】：最新添加接口返回裸数组
     Json(items).into_response()
 }
 
