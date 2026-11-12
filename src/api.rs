@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant, UNIX_EPOCH, SystemTime};
-use rusqlite::{Connection, params_from_iter};
+use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncReadExt;

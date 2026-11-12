@@ -1,5 +1,5 @@
 
-use image::{GenericImage, GenericImageView, imageops::FilterType};
+use image::{GenericImage, GenericImageView};
 use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 use std::path::PathBuf;
@@ -104,10 +104,10 @@ fn generate_landscape_cover(paths: &[String], out_path: &std::path::Path) {
         let grid_size: u32 = 3;
         let cell_w = 800 / grid_size;
         let cell_h = 450 / grid_size;
-        for i in 0..9 {
-            let path = &paths[i % count];
-            let row = (i / grid_size) as u32;
-            let col = (i % grid_size) as u32;
+        for i in 0..9u32 {
+            let path = &paths[(i as usize) % count];
+            let row = i / grid_size;
+            let col = i % grid_size;
             draw_to_region(&mut canvas, path, col * cell_w, row * cell_h, cell_w, cell_h);
         }
     }
