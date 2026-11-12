@@ -1879,6 +1879,7 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
         if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) { 
             if Instant::now() < *expire_at { 
                 println!("⚡ [CACHE] 命中预热缓存，秒开播放！(ID: {}, 片名: {})", item_id, item_title);
+                println!("🔗 [302] 重定向真实网盘 (ID: {}, 片名: {})\n     -> URL: {}", item_id, item_title, cached_url);
                 return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); 
             } 
         }
@@ -1902,8 +1903,7 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
 
     { let mut cache_lock = cache.lock().unwrap(); cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(300))); }
     
-    // 💡 打印真实的 302 重定向日志，包含片名和真实网盘地址
-    println!("🔗 [302] 重定向真实网盘 (ID: {}, 片名: {})\n     -> URL: {}", item_id, item_title, final_url);
+    println!("🔗 [302] 重新解析真实网盘 (ID: {}, 片名: {})\n     -> URL: {}", item_id, item_title, final_url);
     
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
 }
