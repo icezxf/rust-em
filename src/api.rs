@@ -76,15 +76,12 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
                 user_id_opt = Some(uid);
             }
         }
-        
         if let Some(user_id) = user_id_opt {
             // 💡 核心安全控制：普通用户绝对不能访问 /api 接口（网页端管理接口）
-            // 只有 /api/login 是放行的（上面已经 return 了）
             if path.starts_with("/api/") && user_id != 1 {
                 return Err(StatusCode::FORBIDDEN);
             }
-            
-            // 把 user_id 注入到 request extensions 中，方便后续 Handler 提取
+            // 把 user_id 注入到 request extensions 中
             let mut req = req;
             req.extensions_mut().insert(user_id);
             return Ok(next.run(req).await);
@@ -272,17 +269,21 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
     let mut hasher = Sha256::new(); hasher.update(&payload.password);
     let conn = pool.lock().unwrap();
     if conn.prepare("SELECT id FROM users WHERE username = ?1 AND password = ?2").unwrap().exists([&payload.username, &format!("{:x}", hasher.finalize())]).unwrap() {
-        let token = uuid::Uuid::new_v4().to_string();
         let user_id: i64 = conn.query_row("SELECT id FROM users WHERE username = ?1", [&payload.username], |r| r.get(0)).unwrap_or(0);
+        
+        // 💡 网页端：只有 id = 1 (admin) 才能登录
         if user_id != 1 {
             return (StatusCode::FORBIDDEN, Json(json!({ "error": "只有管理员可以登录网页端" }))).into_response();
         }
+        
+        let token = uuid::Uuid::new_v4().to_string();
         TOKENS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap().insert(token.clone(), user_id);
         (StatusCode::OK, Json(json!({ "token": token }))).into_response()
+    } else { 
+        (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid credentials" }))).into_response() 
+    }
 }
 
-#[derive(Deserialize)]
-pub struct BrowseReq { path: String }
 pub async fn browse_dir(Query(req): Query<BrowseReq>) -> impl IntoResponse {
     let base_path = req.path;
     let result = tokio::task::spawn_blocking(move || {
