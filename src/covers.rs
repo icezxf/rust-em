@@ -90,15 +90,15 @@ fn generate_landscape_cover(paths: &[String], out_path: &std::path::Path) {
     }
 
     // 横版 3x3 网格，类似你截图右上角的密集拼接
-    let grid_size = 3;
+    let grid_size: u32 = 3;
     let cell_w = 800 / grid_size;
     let cell_h = 450 / grid_size;
     
     for i in 0..9 {
-        if i >= count { break; }
+        if i >= (count as u32) { break; }
         let row = i / grid_size;
         let col = i % grid_size;
-        draw_to_region(&mut canvas, &paths[i], col * cell_w, row * cell_h, cell_w, cell_h);
+        draw_to_region(&mut canvas, &paths[i as usize], col * cell_w, row * cell_h, cell_w, cell_h);
     }
     if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
 }
