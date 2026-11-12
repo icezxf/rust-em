@@ -1070,7 +1070,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         }
     }
 
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path, date_created, actors, directors, tags, studios, play_count FROM items WHERE 1=1".to_string();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, playback_ticks, fanart_path, date_created, actors, directors, tags, studios, play_count, is_favorite FROM items WHERE 1=1".to_string();
     let mut params: Vec<String> = Vec::new();
 
     // 【核心修复 3】严格串台拦截
@@ -1350,6 +1350,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
         let date_created: i64 = row.get(20).unwrap_or(0);
         let final_date_created = if date_created > 0 { date_created } else { mtime };
         let play_count: i32 = row.get(25).unwrap_or(0);
+        let is_favorite: i32 = row.get(26).unwrap_or(0);
         let played_pct = if total_ticks > 0 { (playback_ticks * 100 / total_ticks) as i32 } else { 0 };
         let date_str = format_iso8601(final_date_created);
         
@@ -1365,7 +1366,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
-            "UserData": { "PlaybackPositionTicks": playback_ticks, "PlayCount": play_count, "IsFavorite": false, "Played": play_count > 0, "PlayedPercentage": played_pct }
+            "UserData": { "PlaybackPositionTicks": playback_ticks, "PlayCount": play_count, "IsFavorite": is_favorite > 0, "Played": play_count > 0, "PlayedPercentage": played_pct }
         }))
     }).unwrap().filter_map(Result::ok).collect();
     items.extend(search_person_items);
@@ -1405,7 +1406,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
 
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let item_opt = conn.query_row(
-        "SELECT id, title, type, year, plot, poster_path, file_path, studios, parts, runtime, actors, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, series, label, set_name, tagline, tags, directors, num, stills, releasedate, original_title, sort_title, country, language, writers, trailer, media_streams, date_created, primary_image_aspect_ratio, original_language, fanart_path, logo_path, thumb_path, banner_path, strm_content, playback_ticks, play_count FROM items WHERE id = ?1",
+        "SELECT id, title, type, year, plot, poster_path, file_path, studios, parts, runtime, actors, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, series, label, set_name, tagline, tags, directors, num, stills, releasedate, original_title, sort_title, country, language, writers, trailer, media_streams, date_created, primary_image_aspect_ratio, original_language, fanart_path, logo_path, thumb_path, banner_path, strm_content, playback_ticks, play_count, is_favorite FROM items WHERE id = ?1",
         [id],
         |row| {
             let title: String = row.get(1).unwrap_or_default(); let typ: String = row.get(2).unwrap_or_default();
@@ -1430,7 +1431,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
             let original_language: String = row.get(37).unwrap_or_default(); let fanart_path: String = row.get(38).unwrap_or_default();
             let logo_path: String = row.get(39).unwrap_or_default(); let thumb_path: String = row.get(40).unwrap_or_default();
             let banner_path: String = row.get(41).unwrap_or_default(); let strm_content: String = row.get(42).unwrap_or_default();
-            let playback_ticks: i64 = row.get(43).unwrap_or(0); let play_count: i32 = row.get(44).unwrap_or(0);
+            let playback_ticks: i64 = row.get(43).unwrap_or(0); let play_count: i32 = row.get(44).unwrap_or(0); let is_favorite: i32 = row.get(45).unwrap_or(0);
 
             let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
             let actors: Vec<Value> = serde_json::from_str(&actors_json).unwrap_or_default();
@@ -1511,7 +1512,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String) -
                 "SetName": json!(set_name), "SeriesName": json!(if typ == "tvshows" { series } else { "".to_string() }),
                 "Path": decode_url(&real_path), "Container": "mp4", "MediaSourceCount": media_sources.len(), "MediaSources": media_sources,
                 "ProbeEngine": "rust-native", "LocationType": "FileSystem", "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
-                "UserData": { "ItemId": id.to_string(), "Key": id.to_string(), "PlaybackPositionTicks": playback_ticks, "PlayCount": play_count, "IsFavorite": false, "Played": play_count > 0, "PlayedPercentage": if run_time_ticks > 0 { playback_ticks * 100 / run_time_ticks } else { 0 } }
+                "UserData": { "ItemId": id.to_string(), "Key": id.to_string(), "PlaybackPositionTicks": playback_ticks, "PlayCount": play_count, "IsFavorite": is_favorite > 0, "Played": play_count > 0, "PlayedPercentage": if run_time_ticks > 0 { playback_ticks * 100 / run_time_ticks } else { 0 } }
             }))
         }
     ).ok();
@@ -2213,13 +2214,13 @@ pub async fn emby_refresh_library(State(pool): State<Arc<Mutex<Connection>>>) ->
 pub async fn emby_mark_favorite(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, i64)>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let _ = conn.execute("UPDATE items SET is_favorite = 1 WHERE id = ?1", [item_id]);
-    StatusCode::OK.into_response()
+    Json(json!({ "IsFavorite": true, "ItemId": item_id.to_string() })).into_response()
 }
 
 pub async fn emby_unmark_favorite(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, i64)>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let _ = conn.execute("UPDATE items SET is_favorite = 0 WHERE id = ?1", [item_id]);
-    StatusCode::OK.into_response()
+    Json(json!({ "IsFavorite": false, "ItemId": item_id.to_string() })).into_response()
 }
 
 
