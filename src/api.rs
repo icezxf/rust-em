@@ -26,7 +26,7 @@ pub async fn logger_middleware(req: Request, next: Next) -> Response {
     let path = uri.path();
     // 屏蔽垃圾日志
     if path.ends_with(".css") || path.ends_with(".js") || path.ends_with(".png") || path.ends_with(".jpg") 
-        || path.contains("/Images/") || path.contains("/api/images/") 
+        || (path.contains("/Images/") && !path.contains("/Images/Primary")) || path.contains("/api/images/") 
         || path.contains("/Sessions/Playing/Progress")
         || path.contains("websocket") || path.contains("webhook") || path.contains("Webhook") {
         return next.run(req).await; 
