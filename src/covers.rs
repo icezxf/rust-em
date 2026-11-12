@@ -3,7 +3,6 @@ use image::{GenericImage, GenericImageView};
 use image::codecs::jpeg::JpegEncoder;
 use image::codecs::jpeg::JpegEncoder;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use rusqlite::Connection;
 use std::path::PathBuf;
 use sha2::{Digest, Sha256};
@@ -216,24 +215,13 @@ fn generate_portrait_cover(paths: &[String], out_path: &std::path::Path) {
 }
 
 fn draw_to_region(canvas: &mut image::RgbImage, path: &str, x: u32, y: u32, w: u32, h: u32) {
-    // 💡 优化 1：限制解码尺寸！如果是 4K 原图，强行按原尺寸的 1/4 解码，砍掉 90% 的 CPU
-    let mut reader = match image::ImageReader::open(path) {
-        Ok(r) => r.with_guessed_format().unwrap_or_else(|_| image::ImageReader::open(path).unwrap()),
-        Err(_) => return,
-    };
-    let (orig_w, orig_h) = reader.dimensions().unwrap_or((3000, 4500));
-    if orig_w > 1500 || orig_h > 2000 {
-        // 告诉解码器：遇到大图，请直接用低分辨率模式解码！
-        reader.no_limits(); 
-        reader.set_format(reader.format().unwrap_or(image::ImageFormat::Jpeg));
-    }
-    
-    if let Ok(img) = reader.decode() {
+    // 直接使用 image::open，稳定且高效
+    if let Ok(img) = image::open(path) {
         let (img_w, img_h) = img.dimensions();
         let target_ratio = w as f64 / h as f64;
         let img_ratio = img_w as f64 / img_h as f64;
 
-        // 💡 优化 2：极速生成纯色背景，替代双重 for 循环
+        // 极速生成纯色背景，替代双重 for 循环
         let bg = image::RgbImage::from_pixel(w, h, image::Rgb([22, 25, 31]));
         let _ = canvas.copy_from(&bg, x, y);
 
@@ -243,6 +231,7 @@ fn draw_to_region(canvas: &mut image::RgbImage, path: &str, x: u32, y: u32, w: u
             ((h as f64 * img_ratio) as u32, h)
         };
 
+        // 极速缩放
         let thumb = img.thumbnail(new_w, new_h).to_rgb8();
         let offset_x = x + (w.saturating_sub(new_w)) / 2;
         let offset_y = y + (h.saturating_sub(new_h)) / 2;
