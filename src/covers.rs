@@ -215,8 +215,12 @@ fn generate_portrait_cover(paths: &[String], out_path: &std::path::Path) {
 
 fn draw_to_region(canvas: &mut image::RgbImage, path: &str, x: u32, y: u32, w: u32, h: u32) {
     if let Ok(img) = image::open(path) {
-        // 💡 核心优化：强行拉伸填满（Stretch），不留任何黑边，同时速度最快
-        let thumb = img.resize_exact(w, h, image::imageops::FilterType::Triangle).to_rgb8();
-        let _ = canvas.copy_from(&thumb, x, y);
+        // 💡 完全等比例缩放，绝不强行拉伸变形
+        let thumb = img.thumbnail(w, h).to_rgb8();
+        
+        // 居中放置（如果不填满，四周会露出一点点画布的深色底色，下发时客户端会统一自适应）
+        let offset_x = x + (w.saturating_sub(thumb.width())) / 2;
+        let offset_y = y + (h.saturating_sub(thumb.height())) / 2;
+        let _ = canvas.copy_from(&thumb, offset_x, offset_y);
     }
 }
