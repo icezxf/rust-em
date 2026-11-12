@@ -1,6 +1,6 @@
 use image::codecs::jpeg::JpegEncoder;
 
-use image::{GenericImage, GenericImageView};
+use image::GenericImage;
 use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 use std::path::PathBuf;

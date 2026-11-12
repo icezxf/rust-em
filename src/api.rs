@@ -284,6 +284,9 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
     }
 }
 
+#[derive(Deserialize)]
+pub struct BrowseReq { path: String }
+
 pub async fn browse_dir(Query(req): Query<BrowseReq>) -> impl IntoResponse {
     let base_path = req.path;
     let result = tokio::task::spawn_blocking(move || {
