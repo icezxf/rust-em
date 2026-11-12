@@ -1020,7 +1020,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             for name in set_name_str.split(" / ").filter(|s| !s.trim().is_empty()) {
                 let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
                 let boxset_id = format!("boxset_{:x}", hash);
-                let is_fav = if let Ok(count) = conn.query_row("SELECT COUNT(1) FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", [req_user_id, &item_id.to_string()], |r| r.get::<_, i64>(0)) { count > 0 } else { false };
+                let is_fav = if let Ok(count) = conn.query_row("SELECT COUNT(1) FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", rusqlite::params![req_user_id, &item_id.to_string()], |r| r.get::<_, i64>(0)) { count > 0 } else { false };
                 boxsets.push(json!({ "Name": name, "Id": boxset_id, "ServerId": "rust-em-server", "Type": "BoxSet", "IsFolder": true, "MediaType": "Video", "ImageTags": {"Primary": format!("{}_cover", boxset_id)}, "BackdropImageTags": [], "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": is_fav, "Played": false } }));
             }
             return Json(json!({ "Items": boxsets, "TotalRecordCount": boxsets.len() })).into_response();
@@ -1145,7 +1145,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
                         let hash_hex = format!("{:x}", hash);
                         let boxset_id = format!("boxset_{}", hash_hex);
                         
-                        let is_fav = if let Ok(count) = conn.query_row("SELECT COUNT(1) FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", [req_user_id, &boxset_id], |r| r.get::<_, i64>(0)) { count > 0 } else { false };
+                        let is_fav = if let Ok(count) = conn.query_row("SELECT COUNT(1) FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", rusqlite::params![req_user_id, &boxset_id], |r| r.get::<_, i64>(0)) { count > 0 } else { false };
                         
                         if is_fav_query && !is_fav {
                             continue;
@@ -1490,7 +1490,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
         }
         if found_set_name.is_empty() { return StatusCode::NOT_FOUND.into_response(); }
         
-        let is_fav = if let Ok(count) = conn.query_row("SELECT COUNT(1) FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", [req_user_id, &item_id], |r| r.get::<_, i64>(0)) { count > 0 } else { false };
+        let is_fav = if let Ok(count) = conn.query_row("SELECT COUNT(1) FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", rusqlite::params![req_user_id, &item_id], |r| r.get::<_, i64>(0)) { count > 0 } else { false };
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE (set_name = ?1 OR set_name LIKE ?2 OR set_name LIKE ?3 OR set_name LIKE ?4)", [&found_set_name, &format!("{} / %", found_set_name), &format!("% / {}", found_set_name), &format!("% / {} / %", found_set_name)], |r| r.get(0)).unwrap_or(0);
         return Json(json!({ "Name": found_set_name, "Id": item_id, "ServerId": "rust-em-server", "Type": "BoxSet", "IsFolder": true, "MediaType": "Video", "ChildCount": count, "RecursiveItemCount": count, "ImageTags": {"Primary": format!("{}_cover", item_id)}, "BackdropImageTags": [], "Overview": "合集", "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": is_fav, "Played": false } })).into_response();
     }
@@ -1664,7 +1664,7 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
                 for entry in entries.flatten() {
                     let fname = entry.file_name().to_string_lossy().to_string();
                     if fname.starts_with(&match_prefix) && fname.ends_with(".jpg") {
-                        if let Ok(mut bytes) = tokio::fs::read(entry.path()).await {
+                        if let Ok(bytes) = tokio::fs::read(entry.path()).await {
                             return (StatusCode::OK, [(CONTENT_TYPE, "image/jpeg")], bytes).into_response();
                         }
                     }
@@ -1917,7 +1917,7 @@ pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, E
                 let conn = pool.lock().unwrap();
                 
                 let mut runtime_mins: i32 = conn.query_row("SELECT runtime FROM items WHERE id = ?1", [item_id], |r| r.get(0)).unwrap_or(0);
-                let current_ticks: i64 = conn.query_row("SELECT playback_position_ticks FROM user_data WHERE user_id = ?1 AND item_id = ?2", rusqlite::params![req_user_id, item_id.to_string()], |r| r.get(0)).unwrap_or(0);
+                let _current_ticks: i64 = conn.query_row("SELECT playback_position_ticks FROM user_data WHERE user_id = ?1 AND item_id = ?2", rusqlite::params!rusqlite::params![req_user_id, item_id.to_string()], |r| r.get(0)).unwrap_or(0);
                 
                 if let Some(client_ticks) = val["RunTimeTicks"].as_i64() {
                     if client_ticks > 0 {
@@ -2372,9 +2372,9 @@ pub async fn emby_refresh_library(State(pool): State<Arc<Mutex<Connection>>>) ->
 pub async fn emby_mark_favorite(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     if item_id.starts_with("boxset_") {
-        let _ = conn.execute("INSERT OR IGNORE INTO boxset_favorites (user_id, boxset_id) VALUES (?1, ?2)", [req_user_id, &item_id]);
+        let _ = conn.execute("INSERT OR IGNORE INTO boxset_favorites (user_id, boxset_id) VALUES (?1, ?2)", rusqlite::params![req_user_id, &item_id]);
     } else if let Ok(_numeric_id) = item_id.parse::<i64>() {
-        let _ = conn.execute("INSERT INTO user_data (user_id, item_id, is_favorite) VALUES (?1, ?2, 1) ON CONFLICT(user_id, item_id) DO UPDATE SET is_favorite = 1", [req_user_id, &item_id]);
+        let _ = conn.execute("INSERT INTO user_data (user_id, item_id, is_favorite) VALUES (?1, ?2, 1) ON CONFLICT(user_id, item_id) DO UPDATE SET is_favorite = 1", rusqlite::params![req_user_id, &item_id]);
     }
     Json(json!({ "IsFavorite": true, "ItemId": item_id })).into_response()
 }
@@ -2382,9 +2382,9 @@ pub async fn emby_mark_favorite(State(pool): State<Arc<Mutex<Connection>>>, Axum
 pub async fn emby_unmark_favorite(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     if item_id.starts_with("boxset_") {
-        let _ = conn.execute("DELETE FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", [req_user_id, &item_id]);
+        let _ = conn.execute("DELETE FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", rusqlite::params![req_user_id, &item_id]);
     } else if let Ok(_numeric_id) = item_id.parse::<i64>() {
-        let _ = conn.execute("INSERT INTO user_data (user_id, item_id, is_favorite) VALUES (?1, ?2, 0) ON CONFLICT(user_id, item_id) DO UPDATE SET is_favorite = 0", [req_user_id, &item_id]);
+        let _ = conn.execute("INSERT INTO user_data (user_id, item_id, is_favorite) VALUES (?1, ?2, 0) ON CONFLICT(user_id, item_id) DO UPDATE SET is_favorite = 0", rusqlite::params![req_user_id, &item_id]);
     }
     Json(json!({ "IsFavorite": false, "ItemId": item_id })).into_response()
 }
