@@ -3,6 +3,8 @@ use image::{GenericImage, GenericImageView};
 use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 use std::path::PathBuf;
+use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use sha2::{Digest, Sha256};
 
 
@@ -18,6 +20,7 @@ fn sanitize_filename(name: &str) -> String {
     sanitized.trim().to_string()
 }
 
+
 pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
     let cache_dir = PathBuf::from("data/cache/covers");
     let _ = std::fs::create_dir_all(cache_dir.join("library"));
@@ -26,26 +29,49 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
     let _ = std::fs::create_dir_all(cache_dir.join("boxset"));
 
     let conn = match pool.lock() { Ok(c) => c, Err(_) => return };
-    println!("🎨 [COVERS] 开始生成媒体库封面...");
-    // 1. 生成媒体库封面 (16:9)
+    let mut valid_files = HashSet::new();
+
+    // 辅助函数：检查是否需要重新生成
+    let need_render = |paths: &[String], out_path: &std::path::Path| -> bool {
+        if !out_path.exists() { return true; }
+        let hash_path = out_path.with_extension("hash");
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for p in paths { p.hash(&mut hasher); }
+        let current_hash = format!("{:x}", hasher.finish());
+        
+        if let Ok(old_hash) = std::fs::read_to_string(&hash_path) {
+            if old_hash == current_hash { return false; }
+        }
+        let _ = std::fs::write(&hash_path, &current_hash);
+        true
+    };
+
+    // 1. 生成媒体库封面
+    println!("🎨 [COVERS] 检查媒体库封面...");
     if let Ok(mut stmt) = conn.prepare("SELECT id FROM libraries") {
         if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, i64>(0)) {
             for id in mapped.flatten() {
                 let paths: Vec<String> = {
-                    let mut p_stmt = conn.prepare("SELECT poster_path FROM items WHERE library_id = ?1 AND poster_path != '' AND poster_path NOT LIKE 'http%' ORDER BY RANDOM() LIMIT 4").unwrap();
+                    let mut p_stmt = conn.prepare("SELECT poster_path FROM items WHERE library_id = ?1 AND poster_path != '' AND poster_path NOT LIKE 'http%' ORDER BY id DESC LIMIT 4").unwrap();
                     p_stmt.query_map([id], |r| r.get::<_, String>(0)).unwrap().filter_map(Result::ok).collect()
                 };
                 if !paths.is_empty() {
                     let out_path = cache_dir.join("library").join(format!("lib_{}.jpg", id));
-                    generate_landscape_cover(&paths, &out_path);
+                    let hash_path = out_path.with_extension("hash");
+                    valid_files.insert(out_path.to_string_lossy().to_string());
+                    valid_files.insert(hash_path.to_string_lossy().to_string());
+                    if need_render(&paths, &out_path) {
+                        println!("  -> 重新生成 lib_{}", id);
+                        generate_landscape_cover(&paths, &out_path);
+                    }
                 }
             }
         }
     }
 
-    println!("🎨 [COVERS] 开始生成类型封面...");
-    // 2. 生成类型封面 (2:3)
-    let mut all_genres = std::collections::HashSet::new();
+    // 2. 生成类型封面
+    println!("🎨 [COVERS] 检查类型封面...");
+    let mut all_genres = HashSet::new();
     if let Ok(mut stmt) = conn.prepare("SELECT genres FROM items WHERE genres != ''") {
         if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
             for g_str in mapped.flatten() {
@@ -54,20 +80,26 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
         }
     }
     for genre in all_genres {
+        let like = format!("%{}%", genre);
         let paths: Vec<String> = {
-            let like = format!("%{}%", genre);
-            let mut p_stmt = conn.prepare("SELECT poster_path FROM items WHERE genres LIKE ?1 AND poster_path != '' AND poster_path NOT LIKE 'http%' ORDER BY RANDOM() LIMIT 4").unwrap();
+            let mut p_stmt = conn.prepare("SELECT poster_path FROM items WHERE genres LIKE ?1 AND poster_path != '' AND poster_path NOT LIKE 'http%' ORDER BY id DESC LIMIT 4").unwrap();
             p_stmt.query_map([&like], |r| r.get::<_, String>(0)).unwrap().filter_map(Result::ok).collect()
         };
         if !paths.is_empty() {
-            let out_path = cache_dir.join("genre").join(format!("genre_{}.jpg", genre));
-            generate_portrait_cover(&paths, &out_path);
+            let out_path = cache_dir.join("genre").join(format!("genre_{}.jpg", sanitize_filename(&genre)));
+            let hash_path = out_path.with_extension("hash");
+            valid_files.insert(out_path.to_string_lossy().to_string());
+            valid_files.insert(hash_path.to_string_lossy().to_string());
+            if need_render(&paths, &out_path) {
+                println!("  -> 重新生成 genre_{}", genre);
+                generate_portrait_cover(&paths, &out_path);
+            }
         }
     }
 
-    println!("🎨 [COVERS] 开始生成标签封面...");
-    // 3. 生成标签封面 (2:3)
-    let mut all_tags = std::collections::HashSet::new();
+    // 3. 生成标签封面
+    println!("🎨 [COVERS] 检查标签封面...");
+    let mut all_tags = HashSet::new();
     if let Ok(mut stmt) = conn.prepare("SELECT tags FROM items WHERE tags != ''") {
         if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
             for t_str in mapped.flatten() {
@@ -76,20 +108,26 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
         }
     }
     for tag in all_tags {
+        let like = format!("%{}%", tag);
         let paths: Vec<String> = {
-            let like = format!("%{}%", tag);
-            let mut p_stmt = conn.prepare("SELECT poster_path FROM items WHERE tags LIKE ?1 AND poster_path != '' AND poster_path NOT LIKE 'http%' ORDER BY RANDOM() LIMIT 4").unwrap();
+            let mut p_stmt = conn.prepare("SELECT poster_path FROM items WHERE tags LIKE ?1 AND poster_path != '' AND poster_path NOT LIKE 'http%' ORDER BY id DESC LIMIT 4").unwrap();
             p_stmt.query_map([&like], |r| r.get::<_, String>(0)).unwrap().filter_map(Result::ok).collect()
         };
         if !paths.is_empty() {
-            let out_path = cache_dir.join("tag").join(format!("tag_{}.jpg", tag));
-            generate_portrait_cover(&paths, &out_path);
+            let out_path = cache_dir.join("tag").join(format!("tag_{}.jpg", sanitize_filename(&tag)));
+            let hash_path = out_path.with_extension("hash");
+            valid_files.insert(out_path.to_string_lossy().to_string());
+            valid_files.insert(hash_path.to_string_lossy().to_string());
+            if need_render(&paths, &out_path) {
+                println!("  -> 重新生成 tag_{}", tag);
+                generate_portrait_cover(&paths, &out_path);
+            }
         }
     }
 
-    // 4. 生成合集封面 (2:3)
-    println!("🎨 [COVERS] 开始生成合集封面...");
-    let mut all_boxsets = std::collections::HashSet::new();
+    // 4. 生成合集封面
+    println!("🎨 [COVERS] 检查合集封面...");
+    let mut all_boxsets = HashSet::new();
     if let Ok(mut stmt) = conn.prepare("SELECT set_name FROM items WHERE set_name != ''") {
         if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
             for b_str in mapped.flatten() {
@@ -98,27 +136,46 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
         }
     }
     for boxset in all_boxsets {
+        let like = format!("%{}%", boxset);
         let paths: Vec<String> = {
-            let like = format!("%{}%", boxset);
-            let mut p_stmt = conn.prepare("SELECT poster_path FROM items WHERE set_name LIKE ?1 AND poster_path != '' AND poster_path NOT LIKE 'http%' ORDER BY RANDOM() LIMIT 4").unwrap();
+            let mut p_stmt = conn.prepare("SELECT poster_path FROM items WHERE set_name LIKE ?1 AND poster_path != '' AND poster_path NOT LIKE 'http%' ORDER BY id DESC LIMIT 4").unwrap();
             p_stmt.query_map([&like], |r| r.get::<_, String>(0)).unwrap().filter_map(Result::ok).collect()
         };
         if !paths.is_empty() {
             let mut h = Sha256::new(); h.update(boxset.as_bytes()); let hash = h.finalize();
             let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
             let out_path = cache_dir.join("boxset").join(format!("boxset_{}_{}.jpg", hash_hex, sanitize_filename(&boxset)));
-            generate_portrait_cover(&paths, &out_path);
+            let hash_path = out_path.with_extension("hash");
+            valid_files.insert(out_path.to_string_lossy().to_string());
+            valid_files.insert(hash_path.to_string_lossy().to_string());
+            if need_render(&paths, &out_path) {
+                println!("  -> 重新生成 boxset_{}", boxset);
+                generate_portrait_cover(&paths, &out_path);
+            }
         }
     }
 
-    println!("✅ [COVERS] 封面生成完毕。");
+    // 5. 清理幽灵文件
+    println!("🧹 [COVERS] 清理废弃的封面...");
+    let mut removed = 0;
+    for folder in &["library", "genre", "tag", "boxset"] {
+        let dir = cache_dir.join(folder);
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let path_str = path.to_string_lossy().to_string();
+                    if !valid_files.contains(&path_str) {
+                        let _ = std::fs::remove_file(&path);
+                        removed += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    println!("✅ [COVERS] 封面生成完毕。本次共清理 {} 个废弃文件。", removed);
 }
-
-
-
-
-
-
 
 fn generate_landscape_cover(paths: &[String], out_path: &std::path::Path) {
     let mut canvas = image::RgbImage::new(800, 450);
