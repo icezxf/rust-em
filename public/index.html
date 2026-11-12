@@ -732,10 +732,36 @@
         }
 
         async function updateUser() {
-            const oldPwd = document.getElementById('old-pwd').value; const newUser = document.getElementById('new-user').value; const newPwd = document.getElementById('new-pwd').value;
+            const oldPwd = document.getElementById('old-pwd').value; 
+            const newUser = document.getElementById('new-user').value; 
+            const newPwd = document.getElementById('new-pwd').value;
             if (!oldPwd || !newUser || !newPwd) return alert('请填写完整所有选项');
-            const res = await api('/api/user/update', 'POST', { old_password: oldPwd, new_username: newUser, new_password: newPwd });
-            if (res && res.status === 'success') { alert('账号修改成功！请重新登录'); logout(); } else if (res && res.error) alert(res.error);
+            
+            try {
+                const res = await fetch('/api/user/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ old_password: oldPwd, new_username: newUser, new_password: newPwd })
+                });
+                
+                if (res.ok) {
+                    alert('账号修改成功！请使用新账号重新登录');
+                    localStorage.removeItem('token');
+                    location.reload();
+                } else if (res.status === 400) {
+                    const err = await res.json();
+                    alert('修改失败: ' + (err.error || '旧密码错误'));
+                } else if (res.status === 401) {
+                    alert('您的登录凭证已失效（可能是因为后端服务刚重启过）。
+请重新登录后再尝试修改。');
+                    localStorage.removeItem('token');
+                    location.reload();
+                } else {
+                    alert('修改失败，HTTP状态码: ' + res.status);
+                }
+            } catch (e) {
+                alert('网络请求异常: ' + e.message);
+            }
         }
 
         async function loadSettings() {
