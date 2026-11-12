@@ -982,7 +982,8 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
                     for s in mapped.flatten() { for name in s.split(" / ").filter(|s| !s.trim().is_empty()) { set_names.insert(name.to_string()); } }
                     for name in set_names {
                         let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
-                        boxsets.push(json!({ "Name": name, "Id": format!("boxset_{:x}", hash), "ServerId": "rust-em-server", "Type": "BoxSet", "IsFolder": true, "MediaType": "Video", "ImageTags": {"Primary": "tag_boxset"}, "BackdropImageTags": [], "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false } }));
+                        let boxset_id = format!("boxset_{:x}", hash);
+                        boxsets.push(json!({ "Name": name, "Id": boxset_id, "ServerId": "rust-em-server", "Type": "BoxSet", "IsFolder": true, "MediaType": "Video", "ImageTags": {"Primary": format!("{}_cover", boxset_id)}, "BackdropImageTags": [], "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false } }));
                     }
                 }
             }
@@ -1489,12 +1490,14 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
         return (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response();
     }
 
-    if item_id.starts_with("lib_") || item_id.starts_with("genre_") || item_id.starts_with("tag_") {
+    if item_id.starts_with("lib_") || item_id.starts_with("genre_") || item_id.starts_with("tag_") || item_id.starts_with("boxset_") {
         let clean_id = item_id.replace("_cover", "");
         let (folder, prefix) = if clean_id.starts_with("lib_") {
             ("library", "lib")
         } else if clean_id.starts_with("genre_") {
             ("genre", "genre")
+        } else if clean_id.starts_with("boxset_") {
+            ("boxset", "boxset")
         } else {
             ("tag", "tag")
         };
@@ -1505,7 +1508,9 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
                 return (StatusCode::OK, [(CONTENT_TYPE, "image/jpeg")], bytes).into_response();
             }
         }
-        return StatusCode::NOT_FOUND.into_response();
+        if !item_id.starts_with("boxset_") {
+            return StatusCode::NOT_FOUND.into_response();
+        }
     }
 
     let path_opt = {

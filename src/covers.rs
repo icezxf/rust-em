@@ -3,12 +3,14 @@ use image::{GenericImage, GenericImageView};
 use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 use std::path::PathBuf;
+use sha2::{Digest, Sha256};
 
 pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
     let cache_dir = PathBuf::from("data/cache/covers");
     let _ = std::fs::create_dir_all(cache_dir.join("library"));
     let _ = std::fs::create_dir_all(cache_dir.join("genre"));
     let _ = std::fs::create_dir_all(cache_dir.join("tag"));
+    let _ = std::fs::create_dir_all(cache_dir.join("boxset"));
 
     let conn = match pool.lock() { Ok(c) => c, Err(_) => return };
     println!("🎨 [COVERS] 开始生成媒体库封面...");
@@ -71,6 +73,31 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
             generate_portrait_cover(&paths, &out_path);
         }
     }
+
+    // 4. 生成合集封面 (2:3)
+    println!("🎨 [COVERS] 开始生成合集封面...");
+    let mut all_boxsets = std::collections::HashSet::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT set_name FROM items WHERE set_name != ''") {
+        if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+            for b_str in mapped.flatten() {
+                for b in b_str.split(" / ") { if !b.trim().is_empty() { all_boxsets.insert(b.trim().to_string()); } }
+            }
+        }
+    }
+    for boxset in all_boxsets {
+        let paths: Vec<String> = {
+            let like = format!("%{}%", boxset);
+            let mut p_stmt = conn.prepare("SELECT poster_path FROM items WHERE set_name LIKE ?1 AND poster_path != '' AND poster_path NOT LIKE 'http%' ORDER BY RANDOM() LIMIT 4").unwrap();
+            p_stmt.query_map([&like], |r| r.get::<_, String>(0)).unwrap().filter_map(Result::ok).collect()
+        };
+        if !paths.is_empty() {
+            let mut h = Sha256::new(); h.update(boxset.as_bytes()); let hash = h.finalize();
+            let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+            let out_path = cache_dir.join("boxset").join(format!("boxset_{}.jpg", hash_hex));
+            generate_portrait_cover(&paths, &out_path);
+        }
+    }
+
     println!("✅ [COVERS] 封面生成完毕。");
 }
 
