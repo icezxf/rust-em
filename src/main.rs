@@ -65,6 +65,15 @@ async fn main() {
         [],
     );
     
+    // 💡 自动补全历史播放时间：如果 user_data 里没记录时间，但以前播过，就用 items.updated_at 填上
+    let _ = conn.execute(
+        "UPDATE user_data 
+         SET last_played_date = (SELECT CAST(updated_at AS TEXT) FROM items WHERE CAST(items.id AS TEXT) = user_data.item_id)
+         WHERE (last_played_date IS NULL OR last_played_date = '') 
+         AND (play_count > 0 OR playback_position_ticks > 0)",
+        [],
+    );
+    
     println!("✅ [DB] 用户数据表已检查/创建完成");
 
     let state = Arc::new(Mutex::new(conn));
