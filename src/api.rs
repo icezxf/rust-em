@@ -1879,7 +1879,7 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
         let cache_lock = cache.lock().unwrap(); 
         if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) { 
             if Instant::now() < *expire_at { 
-                let url_preview: String = cached_url.chars().take(60).collect();
+                let url_preview: String = cached_url.chars().take(30).collect();
                 println!("⚡ [CACHE] 秒开播放 (ID: {}, 片名: {}) -> {}", item_id, item_title, url_preview);
                 return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); 
             } 
@@ -1904,7 +1904,7 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
 
     { let mut cache_lock = cache.lock().unwrap(); cache_lock.insert(cache_key, (final_url.clone(), Instant::now() + Duration::from_secs(300))); }
     
-    let url_preview: String = final_url.chars().take(60).collect();
+    let url_preview: String = final_url.chars().take(30).collect();
     println!("▶️ [PLAY] 重新解析直链并返回 302 (ID: {}, 片名: {}) -> {}", item_id, item_title, url_preview);
     
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
