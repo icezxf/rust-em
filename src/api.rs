@@ -1856,7 +1856,7 @@ pub async fn emby_sessions() -> impl IntoResponse { Json(json!([])) }
 pub async fn emby_playing() -> impl IntoResponse { StatusCode::OK.into_response() }
 pub async fn emby_playing_stopped() -> impl IntoResponse { StatusCode::OK.into_response() }
 
-pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, body: Bytes, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
+pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, Extension(req_user_id): Extension<i64>, body: Bytes) -> impl IntoResponse {
     if let Ok(val) = serde_json::from_slice::<Value>(&body) {
         let item_id_str = val["ItemId"].as_str().map(|s| s.to_string()).or_else(|| val["ItemId"].as_i64().map(|i| i.to_string()));
         if let Some(item_id_str) = item_id_str {
@@ -1866,7 +1866,7 @@ pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, b
                 let conn = pool.lock().unwrap();
                 
                 let mut runtime_mins: i32 = conn.query_row("SELECT runtime FROM items WHERE id = ?1", [item_id], |r| r.get(0)).unwrap_or(0);
-                let current_ticks: i64 = conn.query_row("SELECT playback_position_ticks FROM user_data WHERE user_id = ?1 AND item_id = ?2", [req_user_id, &item_id.to_string()], |r| r.get(0)).unwrap_or(0);
+                let current_ticks: i64 = conn.query_row("SELECT playback_position_ticks FROM user_data WHERE user_id = ?1 AND item_id = ?2", rusqlite::params![req_user_id, item_id.to_string()], |r| r.get(0)).unwrap_or(0);
                 
                 if let Some(client_ticks) = val["RunTimeTicks"].as_i64() {
                     if client_ticks > 0 {
@@ -1898,9 +1898,9 @@ pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, b
                 
                 let total_ticks = (runtime_mins as i64) * 60 * 10_000_000;
                 if total_ticks > 0 && ticks > (total_ticks * 90 / 100) {
-                    let _ = conn.execute("INSERT INTO user_data (user_id, item_id, play_count, playback_position_ticks, last_played_date) VALUES (?1, ?2, 1, 0, ?3) ON CONFLICT(user_id, item_id) DO UPDATE SET play_count = play_count + 1, playback_position_ticks = 0, last_played_date = excluded.last_played_date", rusqlite::params![req_user_id, &item_id.to_string(), now.to_string()]);
+                    let _ = conn.execute("INSERT INTO user_data (user_id, item_id, play_count, playback_position_ticks, last_played_date) VALUES (?1, ?2, 1, 0, ?3) ON CONFLICT(user_id, item_id) DO UPDATE SET play_count = play_count + 1, playback_position_ticks = 0, last_played_date = excluded.last_played_date", rusqlite::params!rusqlite::params![req_user_id, item_id.to_string(), now.to_string()]);
                 } else if ticks > 10_000_000 || (ticks == 0 && current_ticks == 0) {
-                    let _ = conn.execute("INSERT INTO user_data (user_id, item_id, playback_position_ticks, last_played_date) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(user_id, item_id) DO UPDATE SET playback_position_ticks = excluded.playback_position_ticks, last_played_date = excluded.last_played_date", rusqlite::params![req_user_id, &item_id.to_string(), ticks, now.to_string()]);
+                    let _ = conn.execute("INSERT INTO user_data (user_id, item_id, playback_position_ticks, last_played_date) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(user_id, item_id) DO UPDATE SET playback_position_ticks = excluded.playback_position_ticks, last_played_date = excluded.last_played_date", rusqlite::params!rusqlite::params![req_user_id, item_id.to_string(), ticks, now.to_string()]);
                 }
             }
         }
