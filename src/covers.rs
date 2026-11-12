@@ -17,7 +17,7 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
         if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, i64>(0)) {
             for id in mapped.flatten() {
                 let paths: Vec<String> = {
-                    let mut p_stmt = conn.prepare("SELECT poster_path FROM items WHERE library_id = ?1 AND poster_path != '' AND poster_path NOT LIKE 'http%' ORDER BY RANDOM() LIMIT 4").unwrap();
+                    let mut p_stmt = conn.prepare("SELECT poster_path FROM items WHERE library_id = ?1 AND poster_path != '' AND poster_path NOT LIKE 'http%' ORDER BY RANDOM() LIMIT 9").unwrap();
                     p_stmt.query_map([id], |r| r.get::<_, String>(0)).unwrap().filter_map(Result::ok).collect()
                 };
                 if !paths.is_empty() {
@@ -41,7 +41,7 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
     for genre in all_genres {
         let paths: Vec<String> = {
             let like = format!("%{}%", genre);
-            let mut p_stmt = conn.prepare("SELECT poster_path FROM items WHERE genres LIKE ?1 AND poster_path != '' AND poster_path NOT LIKE 'http%' ORDER BY RANDOM() LIMIT 4").unwrap();
+            let mut p_stmt = conn.prepare("SELECT poster_path FROM items WHERE genres LIKE ?1 AND poster_path != '' AND poster_path NOT LIKE 'http%' ORDER BY RANDOM() LIMIT 9").unwrap();
             p_stmt.query_map([&like], |r| r.get::<_, String>(0)).unwrap().filter_map(Result::ok).collect()
         };
         if !paths.is_empty() {
@@ -63,7 +63,7 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
     for tag in all_tags {
         let paths: Vec<String> = {
             let like = format!("%{}%", tag);
-            let mut p_stmt = conn.prepare("SELECT poster_path FROM items WHERE tags LIKE ?1 AND poster_path != '' AND poster_path NOT LIKE 'http%' ORDER BY RANDOM() LIMIT 4").unwrap();
+            let mut p_stmt = conn.prepare("SELECT poster_path FROM items WHERE tags LIKE ?1 AND poster_path != '' AND poster_path NOT LIKE 'http%' ORDER BY RANDOM() LIMIT 9").unwrap();
             p_stmt.query_map([&like], |r| r.get::<_, String>(0)).unwrap().filter_map(Result::ok).collect()
         };
         if !paths.is_empty() {
@@ -75,28 +75,28 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
 }
 
 
+
 fn generate_landscape_cover(paths: &[String], out_path: &std::path::Path) {
     let mut canvas = image::RgbImage::new(800, 450);
-    let count = paths.len().min(4);
+    let count = paths.len();
 
-    match count {
-        0 => {}
-        1 => { draw_to_region(&mut canvas, &paths[0], 0, 0, 800, 450); }
-        2 => {
-            draw_to_region(&mut canvas, &paths[0], 0, 0, 400, 450);
-            draw_to_region(&mut canvas, &paths[1], 400, 0, 400, 450);
-        }
-        3 => {
-            draw_to_region(&mut canvas, &paths[0], 0, 0, 400, 450);
-            draw_to_region(&mut canvas, &paths[1], 400, 0, 400, 225);
-            draw_to_region(&mut canvas, &paths[2], 400, 225, 400, 225);
-        }
-        _ => {
-            draw_to_region(&mut canvas, &paths[0], 0, 0, 400, 225);
-            draw_to_region(&mut canvas, &paths[1], 400, 0, 400, 225);
-            draw_to_region(&mut canvas, &paths[2], 0, 225, 400, 225);
-            draw_to_region(&mut canvas, &paths[3], 400, 225, 400, 225);
-        }
+    if count == 0 { return; }
+    if count == 1 {
+        draw_to_region(&mut canvas, &paths[0], 0, 0, 800, 450);
+        if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
+        return;
+    }
+
+    // 横版 3x3 网格，类似你截图右上角的密集拼接
+    let grid_size = 3;
+    let cell_w = 800 / grid_size;
+    let cell_h = 450 / grid_size;
+    
+    for i in 0..9 {
+        if i >= count { break; }
+        let row = i / grid_size;
+        let col = i % grid_size;
+        draw_to_region(&mut canvas, &paths[i], col * cell_w, row * cell_h, cell_w, cell_h);
     }
     if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
 }
@@ -127,23 +127,28 @@ fn generate_portrait_cover(paths: &[String], out_path: &std::path::Path) {
     if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
 }
 
+// 核心：不裁剪，背景模糊填充，前景完整显示
 fn draw_to_region(canvas: &mut image::RgbImage, path: &str, x: u32, y: u32, w: u32, h: u32) {
     if let Ok(img) = image::open(path) {
         let (img_w, img_h) = img.dimensions();
         let target_ratio = w as f64 / h as f64;
         let img_ratio = img_w as f64 / img_h as f64;
 
-        // 居中裁剪并填满
-        let (crop_w, crop_h) = if img_ratio > target_ratio {
-            ((h as f64 * img_ratio) as u32, img_h)
-        } else {
-            (img_w, (img_w as f64 / target_ratio) as u32)
-        };
-        let crop_x = (img_w - crop_w) / 2;
-        let crop_y = (img_h - crop_h) / 2;
+        // 1. 画背景（强行拉伸铺满，并高斯模糊）
+        let bg = img.resize_exact(w, h, image::imageops::FilterType::Gaussian).blur(15.0);
+        let _ = canvas.copy_from(&bg.to_rgb8(), x, y);
 
-        // 使用 Lanczos3 提升缩放清晰度
-        let thumb = img.crop_imm(crop_x, crop_y, crop_w, crop_h).resize_exact(w, h, image::imageops::FilterType::Lanczos3);
-        let _ = canvas.copy_from(&thumb.to_rgb8(), x, y);
+        // 2. 计算完整缩放后的尺寸 (Contain)
+        let (new_w, new_h) = if img_ratio > target_ratio {
+            (w, (w as f64 / img_ratio) as u32) // 宽贴边，高留空
+        } else {
+            ((h as f64 * img_ratio) as u32, h) // 高贴边，宽留空
+        };
+
+        // 3. 画前景
+        let thumb = img.resize_exact(new_w, new_h, image::imageops::FilterType::Lanczos3);
+        let offset_x = x + (w - new_w) / 2;
+        let offset_y = y + (h - new_h) / 2;
+        let _ = canvas.copy_from(&thumb.to_rgb8(), offset_x, offset_y);
     }
 }
