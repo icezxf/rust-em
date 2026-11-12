@@ -1771,10 +1771,16 @@ pub async fn emby_playback_info(
         }))
         .unwrap_or_default();
     
-    let (parts_json_opt, runtime, media_streams_json, size) = {
+    let (parts_json_opt, runtime, media_streams_json, size, item_title) = {
         let conn = pool.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT parts, runtime, media_streams, size FROM items WHERE id = ?1").unwrap();
-        stmt.query_row([item_id], |row| Ok((row.get::<_, String>(0).ok(), row.get::<_, i32>(1).unwrap_or(0), row.get::<_, String>(2).unwrap_or_else(|_| "[]".to_string()), row.get::<_, i64>(3).unwrap_or(0)))).unwrap_or((None, 0, "[]".to_string(), 0))
+        let mut stmt = conn.prepare("SELECT parts, runtime, media_streams, size, title FROM items WHERE id = ?1").unwrap();
+        stmt.query_row([item_id], |row| Ok((
+            row.get::<_, String>(0).ok(), 
+            row.get::<_, i32>(1).unwrap_or(0), 
+            row.get::<_, String>(2).unwrap_or_else(|_| "[]".to_string()), 
+            row.get::<_, i64>(3).unwrap_or(0),
+            row.get::<_, String>(4).unwrap_or_else(|_| "未知影片".to_string())
+        ))).unwrap_or((None, 0, "[]".to_string(), 0, "未知影片".to_string()))
     };
     let parts: Vec<String> = parts_json_opt.and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default();
     let mut exts: Vec<String> = Vec::new();
@@ -1807,6 +1813,7 @@ pub async fn emby_playback_info(
         };
         if needs_prefetch && !parts.is_empty() {
             let path = parts[0].clone(); let ua_clone = ua.clone();
+            let title_clone = item_title.clone();
             let client = GLOBAL_CLIENT.get_or_init(|| reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(15)).build().unwrap()).clone();
             tokio::spawn(async move {
                 if let Ok(content) = tokio::fs::read_to_string(&path).await {
@@ -1816,7 +1823,7 @@ pub async fn emby_playback_info(
                             let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
                             let mut lock = cache.lock().unwrap();
                             lock.insert(cache_key, (final_url, Instant::now() + Duration::from_secs(300)));
-                            println!("🔥 [PREFETCH] 成功预热直链 (ID: {})", item_id);
+                            println!("🔥 [PREFETCH] 成功预热直链 (ID: {}, 片名: {})", item_id, title_clone);
                         }
                     }
                 }
@@ -1852,18 +1859,6 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
         msid.split('_').last().and_then(|s| s.replace("cd", "").parse::<usize>().ok()).unwrap_or(0)
     } else { 0 };
 
-    let cache_key = format!("{}|{}|{}|{}", item_id, part_idx, ip, ua);
-    let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    { 
-        let cache_lock = cache.lock().unwrap(); 
-        if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) { 
-            if Instant::now() < *expire_at { 
-                println!("⚡ [CACHE] 命中预热缓存，秒开播放！(ID: {})", item_id);
-                return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); 
-            } 
-        }
-    }
-
     let (strm_path_opt, item_title) = {
         let conn = pool.lock().unwrap();
         let mut stmt = conn.prepare("SELECT parts, title FROM items WHERE id = ?1").unwrap();
@@ -1876,6 +1871,18 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
             _ => (None, "未知影片".to_string())
         }
     };
+
+    let cache_key = format!("{}|{}|{}|{}", item_id, part_idx, ip, ua);
+    let cache = STRM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    { 
+        let cache_lock = cache.lock().unwrap(); 
+        if let Some((cached_url, expire_at)) = cache_lock.get(&cache_key) { 
+            if Instant::now() < *expire_at { 
+                println!("⚡ [CACHE] 命中预热缓存，秒开播放！(ID: {}, 片名: {})", item_id, item_title);
+                return (StatusCode::FOUND, [(LOCATION, cached_url.clone())], "").into_response(); 
+            } 
+        }
+    }
     
     let Some(strm_path) = strm_path_opt else { return StatusCode::NOT_FOUND.into_response() };
     println!("🎬 [PLAY] 收到播放请求: 《{}》 (ID: {})", item_title, item_id);
