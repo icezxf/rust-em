@@ -162,26 +162,30 @@ fn generate_portrait_cover(paths: &[String], out_path: &std::path::Path) {
     if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
 }
 
-// 核心逻辑：完整等比缩放（Contain），绝不裁剪；背景使用原图模糊垫底防黑边
+
 fn draw_to_region(canvas: &mut image::RgbImage, path: &str, x: u32, y: u32, w: u32, h: u32) {
     if let Ok(img) = image::open(path) {
         let (img_w, img_h) = img.dimensions();
         let target_ratio = w as f64 / h as f64;
         let img_ratio = img_w as f64 / img_h as f64;
 
-        // 1. 背景：原图拉伸并高斯模糊
-        let bg = img.resize_exact(w, h, image::imageops::FilterType::Gaussian).blur(20.0);
+        // 【性能暴增 1】：背景不原图模糊，先缩小到 1/8，模糊后再拉伸，肉眼完全看不出区别
+        let small_w = (w / 8).max(1);
+        let small_h = (h / 8).max(1);
+        let bg = img.resize_exact(small_w, small_h, image::imageops::FilterType::Nearest)
+                     .blur(3.0)
+                     .resize_exact(w, h, image::imageops::FilterType::Triangle);
         let _ = canvas.copy_from(&bg.to_rgb8(), x, y);
 
-        // 2. 前景：等比缩放
+        // 计算等比缩放尺寸
         let (new_w, new_h) = if img_ratio > target_ratio {
             (w, (w as f64 / img_ratio) as u32)
         } else {
             ((h as f64 * img_ratio) as u32, h)
         };
 
-        // 3. 居中贴图
-        let thumb = img.resize_exact(new_w, new_h, image::imageops::FilterType::Lanczos3);
+        // 【性能暴增 2】：放弃 Lanczos3，改用 CatmullRom（画质依然极佳，但速度快好几倍）
+        let thumb = img.resize_exact(new_w, new_h, image::imageops::FilterType::CatmullRom);
         let offset_x = x + (w.saturating_sub(new_w)) / 2;
         let offset_y = y + (h.saturating_sub(new_h)) / 2;
         let _ = canvas.copy_from(&thumb.to_rgb8(), offset_x, offset_y);
