@@ -733,7 +733,7 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
     let mut stmt = conn.prepare("SELECT id, name, type FROM libraries").unwrap();
     let items: Vec<Value> = stmt.query_map([], |row| {
         let id: i64 = row.get(0).unwrap_or_default(); let name: String = row.get(1).unwrap_or_default(); let lib_type: String = row.get(2).unwrap_or_default();
-        Ok(json!({ "Name": name, "Id": format!("lib_{}", id), "ServerId": "rust-em-server", "Type": "CollectionFolder", "IsFolder": true, "MediaType": "Video", "CollectionType": if lib_type == "movies" { "movies" } else { "tvshows" }, "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false } }))
+        Ok(json!({ "Name": name, "Id": format!("lib_{}", id), "ServerId": "rust-em-server", "Type": "CollectionFolder", "IsFolder": true, "MediaType": "Video", "CollectionType": if lib_type == "movies" { "movies" } else { "tvshows" }, "ImageTags": {"Primary": format!("lib_{}_cover", id)}, "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false } }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
@@ -912,7 +912,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
             let mut names: Vec<String> = set.into_iter().collect();
             names.sort();
             let items: Vec<Value> = names.into_iter().map(|name| {
-                json!({ "Name": name, "Id": name, "ServerId": "rust-em-server", "Type": "Tag", "IsFolder": false, "MediaType": "Video", "PrimaryImageAspectRatio": 0.6666666666666666, "ImageTags": {}, "BackdropImageTags": [], "ImageBlurHashes": {}, "LocationType": "FileSystem", "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 } })
+                json!({ "Name": name, "Id": name, "ServerId": "rust-em-server", "Type": "Tag", "IsFolder": false, "MediaType": "Video", "PrimaryImageAspectRatio": 0.6666666666666666, "ImageTags": {"Primary": format!("tag_{}_cover", name)}, "BackdropImageTags": [], "ImageBlurHashes": {}, "LocationType": "FileSystem", "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 } })
             }).collect();
             return Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response();
         }
@@ -931,7 +931,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery) -
             let mut names: Vec<String> = set.into_iter().collect();
             names.sort();
             let items: Vec<Value> = names.into_iter().map(|name| {
-                json!({ "Name": name, "Id": format!("genre_{}", name), "ServerId": "rust-em-server", "Type": "Genre", "IsFolder": false, "MediaType": "Video", "PrimaryImageAspectRatio": 0.6666666666666666, "ImageTags": {}, "BackdropImageTags": [], "ImageBlurHashes": {}, "LocationType": "FileSystem", "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 } })
+                json!({ "Name": name, "Id": format!("genre_{}", name), "ServerId": "rust-em-server", "Type": "Genre", "IsFolder": false, "MediaType": "Video", "PrimaryImageAspectRatio": 0.6666666666666666, "ImageTags": {"Primary": format!("genre_{}_cover", name)}, "BackdropImageTags": [], "ImageBlurHashes": {}, "LocationType": "FileSystem", "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 } })
             }).collect();
             return Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response();
         }
@@ -1489,6 +1489,25 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
         return (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response();
     }
 
+    if item_id.starts_with("lib_") || item_id.starts_with("genre_") || item_id.starts_with("tag_") {
+        let clean_id = item_id.replace("_cover", "");
+        let (folder, prefix) = if clean_id.starts_with("lib_") {
+            ("library", "lib")
+        } else if clean_id.starts_with("genre_") {
+            ("genre", "genre")
+        } else {
+            ("tag", "tag")
+        };
+        let raw_name = clean_id.trim_start_matches(&format!("{}_", prefix));
+        let path = std::path::PathBuf::from("data/cache/covers").join(folder).join(format!("{}_{}.jpg", prefix, raw_name));
+        if path.exists() {
+            if let Ok(bytes) = tokio::fs::read(&path).await {
+                return (StatusCode::OK, [(CONTENT_TYPE, "image/jpeg")], bytes).into_response();
+            }
+        }
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
     let path_opt = {
         let conn = pool.lock().unwrap();
         if item_id.starts_with("boxset_") {
@@ -1939,7 +1958,7 @@ pub async fn emby_genres(
     let mut names: Vec<String> = set.into_iter().collect();
     names.sort();
     let items: Vec<Value> = names.into_iter().map(|name| {
-        json!({ "Name": name, "Id": format!("genre_{}", name), "ServerId": "rust-em-server", "Type": "Genre", "IsFolder": false, "MediaType": "Video", "PrimaryImageAspectRatio": 0.6666666666666666, "ImageTags": {}, "BackdropImageTags": [], "ImageBlurHashes": {}, "LocationType": "FileSystem", "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 } })
+        json!({ "Name": name, "Id": format!("genre_{}", name), "ServerId": "rust-em-server", "Type": "Genre", "IsFolder": false, "MediaType": "Video", "PrimaryImageAspectRatio": 0.6666666666666666, "ImageTags": {"Primary": format!("genre_{}_cover", name)}, "BackdropImageTags": [], "ImageBlurHashes": {}, "LocationType": "FileSystem", "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 } })
     }).collect();
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
@@ -1964,7 +1983,7 @@ pub async fn emby_tags(
     let mut names: Vec<String> = set.into_iter().collect();
     names.sort();
     let items: Vec<Value> = names.into_iter().map(|name| {
-        json!({ "Name": name, "Id": name, "ServerId": "rust-em-server", "Type": "Tag", "IsFolder": false, "MediaType": "Video", "PrimaryImageAspectRatio": 0.6666666666666666, "ImageTags": {}, "BackdropImageTags": [], "ImageBlurHashes": {}, "LocationType": "FileSystem", "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 } })
+        json!({ "Name": name, "Id": name, "ServerId": "rust-em-server", "Type": "Tag", "IsFolder": false, "MediaType": "Video", "PrimaryImageAspectRatio": 0.6666666666666666, "ImageTags": {"Primary": format!("tag_{}_cover", name)}, "BackdropImageTags": [], "ImageBlurHashes": {}, "LocationType": "FileSystem", "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0 } })
     }).collect();
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
@@ -2133,4 +2152,13 @@ pub async fn emby_unmark_favorite(State(pool): State<Arc<Mutex<Connection>>>, Ax
     let conn = pool.lock().unwrap();
     let _ = conn.execute("UPDATE items SET is_favorite = 0 WHERE id = ?1", [item_id]);
     StatusCode::OK.into_response()
+}
+
+
+pub async fn api_generate_covers(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
+    let pool_clone = pool.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::covers::generate_all_covers(pool_clone);
+    });
+    Json(json!({"status": "started"}))
 }

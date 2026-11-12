@@ -1,3 +1,4 @@
+mod covers;
 #![recursion_limit = "256"]
 
 use axum::{
@@ -42,6 +43,7 @@ async fn main() {
         .route("/api/images/{id}/{img_type}", get(api::get_image).head(api::get_image))
         .route("/api/user/update", post(api::update_user))
         .route("/api/settings", get(api::get_settings).post(api::update_settings))
+        .route("/api/generate_covers", post(api::api_generate_covers))
         .route("/api/probe/scan", post(api::probe_scan))
         
         // ===== Emby API 路由 =====

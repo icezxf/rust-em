@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 mediainfo-rust = "0.1"
 chrono = "0.4"
 tempfile = "3"
