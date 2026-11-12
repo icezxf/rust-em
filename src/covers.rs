@@ -5,6 +5,19 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 use sha2::{Digest, Sha256};
 
+
+fn sanitize_filename(name: &str) -> String {
+    let mut sanitized = String::new();
+    for c in name.chars() {
+        if c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' {
+            sanitized.push('_');
+        } else {
+            sanitized.push(c);
+        }
+    }
+    sanitized.trim().to_string()
+}
+
 pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
     let cache_dir = PathBuf::from("data/cache/covers");
     let _ = std::fs::create_dir_all(cache_dir.join("library"));
