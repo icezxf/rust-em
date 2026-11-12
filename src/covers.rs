@@ -74,56 +74,76 @@ pub fn generate_all_covers(pool: Arc<Mutex<Connection>>) {
     println!("✅ [COVERS] 封面生成完毕。");
 }
 
+
 fn generate_landscape_cover(paths: &[String], out_path: &std::path::Path) {
     let mut canvas = image::RgbImage::new(800, 450);
-    let count = paths.len();
-    let slice_width = 800 / count as u32;
-    
-    for (i, path) in paths.iter().enumerate() {
-        if let Ok(img) = image::open(path) {
-            let (w, h) = img.dimensions();
-            let target_ratio = slice_width as f64 / 450.0;
-            let img_ratio = w as f64 / h as f64;
-            
-            let (crop_w, crop_h) = if img_ratio > target_ratio {
-                ((450.0 * img_ratio) as u32, h)
-            } else {
-                (w, (w as f64 / target_ratio) as u32)
-            };
-            let x = (w - crop_w) / 2;
-            let y = (h - crop_h) / 2;
-            
-            let thumb = img.crop_imm(x, y, crop_w, crop_h).resize_exact(slice_width, 450, FilterType::Triangle);
-            let _ = canvas.copy_from(&thumb.to_rgb8(), (i as u32) * slice_width, 0);
+    let count = paths.len().min(4);
+
+    match count {
+        0 => {}
+        1 => { draw_to_region(&mut canvas, &paths[0], 0, 0, 800, 450); }
+        2 => {
+            draw_to_region(&mut canvas, &paths[0], 0, 0, 400, 450);
+            draw_to_region(&mut canvas, &paths[1], 400, 0, 400, 450);
+        }
+        3 => {
+            draw_to_region(&mut canvas, &paths[0], 0, 0, 400, 450);
+            draw_to_region(&mut canvas, &paths[1], 400, 0, 400, 225);
+            draw_to_region(&mut canvas, &paths[2], 400, 225, 400, 225);
+        }
+        _ => {
+            draw_to_region(&mut canvas, &paths[0], 0, 0, 400, 225);
+            draw_to_region(&mut canvas, &paths[1], 400, 0, 400, 225);
+            draw_to_region(&mut canvas, &paths[2], 0, 225, 400, 225);
+            draw_to_region(&mut canvas, &paths[3], 400, 225, 400, 225);
         }
     }
-    let _ = canvas.save(out_path);
+    if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
 }
 
 fn generate_portrait_cover(paths: &[String], out_path: &std::path::Path) {
     let mut canvas = image::RgbImage::new(400, 600);
     let count = paths.len().min(4);
-    
-    let positions = [(0, 0), (200, 0), (0, 300), (200, 300)];
-    for i in 0..4 {
-        if count == 0 { break; }
-        let path = &paths[i % count];
-        if let Ok(img) = image::open(path) {
-            let (w, h) = img.dimensions();
-            let target_ratio = 200.0 / 300.0;
-            let img_ratio = w as f64 / h as f64;
-            
-            let (crop_w, crop_h) = if img_ratio > target_ratio {
-                ((300.0 * img_ratio) as u32, h)
-            } else {
-                (w, (w as f64 / target_ratio) as u32)
-            };
-            let x = (w - crop_w) / 2;
-            let y = (h - crop_h) / 2;
-            
-            let thumb = img.crop_imm(x, y, crop_w, crop_h).resize_exact(200, 300, FilterType::Triangle);
-            let _ = canvas.copy_from(&thumb.to_rgb8(), positions[i].0, positions[i].1);
+
+    match count {
+        0 => {}
+        1 => { draw_to_region(&mut canvas, &paths[0], 0, 0, 400, 600); }
+        2 => {
+            draw_to_region(&mut canvas, &paths[0], 0, 0, 200, 600);
+            draw_to_region(&mut canvas, &paths[1], 200, 0, 200, 600);
+        }
+        3 => {
+            draw_to_region(&mut canvas, &paths[0], 0, 0, 200, 600);
+            draw_to_region(&mut canvas, &paths[1], 200, 0, 200, 300);
+            draw_to_region(&mut canvas, &paths[2], 200, 300, 200, 300);
+        }
+        _ => {
+            draw_to_region(&mut canvas, &paths[0], 0, 0, 200, 300);
+            draw_to_region(&mut canvas, &paths[1], 200, 0, 200, 300);
+            draw_to_region(&mut canvas, &paths[2], 0, 300, 200, 300);
+            draw_to_region(&mut canvas, &paths[3], 200, 300, 200, 300);
         }
     }
-    let _ = canvas.save(out_path);
+    if let Err(e) = canvas.save(out_path) { println!("❌ [COVERS] 保存失败: {}", e); }
+}
+
+fn draw_to_region(canvas: &mut image::RgbImage, path: &str, x: u32, y: u32, w: u32, h: u32) {
+    if let Ok(img) = image::open(path) {
+        let (img_w, img_h) = img.dimensions();
+        let target_ratio = w as f64 / h as f64;
+        let img_ratio = img_w as f64 / img_h as f64;
+
+        // 居中裁剪并填满
+        let (crop_w, crop_h) = if img_ratio > target_ratio {
+            ((h as f64 * img_ratio) as u32, img_h)
+        } else {
+            (img_w, (img_w as f64 / target_ratio) as u32)
+        };
+        let crop_x = (img_w - crop_w) / 2;
+        let crop_y = (img_h - crop_h) / 2;
+
+        // 使用 Lanczos3 提升缩放清晰度
+        let thumb = img.crop_imm(crop_x, crop_y, crop_w, crop_h).resize_exact(w, h, image::imageops::FilterType::Lanczos3);
+        let _ = canvas.copy_from(&thumb.to_rgb8(), x, y);
+    }
 }
