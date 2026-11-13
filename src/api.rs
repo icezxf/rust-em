@@ -426,8 +426,8 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
     }
 
-    let mut sql = "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path, ud.play_count, ud.last_played_date, items.series_id, items.parent_id, items.season_number, items.episode_number FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE ud.playback_position_ticks > 0".to_string();
-    let mut params: Vec<String> = vec![req_user_id.to_string()];
+    let mut sql = format!("SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path, ud.play_count, ud.last_played_date, items.series_id, items.parent_id, items.season_number, items.episode_number FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE ud.playback_position_ticks > 0", req_user_id);
+    let mut params: Vec<String> = Vec::new();
 
     if let Some(types) = query.get("IncludeItemTypes") {
         if types.contains("Movie") { sql.push_str(" AND items.type = 'movies'"); }
