@@ -252,7 +252,14 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
                     let test_stem = if is_match_media { file_stem.trim_start_matches(&format!("{}-", base_stem)) } else { file_stem };
                     if let Some(img_type) = get_image_type(test_stem) {
                         let p_str = p.to_string_lossy().to_string();
-                        match img_type { "poster" => if final_poster.is_empty() { final_poster = p_str }, "fanart" => if final_fanart.is_empty() { final_fanart = p_str }, "logo" => if logo.is_empty() { logo = p_str }, "thumb" => if thumb.is_empty() { thumb = p_str }, "banner" => if banner.is_empty() { banner = p_str }, _ => {} }
+                        match img_type { 
+                            "poster" => final_poster = p_str, 
+                            "fanart" => final_fanart = p_str, 
+                            "logo" => if logo.is_empty() { logo = p_str }, 
+                            "thumb" => if thumb.is_empty() { thumb = p_str }, 
+                            "banner" => if banner.is_empty() { banner = p_str }, 
+                            _ => {} 
+                        }
                     }
                 }
             }
