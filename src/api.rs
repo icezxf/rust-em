@@ -352,6 +352,14 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
                 sql.push_str(" AND library_id = ?");
                 params.push(lib_id.to_string());
+                
+                // 💡 核心修复：如果是剧集库，最近添加只能返回 Series（剧），绝不能返回单集！
+                let lib_type: String = conn.query_row("SELECT type FROM libraries WHERE id = ?1", [lib_id], |r| r.get(0)).unwrap_or_default();
+                if lib_type == "tvshows" {
+                    sql.push_str(" AND type = 'Series'");
+                } else if lib_type == "movies" {
+                    sql.push_str(" AND type = 'movies'");
+                }
             }
         }
     }
@@ -721,18 +729,30 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
 
     if let Some(types) = &query.include_item_types {
         let t = types.to_lowercase();
-        if t.contains("movie") { sql.push_str(" AND type = 'movies'"); } 
-        else if t.contains("series") { sql.push_str(" AND type = 'Series'"); }
-        else if t.contains("episode") { sql.push_str(" AND type = 'Episode'"); }
+        let mut type_conditions = Vec::new();
+        
+        // 💡 修复：客户端传 "Movie,Series" 时，必须用 OR 关联，不能只匹配到 Movie
+        if t.contains("movie") { type_conditions.push("type = 'movies'"); }
+        if t.contains("series") { type_conditions.push("type = 'Series'"); }
+        if t.contains("episode") { type_conditions.push("type = 'Episode'"); }
+        if t.contains("season") { type_conditions.push("type = 'Season'"); }
+        
+        if !type_conditions.is_empty() {
+            sql.push_str(&format!(" AND ({})", type_conditions.join(" OR ")));
+        }
     } else {
-        // 如果没有传类型，且 ParentId 是剧集库，默认只查 Series，防止季和集乱入
+        // 如果没传 IncludeItemTypes，但指定了库 ID，则根据库类型过滤
         if let Some(pid) = &query.parent_id {
             if pid.starts_with("lib_") { 
                 if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
                     let lib_type: String = conn.query_row("SELECT type FROM libraries WHERE id = ?1", [lib_id], |r| r.get(0)).unwrap_or_default();
                     if lib_type == "tvshows" { sql.push_str(" AND type = 'Series'"); }
+                    else if lib_type == "movies" { sql.push_str(" AND type = 'movies'"); }
                 }
             }
+        } else if query.recursive == Some(true) {
+            // 如果是全局根目录的随机推荐（没有父级 ID），只返回电影和剧，绝对不返回单集
+            sql.push_str(" AND (type = 'movies' OR type = 'Series')");
         }
     }
 
