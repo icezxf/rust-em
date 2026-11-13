@@ -339,7 +339,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         if libs.is_empty() { return Json(json!([])).into_response(); }
     }
 
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path, (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count FROM items WHERE 1=1".to_string();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path, (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count, (SELECT COUNT(*) FROM items s WHERE s.series_id = items.id AND s.type = 'Season') as season_count FROM items WHERE 1=1".to_string();
     let mut params: Vec<String> = Vec::new();
 
     if let Some(libs) = &allowed_libs {
@@ -486,7 +486,7 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
                 "PlaybackPositionTicks": playback_ticks,
                 "PlayCount": play_count,
                 "IsFavorite": false,
-                "Played": play_count > 0,
+                "Played": play_count > 0 && playback_ticks == 0, // 只有看完且进度归零才打勾
                 "PlayedPercentage": if total_ticks > 0 { (playback_ticks as f64 / total_ticks as f64) * 100.0 } else { 0.0 },
                 "LastPlayedDate": if !last_played_str.is_empty() {
                     if let Ok(ts) = last_played_str.parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
@@ -721,7 +721,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         }
     }
 
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, IFNULL(ud.playback_position_ticks, 0), fanart_path, date_created, actors, directors, tags, studios, IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0), IFNULL(ud.last_played_date, ''), (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE 1=1".to_string();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, IFNULL(ud.playback_position_ticks, 0), fanart_path, date_created, actors, directors, tags, studios, IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0), IFNULL(ud.last_played_date, ''), (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count, (SELECT COUNT(*) FROM items s WHERE s.series_id = items.id AND s.type = 'Season') as season_count FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE 1=1".to_string();
     let mut params: Vec<String> = Vec::new();
     params.push(req_user_id.to_string());
 
@@ -994,7 +994,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
                 "PlaybackPositionTicks": playback_ticks,
                 "PlayCount": play_count,
                 "IsFavorite": is_favorite > 0,
-                "Played": play_count > 0,
+                "Played": play_count > 0 && playback_ticks == 0, // 只有看完且进度归零才打勾
                 "PlayedPercentage": if total_ticks > 0 { (playback_ticks as f64 / total_ticks as f64) * 100.0 } else { 0.0 },
                 "LastPlayedDate": if !last_played_str.is_empty() {
                     if let Ok(ts) = last_played_str.parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
@@ -1071,6 +1071,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
             let e_num: i32 = row.get(49).unwrap_or(0);
             let r_type: String = row.get(50).unwrap_or_default();
             let recursive_item_count: i64 = row.get(51).unwrap_or(0);
+            let season_count: i64 = row.get(52).unwrap_or(0);
 
             let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
             let actors: Vec<Value> = serde_json::from_str(&actors_json).unwrap_or_default();
@@ -1152,8 +1153,9 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
                 "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(), "OriginalLanguage": json!(if !original_language.is_empty() { original_language } else { language }),
                 "SetName": json!(set_name), "SeriesName": json!(if typ == "tvshows" { &series } else { "" }),
                 "Path": decode_url(&real_path), "Container": "mp4", "MediaSourceCount": media_sources.len(), "MediaSources": media_sources,
-                "RecursiveItemCount": recursive_item_count,
-                "ChildCount": recursive_item_count,
+                "RecursiveItemCount": if r_type == "Series" { recursive_item_count } else { 0 },
+                "ChildCount": if r_type == "Series" { season_count } else { recursive_item_count },
+                "SeasonCount": if r_type == "Series" { season_count } else { 0 },
                 "SeriesId": if r_type == "Episode" { json!(parent_id.to_string()) } else { json!(null) },
                 "SeriesName": if r_type == "Episode" { json!(series) } else { json!(null) },
                 "SeasonName": if r_type == "Episode" { json!(format!("Season {}", s_num)) } else { json!(null) },
@@ -1164,7 +1166,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
                 "UserData": { 
                     "ItemId": id.to_string(), "Key": id.to_string(), 
                     "PlaybackPositionTicks": playback_ticks, "PlayCount": play_count, 
-                    "IsFavorite": is_favorite > 0, "Played": play_count > 0, 
+                    "IsFavorite": is_favorite > 0, "Played": play_count > 0 && playback_ticks == 0, // 只有看完且进度归零才打勾 
                     "PlayedPercentage": if run_time_ticks > 0 { playback_ticks * 100 / run_time_ticks } else { 0 },
                     "LastPlayedDate": if !last_played_str.is_empty() {
                         if let Ok(ts) = last_played_str.parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
@@ -1356,33 +1358,28 @@ pub async fn emby_shows_next_up() -> impl IntoResponse { Json(json!({ "Items": [
 pub async fn emby_shows_seasons(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(series_id): AxumPath<String>) -> impl IntoResponse {
     let Ok(sid) = series_id.parse::<i64>() else { return Json(json!({"Items": [], "TotalRecordCount": 0})); };
     let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id, title, season_number, poster_path FROM items WHERE type = 'Season' AND parent_id = ?1 ORDER BY season_number ASC").unwrap();
+    // 在 SQL 里动态统计该季下有多少集
+    let mut stmt = conn.prepare("SELECT id, title, season_number, poster_path, (SELECT COUNT(*) FROM items e WHERE e.parent_id = items.id AND e.type = 'Episode') as ep_count FROM items WHERE type = 'Season' AND parent_id = ?1 ORDER BY season_number ASC").unwrap();
+    
     let items: Vec<Value> = stmt.query_map([sid], |r| {
         let id: i64 = r.get(0).unwrap_or_default();
         let title: String = r.get(1).unwrap_or_default();
         let num: i32 = r.get(2).unwrap_or(1);
         let poster: String = r.get(3).unwrap_or_default();
+        let ep_count: i64 = r.get(4).unwrap_or(0);
+        
         Ok(json!({
             "Name": title, "Id": id.to_string(), "ServerId": "rust-em-server", 
             "Type": "Season", "IsFolder": true, "MediaType": "Video",
             "IndexNumber": num, "SeriesId": series_id,
+            "ChildCount": ep_count,
+            "RecursiveItemCount": ep_count,
             "ImageTags": if !poster.is_empty() { json!({"Primary": format!("season_{}", id)}) } else { json!({}) },
-            "UserData": { "Played": false, "UnplayedItemCount": 0 }
+            "UserData": { "Played": false, "UnplayedItemCount": ep_count, "PlaybackPositionTicks": 0, "PlayCount": 0 }
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
-
-
-
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-pub struct EpisodesQuery { 
-    #[serde(rename = "SeasonId")] season_id: Option<String>,
-    #[serde(rename = "ParentId")] parent_id: Option<String>,
-}
-
 pub async fn emby_shows_episodes(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(series_id): AxumPath<String>, Query(query): Query<EpisodesQuery>) -> impl IntoResponse {
     let Ok(sid) = series_id.parse::<i64>() else { return Json(json!({"Items": [], "TotalRecordCount": 0})); };
     let conn = pool.lock().unwrap();
