@@ -1,3 +1,8 @@
+//! 拼接封面生成。
+//!
+//! 职责：从媒体库/类型/标签/合集中取最多 4 张海报，拼接成横版或竖版封面，
+//! 输出到 data/cache/covers/{library,genre,tag,boxset}/，供 images.rs 下发。
+
 use image::codecs::jpeg::JpegEncoder;
 
 use image::GenericImage;

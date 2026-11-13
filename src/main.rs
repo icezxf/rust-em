@@ -1,4 +1,9 @@
 #![recursion_limit = "256"]
+//! Rust-Em 服务入口。
+//!
+//! 职责：初始化数据库、组装 axum 路由、挂载中间件、启动 HTTP 服务。
+//! 不包含任何业务逻辑，所有 handler 均委托给 api / auth / scanner / streamer / images 模块。
+
 
 mod covers;
 

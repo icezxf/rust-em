@@ -1,3 +1,8 @@
+//! 数据库初始化与表结构维护。
+//!
+//! 职责：建表（users / libraries / items / settings / user_data / ...）、
+//! 初始化默认管理员、补齐缺失列、初始化 settings 默认值。
+
 use rusqlite::Connection;
 
 pub fn init_db(conn: &Connection) {

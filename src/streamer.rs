@@ -1,3 +1,9 @@
+//! 302 播放重定向与预热缓存。
+//!
+//! 职责：解析 .strm 内的网盘链接 → 跟随 302 拿到真实直链 → 缓存 5 分钟 → 返回 302。
+//! 包含：PlaybackInfo、Stream、Download 等播放相关 handler，以及详情页预热逻辑。
+//! 依赖：utils.rs（sanitize_media_streams / extract_extension_from_url）。
+
 use axum::{
     extract::{State, Query, Path as AxumPath},
     http::{StatusCode, HeaderMap, header::{LOCATION, USER_AGENT}},

@@ -1,3 +1,8 @@
+//! NFO（Kodi/Emby 标准 XML）解析。
+//!
+//! 职责：把 .nfo 文件解析成 NfoMovie 结构体，供 scanner.rs 入库。
+//! 注意：<runtime> 单位是分钟，原样返回，不做换算。
+
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use std::fs;

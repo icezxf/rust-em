@@ -1,3 +1,10 @@
+//! 图片下发服务。
+//!
+//! 职责：虚拟 ID（lib_/genre_/tag_/boxset_/person_/studio_）与数字 ID 的图片路径解析、
+//! 封面缓存 tag 计算、按 maxWidth/maxHeight 实时缩放、返回 image/jpeg 或 image/png。
+//!
+//! 与 covers.rs 的分工：covers.rs 负责“生成拼接封面”，images.rs 负责“把图发给客户端”。
+
 use axum::{
     extract::{State, Path as AxumPath, Query},
     http::{StatusCode, header::CONTENT_TYPE},

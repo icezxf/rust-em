@@ -1,3 +1,8 @@
+//! 鉴权与权限。
+//!
+//! 职责：Token 存储（TOKENS）、日志中间件（logger_middleware）、
+//! 请求鉴权中间件（auth）、普通用户媒体库权限查询（get_allowed_libs）。
+
 use axum::{
     extract::Request,
     http::{StatusCode, Method},

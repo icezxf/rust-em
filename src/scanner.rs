@@ -1,3 +1,8 @@
+//! 媒体库扫描与入库。
+//!
+//! 职责：遍历目录 → 解析 .strm / .nfo → 匹配图片 → 读取 probe 缓存 → 写入 items 表。
+//! 依赖：nfo.rs（XML 解析）、probe.rs（媒体探测缓存）。
+
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::time::{UNIX_EPOCH, SystemTime};

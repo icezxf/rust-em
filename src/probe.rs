@@ -1,3 +1,8 @@
+//! 媒体信息探测（MediaInfo 解析）。
+//!
+//! 职责：读取 .strm 直链的视频头尾 → 用 mediainfo-rust 解析 → 生成 <name>-mediainfo.json 缓存。
+//! 供 scanner.rs 读取以填充 media_streams / size / runtime 等字段。
+
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

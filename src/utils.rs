@@ -1,3 +1,8 @@
+//! 纯工具函数集合（无业务依赖、无网络请求、无数据库连接）。
+//!
+//! 包含：URL 编解码（decode_url / to_hex / from_hex）、时间格式化（format_iso8601）、
+//! 扩展名提取（extract_extension_from_url）、Emby 媒体流 JSON 清洗（sanitize_media_streams）。
+
 use serde_json::{json, Value};
 
 pub fn decode_url(input: &str) -> String {

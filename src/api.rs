@@ -1,3 +1,11 @@
+//! Emby 协议翻译层 + Web 管理端 API。
+//!
+//! 职责：解析 HTTP 参数 → 查库 → 组装符合 Emby 标准的 JSON → 返回。
+//! 包含：Web 管理接口（/api/*）、Emby 列表/字典/详情/进度/收藏接口。
+//!
+//! 不包含：扫描入库（scanner.rs）、302 播放（streamer.rs）、
+//! 图片下发（images.rs）、鉴权（auth.rs）、公共工具（utils.rs）。
+
 use axum::{
     extract::{State, Json, Query, Path as AxumPath},
     http::{StatusCode, header::CONTENT_TYPE, HeaderMap},
