@@ -8,16 +8,14 @@ use regex::Regex;
 
 fn get_image_type(stem: &str) -> Option<&'static str> {
     let lower = stem.to_lowercase();
-    let base = if let Some((b, suffix)) = lower.rsplit_once('-') {
-        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) { b } else { &lower }
-    } else { &lower };
-    match base {
-        "poster" => Some("poster"),
-        "fanart" | "backdrop" => Some("fanart"),
-        "logo" | "clearlogo" => Some("logo"),
-        "thumb" | "thumbnail" => Some("thumb"),
-        "banner" => Some("banner"),
-        _ => None
+    let base = if let Some((b, suffix)) = lower.rsplit_once('-') { if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) { b } else { &lower } } else { &lower };
+    match base { 
+        "poster" => Some("poster"), 
+        "fanart" | "backdrop" => Some("fanart"), 
+        "logo" | "clearlogo" => Some("logo"), 
+        "thumb" | "thumbnail" => Some("thumb"), 
+        "banner" => Some("banner"), 
+        _ => None 
     }
 }
 

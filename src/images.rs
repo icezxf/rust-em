@@ -51,19 +51,19 @@ pub fn get_cover_tag(folder: &str, prefix: &str, name: &str) -> String {
 }
 
 pub async fn serve_file(path_str: &str) -> Response {
-    // 恢复你最初版本：如果是网络图，返回 1x1 透明图兜底
+    // 网络图：服务器代理拉取，返回 200 OK
     if path_str.starts_with("http") { 
-        let png_bytes: [u8; 67] = [
-            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
-            0x42, 0x60, 0x82
-        ];
-        return (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response(); 
+        let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).build().unwrap();
+        if let Ok(resp) = client.get(path_str).send().await {
+            if let Ok(bytes) = resp.bytes().await {
+                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
+                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
+            }
+        }
+        return StatusCode::NOT_FOUND.into_response();
     }
-    // 恢复你最初版本：如果是本地图，直接读字节返回
-    if let Ok(bytes) = tokio::fs::read(&path_str).await {
+    // 本地图：直接读取返回 200 OK
+    if let Ok(bytes) = tokio::fs::read(path_str).await {
         let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
         return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
     }
