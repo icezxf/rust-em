@@ -1,13 +1,6 @@
-//! 图片下发服务。
-//!
-//! 职责：虚拟 ID（lib_/genre_/tag_/boxset_/person_/studio_）与数字 ID 的图片路径解析、
-//! 封面缓存 tag 计算、按 maxWidth/maxHeight 实时缩放、返回 image/jpeg 或 image/png。
-//!
-//! 与 covers.rs 的分工：covers.rs 负责“生成拼接封面”，images.rs 负责“把图发给客户端”。
-
 use axum::{
     extract::{State, Path as AxumPath, Query},
-    http::{StatusCode, header::CONTENT_TYPE},
+    http::{StatusCode, header::CONTENT_TYPE, header::LOCATION},
     response::{IntoResponse, Response},
 };
 use std::sync::{Arc, Mutex};
@@ -58,18 +51,11 @@ pub fn get_cover_tag(folder: &str, prefix: &str, name: &str) -> String {
 }
 
 pub async fn serve_file(path_str: &str) -> Response {
-    // 如果是网络图片，服务器代下载后再返回，防止客户端网络被墙
+    // 标准 Emby 行为：如果是网络图片，直接返回 302 让客户端重定向去拉
     if path_str.starts_with("http") { 
-        let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).build().unwrap();
-        if let Ok(resp) = client.get(path_str).send().await {
-            if let Ok(bytes) = resp.bytes().await {
-                let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
-                return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
-            }
-        }
-        return StatusCode::NOT_FOUND.into_response();
+        return (StatusCode::FOUND, [(LOCATION, path_str.to_string())], "").into_response(); 
     }
-    // 本地图片直接读
+    // 本地图片：直接读取文件字节流返回
     if let Ok(bytes) = tokio::fs::read(path_str).await {
         let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
         return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
@@ -77,33 +63,27 @@ pub async fn serve_file(path_str: &str) -> Response {
     StatusCode::NOT_FOUND.into_response()
 }
 
-pub async fn emby_item_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type)): AxumPath<(String, String)>, Query(query): Query<HashMap<String, String>>) -> Response { emby_item_image_inner(pool, item_id, image_type, 0, query).await }
-
-pub async fn emby_item_image_with_index(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type, index)): AxumPath<(String, String, String)>, Query(query): Query<HashMap<String, String>>) -> Response { emby_item_image_inner(pool, item_id, image_type, index.parse::<usize>().unwrap_or(0), query).await }
+pub async fn emby_item_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type)): AxumPath<(String, String)>, Query(query): Query<HashMap<String, String>>) -> Response { 
+    emby_item_image_inner(pool, item_id, image_type, 0, query).await 
+}
+pub async fn emby_item_image_with_index(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type, index)): AxumPath<(String, String, String)>, Query(query): Query<HashMap<String, String>>) -> Response { 
+    emby_item_image_inner(pool, item_id, image_type, index.parse::<usize>().unwrap_or(0), query).await 
+}
 
 async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize, query: HashMap<String, String>) -> Response {
+    // 演员/工作室占位图
     if item_id.starts_with("person_") || item_id.starts_with("studio_") {
-        let png_bytes: [u8; 67] = [
-            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
-            0x42, 0x60, 0x82
-        ];
+        let png_bytes: [u8; 67] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82];
         return (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response();
     }
 
+    // 虚拟 ID 的拼接图（媒体库、类型等）
     if item_id.starts_with("lib_") || item_id.starts_with("genre_") || item_id.starts_with("tag_") || item_id.starts_with("boxset_") {
         let clean_id = item_id.replace("_cover", "");
-        let (folder, prefix) = if clean_id.starts_with("lib_") {
-            ("library", "lib")
-        } else if clean_id.starts_with("genre_") {
-            ("genre", "genre")
-        } else if clean_id.starts_with("boxset_") {
-            ("boxset", "boxset")
-        } else {
-            ("tag", "tag")
-        };
+        let (folder, prefix) = if clean_id.starts_with("lib_") { ("library", "lib") } 
+            else if clean_id.starts_with("genre_") { ("genre", "genre") } 
+            else if clean_id.starts_with("boxset_") { ("boxset", "boxset") } 
+            else { ("tag", "tag") };
         let raw_name = clean_id.trim_start_matches(&format!("{}_", prefix));
         
         let mut sanitized_name = String::new();
@@ -138,7 +118,7 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
                     if let (Some(w), Some(h)) = (req_w, req_h) {
                         if w > 0 && h > 0 {
                             if let Ok(img) = image::load_from_memory(&bytes) {
-                                let resized = img.resize_exact(w, h, image::imageops::FilterType::Triangle);
+                                let resized = img.resize(w, h, image::imageops::FilterType::Lanczos3);
                                 let mut out = std::io::Cursor::new(Vec::new());
                                 let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 80);
                                 if encoder.encode_image(&resized).is_ok() {
@@ -153,17 +133,12 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
         }
         
         if !item_id.starts_with("boxset_") {
-            let png_bytes: [u8; 67] = [
-                0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-                0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-                0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-                0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
-                0x42, 0x60, 0x82
-            ];
+            let png_bytes: [u8; 67] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82];
             return (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response();
         }
     }
 
+    // 查数据库找电影/剧集的真实图片
     let path_opt = {
         let conn = pool.lock().unwrap();
         if item_id.starts_with("boxset_") {
@@ -187,16 +162,7 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
             let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
             match image_type.to_lowercase().as_str() {
                 "primary" | "poster" => conn.query_row("SELECT poster_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-                "thumb" => {
-                    // 先查 thumb_path，如果为空或者该条目是 Episode，直接回退去读 poster_path
-                    let thumb_opt: Option<String> = conn.query_row("SELECT thumb_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok();
-                    let is_ep: bool = conn.query_row("SELECT type FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).map(|t| t == "Episode").unwrap_or(false);
-                    if is_ep || thumb_opt.as_deref().unwrap_or("").is_empty() {
-                        conn.query_row("SELECT poster_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok()
-                    } else {
-                        thumb_opt
-                    }
-                },
+                "thumb" => conn.query_row("SELECT thumb_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
                 "logo" => conn.query_row("SELECT logo_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
                 "banner" => conn.query_row("SELECT banner_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
                 "backdrop" | "fanart" => {
@@ -214,19 +180,10 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
         }
     };
 
-    if let Some(path_str) = path_opt { if !path_str.is_empty() { return serve_file(&path_str).await; } }
+    if let Some(path_str) = path_opt { 
+        if !path_str.is_empty() { 
+            return serve_file(&path_str).await; 
+        } 
+    }
     StatusCode::NOT_FOUND.into_response()
 }
-
-pub async fn emby_person_image(_: AxumPath<(String, String)>) -> impl IntoResponse {
-    let png_bytes: [u8; 67] = [
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-        0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-        0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
-        0x42, 0x60, 0x82
-    ];
-    (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response()
-}
-
-pub async fn emby_item_image_user_only(_: AxumPath<(String, String)>) -> Response { StatusCode::NOT_FOUND.into_response() }
