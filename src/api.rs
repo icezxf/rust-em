@@ -1722,17 +1722,19 @@ async fn serve_subtitle_inner(pool: Arc<Mutex<Connection>>, item_id: String, str
     };
 
     if let Some(path) = path_opt {
-        if let Ok(content) = tokio::fs::read_to_string(&path).await {
-            // 如果客户端需要 WebVTT，我们把 SRT 转成 VTT（简单替换）
-            if path.ends_with(".srt") {
-                let mut vtt = String::from("WEBVTT\n\n");
-                let re = regex::Regex::new(r"(\d{2}:\d{2}:\d{2}),\d{3}").unwrap();
-                let processed = re.replace_all(&content, "$1.000");
-                vtt.push_str(&processed);
-                return (StatusCode::OK, [(CONTENT_TYPE, "text/vtt")], vtt).into_response();
-            } else if path.ends_with(".ass") {
-                return (StatusCode::OK, [(CONTENT_TYPE, "text/plain; charset=utf-8")], content).into_response();
+        // 💡 加上文件大小限制，防止恶意超大文件打爆内存 (限制 10MB)
+        if let Ok(meta) = tokio::fs::metadata(&path).await {
+            if meta.len() > 10 * 1024 * 1024 {
+                return StatusCode::PAYLOAD_TOO_LARGE.into_response();
             }
+        }
+
+        // 原样读取，不进行格式转换
+        if let Ok(bytes) = tokio::fs::read(&path).await {
+            let mime = if path.ends_with(".vtt") { "text/vtt" } 
+                       else if path.ends_with(".srt") { "application/x-subrip" } 
+                       else { "text/plain; charset=utf-8" };
+            return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
         }
     }
     StatusCode::NOT_FOUND.into_response()
