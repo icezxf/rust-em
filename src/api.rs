@@ -199,7 +199,11 @@ pub async fn get_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((id,
             stmt.query_row([id], |row| row.get::<_, String>(0)).ok()
         }
     };
-    if let Some(path_str) = path_opt { if !path_str.is_empty() { return crate::images::serve_file(&path_str).await; } }
+    if let Some(path_str) = path_opt { 
+        if !path_str.is_empty() { 
+            return crate::images::serve_file(&path_str).await; 
+        } 
+    }
     StatusCode::NOT_FOUND.into_response()
 }
 
