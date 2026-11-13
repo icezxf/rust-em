@@ -1305,13 +1305,36 @@ pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(i
     for t in tags_str.split(" / ").map(str::trim).filter(|s| !s.is_empty()).take(8) { terms.push((t.to_string(), 2)); }
     for g in genres_str.split(" / ").map(str::trim).filter(|s| !s.is_empty()).take(8) { terms.push((g.to_string(), 1)); }
 
+    // 通用的行数据解析闭包
+    let parse_row = |row: &rusqlite::Row| -> rusqlite::Result<Value> {
+        let id: i64 = row.get(0).unwrap_or_default();
+        let r_type: String = row.get(2).unwrap_or_default();
+        let poster_path: String = row.get(5).unwrap_or_default();
+        let has_poster = !poster_path.is_empty();
+        let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
+        let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+        let poster_tag = if has_poster { format!("tag_{}_{}", id, &hash_hex[..8]) } else { String::new() };
+        
+        let runtime_secs: i32 = row.get(7).unwrap_or(0);
+        let total_ticks = (runtime_secs as i64) * 10_000_000;
+        
+        Ok(json!({
+            "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
+            "Type": if r_type == "movies" { "Movie" } else { "Series" },
+            "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
+            "Overview": row.get::<_, String>(4).unwrap_or_default(),
+            "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0), "RunTimeTicks": total_ticks,
+            "PrimaryImageAspectRatio": 0.6666666666666666,
+            "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
+            "BackdropImageTags": [],
+            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
+            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false }
+        }))
+    };
+
     if terms.is_empty() {
-        let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path, rating FROM items WHERE id != ?1 ORDER BY RANDOM() LIMIT 6").unwrap();
-        let items: Vec<Value> = stmt.query_map([item_id], |row| {
-            let id: i64 = row.get(0).unwrap_or_default();
-            let r_type: String = row.get(2).unwrap_or_default();
-            Ok(json!({ "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "Type": if r_type == "movies" { "Movie" } else { "Series" }, "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0), "ImageTags": {"Primary": format!("tag_{}", id)}, "BackdropImageTags": [] }))
-        }).unwrap().filter_map(Result::ok).collect();
+        let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path, rating, runtime FROM items WHERE id != ?1 ORDER BY RANDOM() LIMIT 6").unwrap();
+        let items: Vec<Value> = stmt.query_map([item_id], |row| parse_row(row)).unwrap().filter_map(Result::ok).collect();
         return Json(json!({ "Items": items, "TotalRecordCount": items.len() }));
     }
 
@@ -1322,17 +1345,14 @@ pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(i
         score_expr.push_str(&format!("((CASE WHEN tags LIKE ?{} THEN {} ELSE 0 END) + (CASE WHEN genres LIKE ?{} THEN {} ELSE 0 END))", p, weight * 2, p, weight));
         where_expr.push_str(&format!("genres LIKE ?{} OR tags LIKE ?{}", p, p));
     }
-    let sql = format!("SELECT id, title, type, year, plot, poster_path, rating, ({}) AS score FROM items WHERE id != ?1 AND ({}) ORDER BY score DESC, RANDOM() LIMIT 6", score_expr, where_expr);
+    
+    let sql = format!("SELECT id, title, type, year, plot, poster_path, rating, runtime, ({}) AS score FROM items WHERE id != ?1 AND ({}) ORDER BY score DESC, RANDOM() LIMIT 6", score_expr, where_expr);
     let mut params_vec: Vec<rusqlite::types::Value> = Vec::with_capacity(terms.len() + 1);
     params_vec.push(rusqlite::types::Value::Integer(item_id));
     for (term, _) in &terms { params_vec.push(rusqlite::types::Value::Text(format!("%{}%", term))); }
-    let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(_) => return Json(json!({ "Items": [], "TotalRecordCount": 0 })) };
     
-    let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(params_vec.iter()), |row| {
-        let id: i64 = row.get(0).unwrap_or_default();
-        let r_type: String = row.get(2).unwrap_or_default();
-        Ok(json!({ "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "Type": if r_type == "movies" { "Movie" } else { "Series" }, "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0), "ImageTags": {"Primary": format!("tag_{}", id)}, "BackdropImageTags": [] }))
-    }).unwrap().filter_map(Result::ok).collect();
+    let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(_) => return Json(json!({ "Items": [], "TotalRecordCount": 0 })) };
+    let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(params_vec.iter()), |row| parse_row(row)).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
