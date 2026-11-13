@@ -39,11 +39,9 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
     let conn = pool.lock().unwrap();
     if conn.prepare("SELECT id FROM users WHERE username = ?1 AND password = ?2").unwrap().exists([&payload.username, &format!("{:x}", hasher.finalize())]).unwrap() {
         let user_id: i64 = conn.query_row("SELECT id FROM users WHERE username = ?1", [&payload.username], |r| r.get(0)).unwrap_or(0);
-        
         if user_id != 1 {
             return (StatusCode::FORBIDDEN, Json(json!({ "error": "只有管理员可以登录网页端" }))).into_response();
         }
-        
         let token = uuid::Uuid::new_v4().to_string();
         TOKENS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap().insert(token.clone(), user_id);
         (StatusCode::OK, Json(json!({ "token": token }))).into_response()
@@ -1136,86 +1134,139 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
     );
 
     let item_opt = conn.query_row(&query_str, rusqlite::params![id], |row| {
-        let r_type: String = row.get(2).unwrap_or_default();
-        let runtime: i32 = row.get(9).unwrap_or(0);
-        let run_time_ticks = (runtime as i64) * 10_000_000;
-        let play_count: i32 = row.get(44).unwrap_or(0);
-        let playback_ticks: i64 = row.get(43).unwrap_or(0);
+        let title: String = row.get(1).unwrap_or_default(); let typ: String = row.get(2).unwrap_or_default();
+        let year_str: String = row.get(3).unwrap_or_default(); let plot: String = row.get(4).unwrap_or_default();
+        let poster_path: String = row.get(5).unwrap_or_default(); let studios_str: String = row.get(7).unwrap_or_default();
+        let parts_json: String = row.get(8).unwrap_or_default(); let runtime: i32 = row.get(9).unwrap_or(0);
+        let actors_json: String = row.get(10).unwrap_or_default(); let rating: f64 = row.get(11).unwrap_or(0.0);
+        let mpaa: String = row.get(12).unwrap_or_default(); let genres_str: String = row.get(13).unwrap_or_default();
+        let premiered: String = row.get(14).unwrap_or_default(); let tmdb_id: String = row.get(15).unwrap_or_default();
+        let imdb_id: String = row.get(16).unwrap_or_default(); let size: i64 = row.get(17).unwrap_or(0);
+        let mtime: i64 = row.get(18).unwrap_or(0); let series: String = row.get(19).unwrap_or_default();
+        let set_name: String = row.get(21).unwrap_or_default(); let tagline: String = row.get(22).unwrap_or_default();
+        let tags_str: String = row.get(23).unwrap_or_default(); let directors_str: String = row.get(24).unwrap_or_default();
+        let num: String = row.get(25).unwrap_or_default(); let stills_json: String = row.get(26).unwrap_or_default();
+        let stills_vec: Vec<String> = serde_json::from_str(&stills_json).unwrap_or_default();
+        let releasedate: String = row.get(27).unwrap_or_default(); let original_title: String = row.get(28).unwrap_or_default();
+        let sort_title: String = row.get(29).unwrap_or_default();
+        let sort_title = if sort_title.is_empty() { title.clone() } else { sort_title };
+        let country: String = row.get(30).unwrap_or_default(); let language: String = row.get(31).unwrap_or_default();
+        let _writers_str: String = row.get(32).unwrap_or_default(); let media_streams_json: String = row.get(34).unwrap_or_default();
+        let date_created: i64 = row.get(35).unwrap_or(0); let aspect_ratio: f64 = row.get(36).unwrap_or(0.0);
+        let original_language: String = row.get(37).unwrap_or_default(); let fanart_path: String = row.get(38).unwrap_or_default();
+        let logo_path: String = row.get(39).unwrap_or_default(); let thumb_path: String = row.get(40).unwrap_or_default();
+        let banner_path: String = row.get(41).unwrap_or_default(); let strm_content: String = row.get(42).unwrap_or_default();
+        let playback_ticks: i64 = row.get(43).unwrap_or(0); let play_count: i32 = row.get(44).unwrap_or(0); let is_favorite: i32 = row.get(45).unwrap_or(0);
+        let last_played_str: String = row.get(46).unwrap_or_default();
         let total_eps: i64 = row.get(47).unwrap_or(0);
         let total_seasons: i64 = row.get(48).unwrap_or(0);
         let played_eps: i64 = row.get(49).unwrap_or(0);
         let season_total_eps: i64 = row.get(50).unwrap_or(0);
         let season_played_eps: i64 = row.get(51).unwrap_or(0);
 
-        let mut people = Vec::new();
-        let directors_str: String = row.get(24).unwrap_or_default();
+        let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
+        let actors: Vec<Value> = serde_json::from_str(&actors_json).unwrap_or_default();
+        let mut media_streams: Value = serde_json::from_str(&media_streams_json).unwrap_or(json!([]));
+        sanitize_media_streams(&mut media_streams);
+        let real_path = strm_content.lines().map(str::trim).find(|s| !s.is_empty()).unwrap_or("").to_string();
+
+        let genres_vec: Vec<&str> = genres_str.split(" / ").filter(|s| !s.is_empty()).collect();
+        let mut genre_items = Vec::new();
+        for g in &genres_vec { genre_items.push(json!({"Id": format!("genre_{}", g), "Name": g})); }
+        
+        let tags_vec: Vec<&str> = tags_str.split(" / ").filter(|s| !s.is_empty()).collect();
+        let mut tag_items = Vec::new();
+        for t in &tags_vec { tag_items.push(json!({"Id": format!("tag_{}", t), "Name": t})); }
+
+        let studios: Vec<Value> = studios_str.split(" / ").filter(|s| !s.trim().is_empty()).map(|s| json!({ "Name": s, "Id": format!("studio_{}", s) })).collect();
+
+        let mut people: Vec<Value> = Vec::new();
         for d in directors_str.split(" / ").filter(|s| !s.is_empty()) {
             people.push(json!({ "Name": d.trim(), "Type": "Director", "Id": format!("person_{}", d.trim()), "PrimaryImageTag": "" }));
         }
-        let actors_str: String = row.get(10).unwrap_or_default();
-        if let Ok(actors) = serde_json::from_str::<Vec<Value>>(&actors_str) {
-            for a in actors {
-                people.push(json!({ "Name": a["name"].as_str().unwrap_or_default(), "Role": a["role"].as_str().unwrap_or_default(), "Type": "Actor", "Id": format!("person_{}", a["name"].as_str().unwrap_or_default()), "PrimaryImageTag": "" }));
-            }
+        for a in actors.iter() {
+            people.push(json!({ "Name": a["name"].as_str().unwrap_or_default(), "Role": a["role"].as_str().unwrap_or_default(), "Type": "Actor", "Id": format!("person_{}", a["name"].as_str().unwrap_or_default()), "PrimaryImageTag": "" }));
         }
 
         let mut image_tags = serde_json::Map::new();
-        if !row.get::<_, String>(5).unwrap_or_default().is_empty() { image_tags.insert("Primary".to_string(), json!(format!("tag_{}", id))); }
-        if !row.get::<_, String>(39).unwrap_or_default().is_empty() { image_tags.insert("Logo".to_string(), json!(format!("logo_{}", id))); }
-        if !row.get::<_, String>(40).unwrap_or_default().is_empty() { image_tags.insert("Thumb".to_string(), json!(format!("thumb_{}", id))); }
-        if !row.get::<_, String>(41).unwrap_or_default().is_empty() { image_tags.insert("Banner".to_string(), json!(format!("banner_{}", id))); }
+        if !poster_path.is_empty() {
+            let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
+            let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+            image_tags.insert("Primary".to_string(), json!(format!("tag_{}_{}", id, &hash_hex[..8])));
+        }
+        if !logo_path.is_empty() { image_tags.insert("Logo".to_string(), json!(format!("logo_{}", id))); }
+        if !thumb_path.is_empty() { image_tags.insert("Thumb".to_string(), json!(format!("thumb_{}", id))); }
+        if !banner_path.is_empty() { image_tags.insert("Banner".to_string(), json!(format!("banner_{}", id))); }
 
-        let played = if r_type == "Series" { total_eps > 0 && total_eps == played_eps } 
-                     else if r_type == "Season" { season_total_eps > 0 && season_total_eps == season_played_eps } 
+        let mut backdrops: Vec<String> = Vec::new();
+        if !fanart_path.is_empty() { backdrops.push(fanart_path.clone()); }
+        backdrops.extend(stills_vec.iter().cloned());
+        let mut backdrop_tags: Vec<Value> = Vec::new();
+        for (i, p) in backdrops.iter().enumerate() {
+            let mut h = Sha256::new(); h.update(p.as_bytes()); let hash = h.finalize();
+            let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+            backdrop_tags.push(json!(format!("backdrop_{}_{}_{}", id, i, &hash_hex[..8])));
+        }
+
+        let date_created_ts = if date_created > 0 { date_created } else { mtime };
+        let run_time_ticks = (runtime as i64) * 10_000_000;
+        let est_bitrate = if size > 0 && run_time_ticks > 0 { (size * 8) / (run_time_ticks / 10_000_000) } else { 0 };
+
+        let media_sources: Vec<Value> = if parts.is_empty() { vec![] } else {
+            parts.iter().enumerate().map(|(i, _path)| {
+                let stream_url = format!("/Videos/{}/original.mp4?MediaSourceId={}_cd{}", id, id, i);
+                json!({
+                    "Id": format!("{}_cd{}", id, i), "ItemId": id.to_string(), "Path": decode_url(&real_path), "DirectStreamUrl": stream_url,
+                    "Protocol": "Http", "Container": "mp4", "Name": title.clone(), "Type": "Default", "VideoType": "VideoFile", "IsRemote": true,
+                    "Bitrate": est_bitrate, "RunTimeTicks": run_time_ticks, "Size": size, "DefaultAudioStreamIndex": 1, "DefaultSubtitleStreamIndex": -1,
+                    "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsProbing": true, "SupportsTranscoding": false,
+                    "AddApiKeyToDirectStreamUrl": false, "RequiresClosing": false, "RequiresOpening": false, "ProbeEngine": "rust-native", "MediaStreams": media_streams.clone()
+                })
+            }).collect()
+        };
+
+        let played = if typ == "Series" { total_eps > 0 && total_eps == played_eps } 
+                     else if typ == "Season" { season_total_eps > 0 && season_total_eps == season_played_eps } 
                      else { play_count > 0 };
-        let unplayed = if r_type == "Series" { total_eps - played_eps } 
-                       else if r_type == "Season" { season_total_eps - season_played_eps } 
+        let unplayed = if typ == "Series" { total_eps - played_eps } 
+                       else if typ == "Season" { season_total_eps - season_played_eps } 
                        else { 0 };
-        let recursive_count = if r_type == "Series" { total_eps } else if r_type == "Season" { season_total_eps } else { 0 };
-        let child_count = if r_type == "Series" { total_seasons } else if r_type == "Season" { season_total_eps } else { 0 };
-
-        let tmdb_id: String = row.get(15).unwrap_or_default();
-        let imdb_id: String = row.get(16).unwrap_or_default();
+        let recursive_count = if typ == "Series" { total_eps } else if typ == "Season" { season_total_eps } else { 0 };
+        let child_count = if typ == "Series" { total_seasons } else if typ == "Season" { season_total_eps } else { 0 };
 
         Ok(json!({
-            "Id": id.to_string(), "ServerId": "rust-em-server", "Name": row.get::<_, String>(1).unwrap_or_default(),
-            "Type": if r_type == "movies" { "Movie" } else if r_type == "Series" { "Series" } else if r_type == "Season" { "Season" } else { "Episode" },
-            "Overview": row.get::<_, String>(4).unwrap_or_default(),
-            "RunTimeTicks": run_time_ticks, "RecursiveItemCount": recursive_count, "ChildCount": child_count,
-            "People": people, "ImageTags": image_tags,
-            "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &r_type),
-            "MediaStreams": serde_json::from_str::<Value>(&row.get::<_, String>(34).unwrap_or_else(|_| "[]".into())).unwrap_or(json!([])),
-            "UserData": { "Played": played, "UnplayedItemCount": unplayed, "PlaybackPositionTicks": playback_ticks }
+            "Id": id.to_string(), "ServerId": "rust-em-server", "Name": title.clone(),
+            "OriginalTitle": json!(original_title), "SortName": json!(sort_title.clone()), "ForcedSortName": json!(sort_title.clone()),
+            "Type": if typ == "movies" { "Movie" } else if typ == "Series" { "Series" } else if typ == "Season" { "Season" } else { "Episode" },
+            "MediaType": "Video", "IsFolder": false, "Overview": plot, "ProductionYear": year_str.parse::<i32>().unwrap_or(0), "PremiereDate": premiered, "ReleaseDate": releasedate,
+            "DateCreated": format_iso8601(date_created_ts), "CommunityRating": rating, "OfficialRating": mpaa, "RunTimeTicks": run_time_ticks, "Size": size, "Bitrate": est_bitrate,
+            "Genres": genres_vec, "GenreItems": genre_items, "Tags": tags_vec, "TagItems": tag_items,
+            "Taglines": if tagline.is_empty() { json!([]) } else { json!([tagline]) }, "Studios": studios, "People": people,
+            "ProviderIds": json!({ "Tmdb": tmdb_id, "Imdb": imdb_id, "num": num }),
+            "ImageTags": image_tags, "BackdropImageTags": backdrop_tags, "PrimaryImageAspectRatio": if typ == "Episode" { json!(1.7777777777777777) } else if aspect_ratio > 0.0 { json!(aspect_ratio) } else { json!(0.6666666666666666) },
+            "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(), "OriginalLanguage": json!(if !original_language.is_empty() { original_language } else { language }),
+            "SetName": json!(set_name), "SeriesName": json!(if typ == "tvshows" { series } else { "".to_string() }),
+            "Path": decode_url(&real_path), "Container": "mp4", "MediaSourceCount": media_sources.len(), "MediaSources": media_sources,
+            "RecursiveItemCount": recursive_count, "ChildCount": child_count, "SeasonCount": if typ == "Series" { total_seasons } else { 0 },
+            "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &typ),
+            "ProbeEngine": "rust-native", "LocationType": "FileSystem", "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
+            "UserData": { 
+                "ItemId": id.to_string(), "Key": id.to_string(), 
+                "PlaybackPositionTicks": playback_ticks, "PlayCount": play_count, 
+                "IsFavorite": is_favorite > 0, "Played": played, 
+                "PlayedPercentage": if run_time_ticks > 0 { playback_ticks * 100 / run_time_ticks } else { 0 },
+                "LastPlayedDate": if !last_played_str.is_empty() {
+                    if let Ok(ts) = last_played_str.parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
+                } else { json!(null) },
+                "UnplayedItemCount": unplayed
+            }
         }))
     }).ok();
 
-    if let Some(item) = item_opt { Json(item).into_response() } else { StatusCode::NOT_FOUND.into_response() }
-}
-
-
-pub async fn emby_item_counts(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
-    let conn = pool.lock().unwrap();
-    let movie_count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE type='movies'", [], |r| r.get(0)).unwrap_or(0);
-    let series_count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE type='tvshows' OR type='Series'", [], |r| r.get(0)).unwrap_or(0);
-    Json(json!({ "MovieCount": movie_count, "SeriesCount": series_count, "EpisodeCount": 0, "ArtistCount": 0, "SongCount": 0, "AlbumCount": 0, "MusicVideoCount": 0, "BoxSetCount": 0, "BookCount": 0, "TrailerCount": 0 }))
-}
-
-#[derive(Deserialize)]
-pub struct SearchQuery { #[serde(rename = "SearchTerm")] pub search_term: Option<String>, #[serde(rename = "Limit")] pub limit: Option<i64> }
-pub async fn emby_search_hints(State(pool): State<Arc<Mutex<Connection>>>, Query(q): Query<SearchQuery>) -> impl IntoResponse {
-    let term = q.search_term.unwrap_or_default();
-    if term.is_empty() { return Json(json!({ "SearchHints": [], "TotalRecordCount": 0 })); }
-    let limit = q.limit.unwrap_or(20);
-    let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id, title, type, year, poster_path FROM items WHERE title LIKE ?1 ORDER BY id DESC LIMIT ?2").unwrap();
-    let pattern = format!("%{}%", term);
-    let hints: Vec<Value> = stmt.query_map(rusqlite::params![pattern, limit], |row| {
-        let id: i64 = row.get(0).unwrap_or_default();
-        let r_type: String = row.get(2).unwrap_or_default();
-        let has_poster = !row.get::<_, String>(4).unwrap_or_default().is_empty();
-        Ok(json!({ "ItemId": id.to_string(), "Id": id.to_string(), "Name": row.get::<_, String>(1).unwrap_or_default(), "Type": if r_type == "movies" { "Movie" } else { "Series" }, "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0), "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) }, "MatchedTerm": term, "PrimaryImageTag": if has_poster { format!("tag_{}", id) } else { "".to_string() } }))
-    }).unwrap().filter_map(Result::ok).collect();
-    Json(json!({ "SearchHints": hints, "TotalRecordCount": hints.len() }))
+    match item_opt {
+        Ok(Some(item)) => Json(item).into_response(),
+        _ => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
@@ -1424,9 +1475,7 @@ pub async fn emby_items_filters(State(pool): State<Arc<Mutex<Connection>>>, Quer
     Json(json!({ "Genres": genre_items, "Tags": tag_items, "OfficialRatings": rating_items, "Years": year_list }))
 }
 
-pub async fn emby_activity_log() -> impl IntoResponse {
-    Json(json!({ "Items": [], "TotalRecordCount": 0 }))
-}
+pub async fn emby_activity_log() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 
 pub async fn emby_scheduled_tasks() -> impl IntoResponse {
     let is_running = *SCAN_STATUS.get_or_init(|| Mutex::new(false)).lock().unwrap();
@@ -1562,6 +1611,31 @@ pub async fn emby_hide_from_resume(AxumPath((_user_id, _item_id)): AxumPath<(Str
 }
 
 pub async fn emby_thumbnail_set(AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse { Json(json!({ "Id": item_id.to_string(), "ThumbnailSet": {} })) }
+
+pub async fn emby_item_counts(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let movie_count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE type='movies'", [], |r| r.get(0)).unwrap_or(0);
+    let series_count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE type='tvshows' OR type='Series'", [], |r| r.get(0)).unwrap_or(0);
+    Json(json!({ "MovieCount": movie_count, "SeriesCount": series_count, "EpisodeCount": 0, "ArtistCount": 0, "SongCount": 0, "AlbumCount": 0, "MusicVideoCount": 0, "BoxSetCount": 0, "BookCount": 0, "TrailerCount": 0 }))
+}
+
+#[derive(Deserialize)]
+pub struct SearchQuery { #[serde(rename = "SearchTerm")] pub search_term: Option<String>, #[serde(rename = "Limit")] pub limit: Option<i64> }
+pub async fn emby_search_hints(State(pool): State<Arc<Mutex<Connection>>>, Query(q): Query<SearchQuery>) -> impl IntoResponse {
+    let term = q.search_term.unwrap_or_default();
+    if term.is_empty() { return Json(json!({ "SearchHints": [], "TotalRecordCount": 0 })); }
+    let limit = q.limit.unwrap_or(20);
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT id, title, type, year, poster_path FROM items WHERE title LIKE ?1 ORDER BY id DESC LIMIT ?2").unwrap();
+    let pattern = format!("%{}%", term);
+    let hints: Vec<Value> = stmt.query_map(rusqlite::params![pattern, limit], |row| {
+        let id: i64 = row.get(0).unwrap_or_default();
+        let r_type: String = row.get(2).unwrap_or_default();
+        let has_poster = !row.get::<_, String>(4).unwrap_or_default().is_empty();
+        Ok(json!({ "ItemId": id.to_string(), "Id": id.to_string(), "Name": row.get::<_, String>(1).unwrap_or_default(), "Type": if r_type == "movies" { "Movie" } else { "Series" }, "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0), "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) }, "MatchedTerm": term, "PrimaryImageTag": if has_poster { format!("tag_{}", id) } else { "".to_string() } }))
+    }).unwrap().filter_map(Result::ok).collect();
+    Json(json!({ "SearchHints": hints, "TotalRecordCount": hints.len() }))
+}
 
 pub async fn emby_danmu(_: AxumPath<String>) -> impl IntoResponse { Json(json!([])) }
 
