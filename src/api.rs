@@ -140,7 +140,7 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
         params.push(g.clone()); params.push(format!("{} / %", g)); params.push(format!("% / {}", g)); params.push(format!("% / {} / %", g));
     }
     if let Some(t) = &query.tag { 
-        sql.push_str(" AND (tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)");
+        where_clauses.push("(tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)".to_string());
         params.push(t.clone()); params.push(format!("{} / %", t)); params.push(format!("% / {}", t)); params.push(format!("% / {} / %", t));
     }
     if let Some(st) = &query.studio { 
@@ -426,27 +426,28 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
     }
 
-    let mut sql = format!("SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path, ud.play_count, ud.last_played_date, items.series_id, items.parent_id, items.season_number, items.episode_number FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE ud.playback_position_ticks > 0", req_user_id);
+    let mut where_clauses = vec!["ud.playback_position_ticks > 0".to_string()];
     let mut params: Vec<String> = Vec::new();
 
     if let Some(types) = query.get("IncludeItemTypes") {
-        if types.contains("Movie") { sql.push_str(" AND items.type = 'movies'"); }
-        else if types.contains("Episode") { sql.push_str(" AND items.type = 'Episode'"); }
+        if types.contains("Movie") { where_clauses.push("items.type = 'movies'".to_string()); }
+        else if types.contains("Episode") { where_clauses.push("items.type = 'Episode'".to_string()); }
     }
 
     if let Some(libs) = &allowed_libs {
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
-        sql.push_str(&format!(" AND items.library_id IN ({})", libs_str.join(",")));
+        where_clauses.push(format!("items.library_id IN ({})", libs_str.join(",")));
     }
     if let Some(pid) = query.get("ParentId") {
         if pid.starts_with("lib_") {
             if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
-                sql.push_str(" AND items.library_id = ?");
+                where_clauses.push("items.library_id = ?".to_string());
                 params.push(lib_id.to_string());
             }
         }
     }
-    sql.push_str(" ORDER BY ud.last_played_date DESC LIMIT 30");
+    let where_str = where_clauses.join(" AND ");
+    let sql = format!("SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path, ud.play_count, ud.last_played_date, items.series_id, items.parent_id, items.season_number, items.episode_number FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE {} ORDER BY ud.last_played_date DESC LIMIT 30", req_user_id, where_str);
     
     let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
@@ -773,22 +774,22 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     }
 
     if let Some(filters) = &query.filters {
-        if filters.contains("IsPlayed") { sql.push_str(" AND ud.play_count > 0"); } 
-        else if filters.contains("IsUnplayed") { sql.push_str(" AND IFNULL(ud.play_count, 0) = 0"); }
-        if filters.contains("IsFavorite") { sql.push_str(" AND ud.is_favorite = 1"); }
+        if filters.contains("IsPlayed") { where_clauses.push("ud.play_count > 0".to_string()); } 
+        else if filters.contains("IsUnplayed") { where_clauses.push("IFNULL(ud.play_count, 0) = 0".to_string()); }
+        if filters.contains("IsFavorite") { where_clauses.push("ud.is_favorite = 1".to_string()); }
     }
 
     if let Some(pid) = &query.parent_id {
         if pid.starts_with("folder_") {
             if let Some(abs_path) = from_hex(pid.trim_start_matches("folder_")) { 
-                sql.push_str(" AND file_path LIKE ?"); 
+                where_clauses.push("file_path LIKE ?".to_string());
                 params.push(format!("{}/%", abs_path.trim_end_matches('/'))); 
             } else { 
                 return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); 
             }
         } else if pid.starts_with("lib_") {
             if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { 
-                sql.push_str(" AND library_id = ?"); 
+                where_clauses.push("library_id = ?".to_string());
                 params.push(lib_id.to_string()); 
             }
         } else if pid.starts_with("boxset_") {
@@ -807,7 +808,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
                 if !found_set_name.is_empty() { break; }
             }
             if !found_set_name.is_empty() {
-                sql.push_str(" AND (set_name = ? OR set_name LIKE ? OR set_name LIKE ? OR set_name LIKE ?)");
+                where_clauses.push("(set_name = ? OR set_name LIKE ? OR set_name LIKE ? OR set_name LIKE ?)".to_string());
                 params.push(found_set_name.clone());
                 params.push(format!("{} / %", found_set_name));
                 params.push(format!("% / {}", found_set_name));
@@ -831,7 +832,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         is_search = true;
 
         let pattern = format!("%{}%", term);
-        sql.push_str(" AND (title LIKE ? OR original_title LIKE ? OR tags LIKE ? OR actors LIKE ? OR directors LIKE ?)");
+        where_clauses.push("(title LIKE ? OR original_title LIKE ? OR tags LIKE ? OR actors LIKE ? OR directors LIKE ?)".to_string());
         params.push(pattern.clone()); params.push(pattern.clone()); params.push(pattern.clone()); params.push(pattern.clone()); params.push(pattern.clone());
 
         let types_lower = query.include_item_types.as_deref().map(|t| t.to_lowercase()).unwrap_or_default();
@@ -903,7 +904,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             or_clauses.push("(genres = ? OR genres LIKE ? OR genres LIKE ? OR genres LIKE ?)");
             params.push(name.clone()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name));
         }
-        if !or_clauses.is_empty() { sql.push_str(&format!(" AND ({})", or_clauses.join(" OR "))); }
+        if !or_clauses.is_empty() { where_clauses.push(format!("({})", or_clauses.join(" OR "))); }
     }
 
     if !studio_filters.is_empty() {
@@ -914,7 +915,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             or_clauses.push("(studios = ? OR studios LIKE ? OR studios LIKE ? OR studios LIKE ?)");
             params.push(name.clone()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name));
         }
-        if !or_clauses.is_empty() { sql.push_str(&format!(" AND ({})", or_clauses.join(" OR "))); }
+        if !or_clauses.is_empty() { where_clauses.push(format!("({})", or_clauses.join(" OR "))); }
     }
 
     if !person_filters.is_empty() {
@@ -925,13 +926,13 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             or_clauses.push("(directors = ? OR directors LIKE ? OR directors LIKE ? OR directors LIKE ? OR actors LIKE ? OR actors LIKE ?)");
             params.push(name.clone()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name)); params.push(format!("%\"name\":\"{}\"%", name)); params.push(format!("%\"name\": \"{}\"%", name));
         }
-        if !or_clauses.is_empty() { sql.push_str(&format!(" AND ({})", or_clauses.join(" OR "))); }
+        if !or_clauses.is_empty() { where_clauses.push(format!("({})", or_clauses.join(" OR "))); }
     }
 
     for raw_id in tag_filters {
         let name = raw_id.replace("tag_", "").trim().to_string();
         if name.is_empty() { continue; }
-        sql.push_str(" AND (tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)");
+        where_clauses.push("(tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)".to_string());
         params.push(name.clone()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name));
     }
 
@@ -956,7 +957,9 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     
     let start = query.start_index.unwrap_or(0);
     let limit = query.limit.unwrap_or(100);
-    sql.push_str(&format!("{} LIMIT {} OFFSET {}", order_clause, limit, start));
+    
+    let data_sql = format!("SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, IFNULL(ud.playback_position_ticks, 0), items.fanart_path, items.date_created, items.actors, items.directors, items.tags, items.studios, IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0), IFNULL(ud.last_played_date, ''), (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE {} {} LIMIT {} OFFSET {}", req_user_id, where_str, order_clause, limit, start);
+    let sql = data_sql;
     
     let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
