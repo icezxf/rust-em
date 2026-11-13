@@ -410,7 +410,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         if libs.is_empty() { return Json(json!([])).into_response(); }
     }
 
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path, (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count FROM items WHERE 1=1".to_string();
+    let mut sql = format!("SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path, (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count, IFNULL(ud.play_count, 0) as play_count, IFNULL(ud.is_favorite, 0) as is_favorite, IFNULL(ud.playback_position_ticks, 0) as playback_position_ticks FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE 1=1", req_user_id);
     let mut params: Vec<String> = Vec::new();
 
     if let Some(libs) = &allowed_libs {
@@ -474,10 +474,16 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &r_type),
-            "RecursiveItemCount": row.get::<_, i64>(19).unwrap_or(0),
-            "ChildCount": row.get::<_, i64>(19).unwrap_or(0),
+            "RecursiveItemCount": row.get::<_, i64>("recursive_item_count").unwrap_or(0),
+            "ChildCount": row.get::<_, i64>("recursive_item_count").unwrap_or(0),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
-            "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0.0 }
+            "UserData": {
+                "Played": row.get::<_, i32>("play_count").unwrap_or(0) > 0,
+                "PlayCount": row.get::<_, i32>("play_count").unwrap_or(0),
+                "IsFavorite": row.get::<_, i32>("is_favorite").unwrap_or(0) > 0,
+                "PlaybackPositionTicks": row.get::<_, i64>("playback_position_ticks").unwrap_or(0),
+                "PlayedPercentage": if total_ticks > 0 { (row.get::<_, i64>("playback_position_ticks").unwrap_or(0) as f64 / total_ticks as f64) * 100.0 } else { 0.0 }
+            }
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(items).into_response()
@@ -1025,7 +1031,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     let start = query.start_index.unwrap_or(0);
     let limit = query.limit.unwrap_or(100);
     
-    let data_sql = format!("SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, IFNULL(ud.playback_position_ticks, 0), fanart_path, date_created, actors, directors, tags, studios, IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0), IFNULL(ud.last_played_date, ''), (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE {} {} LIMIT {} OFFSET {}", req_user_id, where_str, order_clause, limit, start);
+    let data_sql = format!("SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, IFNULL(ud.playback_position_ticks, 0) as playback_position_ticks, fanart_path, date_created, actors, directors, tags, studios, IFNULL(ud.play_count, 0) as play_count, IFNULL(ud.is_favorite, 0) as is_favorite, IFNULL(ud.last_played_date, '') as last_played_date, (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE {} {} LIMIT {} OFFSET {}", req_user_id, where_str, order_clause, limit, start);
 
     let mut stmt = match conn.prepare(&data_sql) { Ok(s) => s, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
