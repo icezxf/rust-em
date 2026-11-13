@@ -12,6 +12,7 @@ use tokio::net::TcpListener;
 
 mod api;
 mod auth;
+mod scanner;
 mod db;
 mod nfo;
 mod probe;
