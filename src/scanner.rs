@@ -217,6 +217,17 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
         }
         let mut final_poster = nfo_poster; let mut final_fanart = nfo_fanart;
         let mut logo = String::new(); let mut thumb = String::new(); let mut banner = String::new();
+        
+        // 如果是剧集，优先找同名的 .jpg 或 .png 作为单集封面
+        if is_tv {
+            for ext in &["jpg", "png", "webp"] {
+                let ep_img = parent.join(format!("{}.{}", base_stem, ext));
+                if ep_img.exists() {
+                    final_poster = ep_img.to_string_lossy().to_string();
+                    break;
+                }
+            }
+        }
         if let Ok(entries) = std::fs::read_dir(&parent) {
             for entry in entries.flatten() {
                 let p = entry.path(); if !p.is_file() { continue; }

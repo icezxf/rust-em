@@ -1062,9 +1062,10 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
             let studios: Vec<Value> = studios_str.split(" / ").filter(|s| !s.trim().is_empty()).map(|s| json!({ "Name": s, "Id": format!("studio_{}", s) })).collect();
 
             let mut people: Vec<Value> = Vec::new();
-            let dir_names: Vec<&str> = directors_str.split(" / ").filter(|s| !s.is_empty()).collect();
-            let director_str = dir_names.join(", ");
-            if !director_str.is_empty() { people.push(json!({ "Name": director_str, "Type": "Director", "Id": format!("person_{}", director_str), "PrimaryImageTag": "" })); }
+            // 把导演拆开，每个人单独返回，客户端才会正确展示
+            for d in directors_str.split(" / ").filter(|s| !s.is_empty()) {
+                people.push(json!({ "Name": d.trim(), "Type": "Director", "Id": format!("person_{}", d.trim()), "PrimaryImageTag": "" }));
+            }
             
             for a in actors.iter() {
                 people.push(json!({
