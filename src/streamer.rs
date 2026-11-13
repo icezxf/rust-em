@@ -1,6 +1,7 @@
 use axum::{
     extract::{State, Query, Path as AxumPath},
-    http::{StatusCode, HeaderMap, header::LOCATION},
+    http::{StatusCode, HeaderMap, header::{LOCATION, USER_AGENT}},
+    Json,
     response::{IntoResponse, Response},
 };
 use std::sync::{Arc, Mutex, OnceLock};
