@@ -1129,6 +1129,13 @@ pub async fn emby_shows_seasons(State(pool): State<Arc<Mutex<Connection>>>, Axum
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct EpisodesQuery { 
+    #[serde(rename = "SeasonId")] season_id: Option<String>,
+    #[serde(rename = "ParentId")] parent_id: Option<String>,
+}
+
 pub async fn emby_shows_episodes(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(series_id): AxumPath<String>, Query(query): Query<EpisodesQuery>) -> impl IntoResponse {
     let Ok(sid) = series_id.parse::<i64>() else { return Json(json!({"Items": [], "TotalRecordCount": 0})); };
     let conn = pool.lock().unwrap();
