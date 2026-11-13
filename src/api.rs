@@ -940,6 +940,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     } else {
         let from_idx = sql.find(" FROM items").unwrap_or(0);
         let count_sql = format!("SELECT COUNT(*){}", &sql[from_idx..]);
+        // 💡 核心修复：统计总数时如果报错（参数数量不匹配），兜底返回 0，绝不 panic 导致整个服务崩溃
         conn.query_row(&count_sql, rusqlite::params_from_iter(params.iter()), |r| r.get(0)).unwrap_or(0)
     };
     
