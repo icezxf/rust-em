@@ -214,6 +214,14 @@
                                     <div id="detail-genres-val" class="flex flex-wrap gap-1.5"></div>
                                 </div>
                                 <div id="detail-play-actions" class="flex flex-wrap gap-2 mb-4"></div>
+                                
+                                <!-- 剧集专属的季/集选择区 -->
+                                <div id="detail-tvshows-container" class="hidden w-full mb-6 bg-[#16191f]/50 p-4 rounded-xl border border-gray-800">
+                                    <div class="text-xs text-gray-500 font-bold mb-2 uppercase tracking-wider">剧集列表</div>
+                                    <div id="detail-seasons-list" class="flex gap-2 mb-4 overflow-x-auto no-scrollbar pb-1"></div>
+                                    <div id="detail-episodes-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+                                </div>
+
                                 <p id="detail-plot" class="text-gray-300 leading-relaxed text-sm md:text-base mb-4 whitespace-pre-wrap drop-shadow-md">暂无简介...</p>
                                 <div class="flex flex-col gap-1 text-xs md:text-sm text-gray-300 pt-3 border-t border-gray-600/50">
                                     <div id="detail-series-box" class="hidden"><span class="text-gray-400 w-12 inline-block font-medium">系列:</span> <span id="detail-series" class="text-blue-400 font-medium drop-shadow-sm"></span></div>
@@ -585,7 +593,16 @@
             } else { tagsBox.classList.add('hidden'); }
 
             const playActions = document.getElementById('detail-play-actions');
-            playActions.innerHTML = `<button onclick="playVideo(0)" class="bg-white text-black hover:bg-gray-200 px-6 py-2 rounded-lg font-bold flex items-center gap-2 transition shadow-lg text-sm"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>播放</button>`;
+            const tvshowsContainer = document.getElementById('detail-tvshows-container');
+            
+            if (item.type === 'tvshows' || item.type === 'Series') {
+                playActions.innerHTML = ''; 
+                tvshowsContainer.classList.remove('hidden');
+                loadSeasons(item.id);
+            } else {
+                playActions.innerHTML = `<button onclick="playVideo(0)" class="bg-white text-black hover:bg-gray-200 px-6 py-2 rounded-lg font-bold flex items-center gap-2 transition shadow-lg text-sm"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>播放</button>`;
+                tvshowsContainer.classList.add('hidden');
+            }
 
             document.getElementById('detail-poster').src = item.has_poster ? `/api/images/${item.id}/poster?token=${token}&t=${Date.now()}` : defaultPosterSvg;
             document.getElementById('detail-fanart').style.backgroundImage = item.has_poster ? `url('/api/images/${item.id}/fanart?token=${token}&t=${Date.now()}')` : 'none';
@@ -915,6 +932,97 @@
                 btn.innerText = originalText; btn.disabled = false; btn.classList.remove('opacity-50');
             }
         }
+    
+        window.cachedEpisodes = {};
+
+        async function loadSeasons(seriesId) {
+            const list = document.getElementById('detail-seasons-list');
+            const epList = document.getElementById('detail-episodes-list');
+            list.innerHTML = '<div class="text-gray-500 text-sm">加载季...</div>';
+            epList.innerHTML = '';
+            
+            try {
+                const res = await fetch(`/emby/Shows/${seriesId}/Seasons?api_key=${token}`);
+                if (!res.ok) throw new Error("请求失败");
+                const data = await res.json();
+                
+                if (data.Items && data.Items.length > 0) {
+                    list.innerHTML = data.Items.map((s, idx) => 
+                        `<button onclick="loadEpisodes('${seriesId}', '${s.Id}')" id="season-btn-${s.Id}" class="px-4 py-1.5 rounded-lg text-sm transition whitespace-nowrap ${idx === 0 ? 'bg-blue-600 text-white font-bold' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}">${s.Name}</button>`
+                    ).join('');
+                    await loadEpisodes(seriesId, data.Items[0].Id);
+                } else {
+                    list.innerHTML = '<div class="text-gray-500 text-sm">没有找到季</div>';
+                }
+            } catch(e) {
+                list.innerHTML = '<div class="text-red-400 text-sm">获取季失败</div>';
+            }
+        }
+
+        async function loadEpisodes(seriesId, seasonId) {
+            document.querySelectorAll('[id^="season-btn-"]').forEach(btn => {
+                btn.className = 'px-4 py-1.5 rounded-lg text-sm transition whitespace-nowrap bg-gray-800 text-gray-300 hover:bg-gray-700';
+            });
+            const activeBtn = document.getElementById(`season-btn-${seasonId}`);
+            if (activeBtn) activeBtn.className = 'px-4 py-1.5 rounded-lg text-sm transition whitespace-nowrap bg-blue-600 text-white font-bold';
+            
+            const epList = document.getElementById('detail-episodes-list');
+            epList.innerHTML = '<div class="text-gray-500 text-sm col-span-full">加载剧集...</div>';
+            
+            try {
+                const res = await fetch(`/emby/Shows/${seriesId}/Episodes?SeasonId=${seasonId}&api_key=${token}`);
+                if (!res.ok) throw new Error("请求失败");
+                const data = await res.json();
+                
+                if (data.Items && data.Items.length > 0) {
+                    data.Items.forEach(e => { window.cachedEpisodes[e.Id] = e; });
+                    
+                    epList.innerHTML = data.Items.map(e => `
+                        <div class="bg-[#0f1115] border border-gray-700/50 rounded-lg p-3 hover:border-blue-500/50 transition group flex flex-col justify-between h-full">
+                            <div>
+                                <div class="flex justify-between items-start mb-1">
+                                    <div class="text-sm text-gray-200 font-bold truncate pr-2">${e.Name}</div>
+                                    <div class="text-[10px] text-gray-500 whitespace-nowrap">E${e.IndexNumber}</div>
+                                </div>
+                                <div class="text-xs text-gray-400 line-clamp-2 mb-3 h-8">${e.Overview || '暂无简介'}</div>
+                            </div>
+                            <button onclick="playEpisode('${e.Id}')" class="w-full bg-white/10 hover:bg-blue-600 text-white text-xs py-1.5 rounded transition flex items-center justify-center gap-1 group-hover:bg-blue-600">
+                                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
+                                播放本集
+                            </button>
+                        </div>
+                    `).join('');
+                } else {
+                    epList.innerHTML = '<div class="text-gray-500 text-sm col-span-full">本季暂无剧集</div>';
+                }
+            } catch(e) {
+                epList.innerHTML = '<div class="text-red-400 text-sm col-span-full">获取剧集失败</div>';
+            }
+        }
+
+        function playEpisode(epId) {
+            const ep = window.cachedEpisodes[epId];
+            if (!ep) return;
+            
+            const playerModal = document.getElementById('video-player-modal');
+            const video = document.getElementById('main-video');
+            const loading = document.getElementById('player-loading');
+            const titleEl = document.getElementById('player-title');
+            const infoEl = document.getElementById('player-media-info');
+            
+            titleEl.innerText = ep.Name;
+            infoEl.innerHTML = `<span class="text-gray-400">S${ep.ParentIndexNumber} E${ep.IndexNumber}</span>`;
+            
+            playerModal.classList.remove('hidden');
+            loading.classList.remove('hidden');
+            loading.innerHTML = `<div class="w-10 h-10 border-4 border-gray-600 border-t-blue-500 rounded-full animate-spin mb-4"></div><div class="text-sm text-gray-300">正在解析网盘直链...</div>`;
+            
+            video.src = `/Videos/${ep.Id}/stream?token=${token}&part=0`;
+            video.play().then(() => { loading.classList.add('hidden'); }).catch(e => {
+                loading.innerHTML = `<div class="text-red-400 font-bold">播放失败</div><div class="text-sm text-gray-300 mt-2">浏览器可能不支持该格式，或网盘风控拦截。</div>`;
+            });
+        }
+
     </script>
 </body>
 </html>
