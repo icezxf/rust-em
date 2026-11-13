@@ -460,11 +460,11 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let poster_tag = if has_poster { format!("tag_{}_{}", id, &hash_hex[..8]) } else { String::new() };
         
         let playback_ticks: i64 = row.get(18).unwrap_or(0);
-        let series_id: Option<i64> = row.get(22).ok();
-        let parent_id: Option<i64> = row.get(23).ok();
-        let s_num: Option<i32> = row.get(24).ok();
-        let e_num: Option<i32> = row.get(25).ok();
-        let item_type: String = row.get(2).unwrap_or_default();
+        let _series_id: Option<i64> = row.get(22).ok();
+        let _parent_id: Option<i64> = row.get(23).ok();
+        let _s_num: Option<i32> = row.get(24).ok();
+        let _e_num: Option<i32> = row.get(25).ok();
+        let _item_type: String = row.get(2).unwrap_or_default();
         let fanart_path: String = row.get(19).unwrap_or_default();
         let has_fanart = !fanart_path.is_empty();
         let mut hf = Sha256::new(); hf.update(fanart_path.as_bytes()); let hashf = hf.finalize();
@@ -970,11 +970,11 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         } else { String::new() };
         
         let playback_ticks: i64 = row.get(18).unwrap_or(0);
-        let series_id: Option<i64> = row.get(22).ok();
-        let parent_id: Option<i64> = row.get(23).ok();
-        let s_num: Option<i32> = row.get(24).ok();
-        let e_num: Option<i32> = row.get(25).ok();
-        let item_type: String = row.get(2).unwrap_or_default();
+        let _series_id: Option<i64> = row.get(22).ok();
+        let _parent_id: Option<i64> = row.get(23).ok();
+        let _s_num: Option<i32> = row.get(24).ok();
+        let _e_num: Option<i32> = row.get(25).ok();
+        let _item_type: String = row.get(2).unwrap_or_default();
         let fanart_path: String = row.get(19).unwrap_or_default();
         let has_fanart = !fanart_path.is_empty();
         let mut hf = Sha256::new(); hf.update(fanart_path.as_bytes()); let hashf = hf.finalize();
