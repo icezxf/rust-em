@@ -1121,7 +1121,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
                 "ProviderIds": json!({ "Tmdb": tmdb_id, "Imdb": imdb_id, "num": num }),
                 "ImageTags": image_tags, "BackdropImageTags": backdrop_tags, "PrimaryImageAspectRatio": if aspect_ratio > 0.0 { json!(aspect_ratio) } else { json!(0.6666666666666666) },
                 "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(), "OriginalLanguage": json!(if !original_language.is_empty() { original_language } else { language }),
-                "SetName": json!(set_name), "SeriesName": json!(if typ == "tvshows" { series } else { "".to_string() }),
+                "SetName": json!(set_name), "SeriesName": json!(if typ == "tvshows" { &series } else { "" }),
                 "Path": decode_url(&real_path), "Container": "mp4", "MediaSourceCount": media_sources.len(), "MediaSources": media_sources,
                 "SeriesId": if r_type == "Episode" { json!(parent_id.to_string()) } else { json!(null) },
                 "SeriesName": if r_type == "Episode" { json!(series) } else { json!(null) },
