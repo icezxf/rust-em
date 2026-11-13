@@ -19,10 +19,6 @@ use crate::auth::{TOKENS, get_allowed_libs};
 static SCAN_STATUS: OnceLock<Mutex<bool>> = OnceLock::new();
 static LAST_SCAN_TIME: OnceLock<Mutex<String>> = OnceLock::new();
 
-// ==============================================================================
-// 核心工具函数
-// ==============================================================================
-
 fn build_external_urls(tmdb_id: &str, imdb_id: &str, item_type: &str) -> Value {
     let mut urls = Vec::new();
     if !tmdb_id.is_empty() && tmdb_id != "0" {
@@ -35,17 +31,7 @@ fn build_external_urls(tmdb_id: &str, imdb_id: &str, item_type: &str) -> Value {
     json!(urls)
 }
 
-fn get_image_tag(poster_path: &str) -> String {
-    if poster_path.is_empty() { return String::new(); }
-    let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
-    let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
-    format!("tag_{}", &hash_hex[..8])
-}
-
-// ==============================================================================
-// Web 管理端 API
-// ==============================================================================
-
+// ======= Web API =======
 #[derive(Deserialize)]
 pub struct LoginReq { username: String, password: String }
 pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<LoginReq>) -> impl IntoResponse {
@@ -53,11 +39,17 @@ pub async fn login(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Js
     let conn = pool.lock().unwrap();
     if conn.prepare("SELECT id FROM users WHERE username = ?1 AND password = ?2").unwrap().exists([&payload.username, &format!("{:x}", hasher.finalize())]).unwrap() {
         let user_id: i64 = conn.query_row("SELECT id FROM users WHERE username = ?1", [&payload.username], |r| r.get(0)).unwrap_or(0);
-        if user_id != 1 { return (StatusCode::FORBIDDEN, Json(json!({ "error": "只有管理员可以登录网页端" }))).into_response(); }
+        
+        if user_id != 1 {
+            return (StatusCode::FORBIDDEN, Json(json!({ "error": "只有管理员可以登录网页端" }))).into_response();
+        }
+        
         let token = uuid::Uuid::new_v4().to_string();
         TOKENS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap().insert(token.clone(), user_id);
         (StatusCode::OK, Json(json!({ "token": token }))).into_response()
-    } else { (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid credentials" }))).into_response() }
+    } else { 
+        (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid credentials" }))).into_response() 
+    }
 }
 
 #[derive(Deserialize)]
@@ -219,11 +211,14 @@ pub async fn update_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payloa
     let mut hasher_old = Sha256::new(); hasher_old.update(&payload.old_password);
     let mut hasher_new = Sha256::new(); hasher_new.update(&payload.new_password);
     let conn = pool.lock().unwrap();
+    
     if conn.prepare("SELECT id FROM users WHERE id = 1 AND password = ?1").unwrap().exists([&format!("{:x}", hasher_old.finalize())]).unwrap() {
         conn.execute("UPDATE users SET username = ?1, password = ?2 WHERE id = 1", [&payload.new_username, &format!("{:x}", hasher_new.finalize())]).unwrap();
         if let Some(tokens) = TOKENS.get() { tokens.lock().unwrap().clear(); }
         (StatusCode::OK, Json(json!({"status": "success"})))
-    } else { (StatusCode::BAD_REQUEST, Json(json!({"error": "旧密码错误"}))) }
+    } else { 
+        (StatusCode::BAD_REQUEST, Json(json!({"error": "旧密码错误"}))) 
+    }
 }
 
 pub async fn get_settings(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
@@ -279,19 +274,24 @@ pub async fn probe_scan(State(_pool): State<Arc<Mutex<Connection>>>, Json(req): 
 
 pub async fn api_generate_covers(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
     let pool_clone = pool.clone();
-    tokio::spawn(async move { crate::covers::generate_all_covers(pool_clone).await; });
+    tokio::spawn(async move {
+        crate::covers::generate_all_covers(pool_clone).await;
+    });
     Json(json!({"status": "started"}))
 }
 
 pub async fn api_get_users(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut stmt = conn.prepare("SELECT id, username FROM users WHERE id != 1").unwrap();
-    let users: Vec<Value> = stmt.query_map([], |r| Ok((r.get::<_, i64>(0).unwrap_or_default(), r.get::<_, String>(1).unwrap_or_default())))
-        .unwrap().filter_map(Result::ok).map(|(id, name)| {
-            let mut access_stmt = conn.prepare("SELECT library_id FROM user_library_access WHERE user_id = ?1").unwrap();
-            let libs: Vec<i64> = access_stmt.query_map([id], |r| r.get(0)).unwrap().filter_map(Result::ok).collect();
-            json!({ "id": id, "username": name, "libraries": libs })
-        }).collect();
+    let users: Vec<Value> = stmt.query_map([], |r| {
+        let id: i64 = r.get(0).unwrap_or_default();
+        let name: String = r.get(1).unwrap_or_default();
+        Ok((id, name))
+    }).unwrap().filter_map(Result::ok).map(|(id, name)| {
+        let mut access_stmt = conn.prepare("SELECT library_id FROM user_library_access WHERE user_id = ?1").unwrap();
+        let libs: Vec<i64> = access_stmt.query_map([id], |r| r.get(0)).unwrap().filter_map(Result::ok).collect();
+        json!({ "id": id, "username": name, "libraries": libs })
+    }).collect();
     Json(users)
 }
 
@@ -299,7 +299,9 @@ pub async fn api_get_users(State(pool): State<Arc<Mutex<Connection>>>) -> impl I
 pub struct CreateUserReq { username: String, password: String, libraries: Vec<i64> }
 pub async fn api_create_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<CreateUserReq>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
+    
     let user_id: i64 = conn.query_row("SELECT id FROM users WHERE username = ?1", [&payload.username], |r| r.get(0)).unwrap_or(0);
+    
     if user_id == 0 {
         if payload.password.is_empty() { return (StatusCode::BAD_REQUEST, "新建用户密码不能为空").into_response(); }
         let mut hasher = Sha256::new(); hasher.update(&payload.password);
@@ -311,11 +313,17 @@ pub async fn api_create_user(State(pool): State<Arc<Mutex<Connection>>>, Json(pa
             let hash = format!("{:x}", hasher.finalize());
             let _ = conn.execute("UPDATE users SET password = ?1 WHERE id = ?2", [&hash, &user_id.to_string()]);
         }
-    } else { return (StatusCode::FORBIDDEN, "不能修改管理员").into_response(); }
+    } else {
+        return (StatusCode::FORBIDDEN, "不能修改管理员").into_response();
+    }
+    
     let user_id: i64 = conn.query_row("SELECT id FROM users WHERE username = ?1", [&payload.username], |r| r.get(0)).unwrap_or(0);
+    
     if user_id > 1 {
         let _ = conn.execute("DELETE FROM user_library_access WHERE user_id = ?1", [user_id]);
-        for lib_id in payload.libraries { let _ = conn.execute("INSERT INTO user_library_access (user_id, library_id) VALUES (?1, ?2)", [user_id, lib_id]); }
+        for lib_id in payload.libraries {
+            let _ = conn.execute("INSERT INTO user_library_access (user_id, library_id) VALUES (?1, ?2)", [user_id, lib_id]);
+        }
     }
     StatusCode::OK.into_response()
 }
@@ -328,10 +336,7 @@ pub async fn api_delete_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPat
     StatusCode::OK.into_response()
 }
 
-// ==============================================================================
-// Emby API 系统与鉴权
-// ==============================================================================
-
+// ======= Emby API =======
 pub async fn emby_public_info() -> impl IntoResponse { Json(json!({ "ServerName": "Rust-Em", "Version": "4.8.0.0", "Id": "rust-em-server", "OperatingSystem": "Linux", "StartupWizardCompleted": true })) }
 pub async fn emby_info() -> impl IntoResponse { Json(json!({ "ServerName": "Rust-Em", "Version": "4.8.0.0", "Id": "rust-em-server", "OperatingSystem": "Linux", "OperatingSystemDisplayName": "Linux", "HasPendingRestart": false, "IsShuttingDown": false, "SupportsLibraryMonitor": false, "SupportsHttps": true, "HttpServerPortNumber": 8096 })) }
 pub async fn emby_ping() -> impl IntoResponse { "Emby Server" }
@@ -354,14 +359,29 @@ pub async fn emby_authenticate(State(pool): State<Arc<Mutex<Connection>>>, heade
     if let Some((id, name)) = user_opt {
         let token = uuid::Uuid::new_v4().to_string();
         TOKENS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap().insert(token.clone(), id);
-        (StatusCode::OK, Json(json!({ "User": { "Id": id.to_string(), "Name": name, "ServerId": "rust-em-server", "HasPassword": true, "Policy": { "IsAdministrator": id == 1, "EnableAllFolders": id == 1 } }, "SessionInfo": { "Id": uuid::Uuid::new_v4().to_string(), "UserId": id.to_string() }, "AccessToken": token, "ServerId": "rust-em-server" }))).into_response()
+        (StatusCode::OK, Json(json!({
+            "User": {
+                "Id": id.to_string(),
+                "Name": name,
+                "ServerId": "rust-em-server",
+                "HasPassword": true,
+                "Policy": { "IsAdministrator": id == 1, "EnableAllFolders": id == 1 }
+            },
+            "SessionInfo": { "Id": uuid::Uuid::new_v4().to_string(), "UserId": id.to_string() },
+            "AccessToken": token,
+            "ServerId": "rust-em-server"
+        }))).into_response()
     } else { (StatusCode::UNAUTHORIZED, Json(json!({ "error": "Invalid credentials" }))).into_response() }
 }
 
 pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
+    
     let mut sql = "SELECT id, name, type FROM libraries".to_string();
-    if req_user_id != 1 { sql.push_str(&format!(" WHERE id IN (SELECT library_id FROM user_library_access WHERE user_id = {})", req_user_id)); }
+    if req_user_id != 1 {
+        sql.push_str(&format!(" WHERE id IN (SELECT library_id FROM user_library_access WHERE user_id = {})", req_user_id));
+    }
+    
     let mut stmt = conn.prepare(&sql).unwrap();
     let items: Vec<Value> = stmt.query_map([], |row| {
         let id: i64 = row.get(0).unwrap_or_default(); let name: String = row.get(1).unwrap_or_default(); let lib_type: String = row.get(2).unwrap_or_default();
@@ -380,14 +400,13 @@ pub async fn emby_virtual_folders(State(pool): State<Arc<Mutex<Connection>>>) ->
     Json(folders)
 }
 
-// ==============================================================================
-// Emby API 列表与查询核心
-// ==============================================================================
-
 pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<HashMap<String, String>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
+    
     let allowed_libs = get_allowed_libs(&conn, req_user_id);
-    if let Some(libs) = &allowed_libs { if libs.is_empty() { return Json(json!([])).into_response(); } }
+    if let Some(libs) = &allowed_libs {
+        if libs.is_empty() { return Json(json!([])).into_response(); }
+    }
 
     let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path, (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count FROM items WHERE 1=1".to_string();
     let mut params: Vec<String> = Vec::new();
@@ -411,7 +430,11 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
     
     sql.push_str(" ORDER BY id DESC LIMIT 16"); 
     
-    let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(_) => return Json(json!([])).into_response() };
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(_) => return Json(json!([])).into_response(),
+    };
+    
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
     
     let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
@@ -436,7 +459,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let tmdb_id: String = row.get(12).unwrap_or_default();
         let imdb_id: String = row.get(13).unwrap_or_default();
         let r_type: String = row.get(2).unwrap_or_default();
-
+        
         Ok(json!({
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
             "Type": if r_type == "movies" { "Movie" } else if r_type == "Series" { "Series" } else { "Episode" },
@@ -451,6 +474,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &r_type),
             "RecursiveItemCount": row.get::<_, i64>(19).unwrap_or(0),
             "ChildCount": row.get::<_, i64>(19).unwrap_or(0),
+            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
             "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "PlayedPercentage": 0.0 }
         }))
     }).unwrap().filter_map(Result::ok).collect();
@@ -500,6 +524,7 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "SeasonId": if item_type == "Episode" { json!(row.get::<_, i64>(23).unwrap_or(0)) } else { json!(null) },
             "IndexNumber": if item_type == "Episode" { json!(row.get::<_, i32>(25).unwrap_or(0)) } else { json!(null) },
             "ParentIndexNumber": if item_type == "Episode" { json!(row.get::<_, i32>(24).unwrap_or(0)) } else { json!(null) },
+            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
             "UserData": { "Played": play_count > 0, "PlaybackPositionTicks": row.get::<_, i64>(18).unwrap_or(0) }
         }))
     }).unwrap().filter_map(Result::ok).collect();
@@ -1004,13 +1029,29 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
 
         Ok(json!({
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
-            "Type": if r_type == "movies" { "Movie" } else if r_type == "Series" { "Series" } else { "Episode" },
-            "IsFolder": false, "MediaType": "Video", "RunTimeTicks": total_ticks, "Size": size,
-            "RecursiveItemCount": recursive_count, "ChildCount": recursive_count,
+            "Type": if r_type == "movies" { "Movie" } else if r_type == "Series" { "Series" } else if r_type == "Season" { "Season" } else { "Episode" },
+            "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
+            "Overview": row.get::<_, String>(4).unwrap_or_default(), 
+            "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0), "RunTimeTicks": total_ticks, "Size": size,
+            "DateCreated": format_iso8601(row.get::<_, i64>(20).unwrap_or(0)), "PrimaryImageAspectRatio": 0.6666666666666666,
+            "Container": "mp4", "CanDelete": false, "CanDownload": false, "LocationType": "FileSystem", "Status": "Released",
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
+            "RecursiveItemCount": recursive_count, "ChildCount": recursive_count,
+            "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &r_type),
-            "UserData": { "Played": play_count > 0, "PlaybackPositionTicks": playback_ticks }
+            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
+            "UserData": { 
+                "PlaybackPositionTicks": playback_ticks, 
+                "PlayCount": play_count, 
+                "IsFavorite": row.get::<_, i32>(26).unwrap_or(0) > 0, 
+                "Played": play_count > 0, 
+                "PlayedPercentage": if total_ticks > 0 { (playback_ticks as f64 / total_ticks as f64) * 100.0 } else { 0.0 },
+                "LastPlayedDate": if !row.get::<_, String>(27).unwrap_or_default().is_empty() {
+                    if let Ok(ts) = row.get::<_, String>(27).unwrap_or_default().parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
+                } else { json!(null) },
+                "UnplayedItemCount": 0
+            }
         }))
     }).unwrap().filter_map(Result::ok).collect();
     
@@ -1080,10 +1121,6 @@ pub async fn emby_shows_episodes(State(pool): State<Arc<Mutex<Connection>>>, Axu
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
-
-// ==============================================================================
-// Emby API 详情与元数据
-// ==============================================================================
 
 pub async fn emby_item_detail(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<String>, Extension(req_user_id): Extension<i64>) -> Response { emby_item_detail_inner(pool, item_id, req_user_id).await }
 pub async fn emby_item_detail_with_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> Response { emby_item_detail_inner(pool, item_id, req_user_id).await }
@@ -1206,10 +1243,6 @@ pub async fn emby_studio(AxumPath(studio_id): AxumPath<String>) -> impl IntoResp
 pub async fn emby_studio_items(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(studio_id): AxumPath<String>, Query(mut query): Query<EmbyItemsQuery>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     query.studio_ids = Some(studio_id); query.studios = None; emby_items_inner(pool, query, req_user_id).await
 }
-
-// ==============================================================================
-// Emby API 字典与筛选
-// ==============================================================================
 
 pub async fn emby_genres(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<HashMap<String, String>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
@@ -1365,21 +1398,22 @@ pub async fn emby_items_filters(State(pool): State<Arc<Mutex<Connection>>>, Quer
     Json(json!({ "Genres": genre_items, "Tags": tag_items, "OfficialRatings": rating_items, "Years": year_list }))
 }
 
-// ==============================================================================
-// Emby API 任务与状态
-// ==============================================================================
-
-pub async fn emby_activity_log() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
+pub async fn emby_activity_log() -> impl IntoResponse {
+    Json(json!({ "Items": [], "TotalRecordCount": 0 }))
+}
 
 pub async fn emby_scheduled_tasks() -> impl IntoResponse {
     let is_running = *SCAN_STATUS.get_or_init(|| Mutex::new(false)).lock().unwrap();
     let state_str = if is_running { "Running" } else { "Idle" };
     let last_time = LAST_SCAN_TIME.get_or_init(|| Mutex::new("2024-01-01T00:00:00.0000000Z".to_string())).lock().unwrap().clone();
+    
     Json(json!([
-        { "Name": "Scan Media Library", "State": state_str, "Id": "RefreshLibrary",
-          "LastExecutionResult": { "StartTimeUtc": last_time.clone(), "EndTimeUtc": last_time.clone(), "Status": "Completed", "Error": "" },
-          "Triggers": [{ "Type": "IntervalTrigger", "IntervalTicks": 864000000000i64 }],
-          "Description": "Scans your media library for new and updated files.", "Category": "Library", "IsHidden": false, "Key": "RefreshLibrary" }
+        {
+            "Name": "Scan Media Library", "State": state_str, "Id": "RefreshLibrary",
+            "LastExecutionResult": { "StartTimeUtc": last_time.clone(), "EndTimeUtc": last_time.clone(), "Status": "Completed", "Error": "" },
+            "Triggers": [{ "Type": "IntervalTrigger", "IntervalTicks": 864000000000i64 }],
+            "Description": "Scans your media library for new and updated files.", "Category": "Library", "IsHidden": false, "Key": "RefreshLibrary"
+        }
     ]))
 }
 
@@ -1387,9 +1421,15 @@ pub async fn emby_refresh_library(State(pool): State<Arc<Mutex<Connection>>>) ->
     let status = SCAN_STATUS.get_or_init(|| Mutex::new(false));
     *status.lock().unwrap() = true;
     println!("📡 [TASK] 客户端触发了计划任务：全库扫描");
+
     let pool_clone = pool.clone();
     tokio::task::spawn_blocking(move || {
-        let libs = { let conn = pool_clone.lock().unwrap(); let mut stmt = match conn.prepare("SELECT id, path, type FROM libraries") { Ok(s) => s, Err(_) => return }; let libs: Vec<(i64, String, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().filter_map(Result::ok).collect(); libs }; 
+        let libs = {
+            let conn = pool_clone.lock().unwrap();
+            let mut stmt = match conn.prepare("SELECT id, path, type FROM libraries") { Ok(s) => s, Err(_) => return };
+            let libs: Vec<(i64, String, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().filter_map(Result::ok).collect();
+            libs
+        }; 
         for (id, path_json, lib_type) in libs {
             if let Ok(paths) = serde_json::from_str::<Vec<String>>(&path_json) {
                 for path in paths { crate::scanner::scan_directory(pool_clone.clone(), id, lib_type.clone(), path); }
@@ -1404,54 +1444,92 @@ pub async fn emby_refresh_library(State(pool): State<Arc<Mutex<Connection>>>) ->
     StatusCode::NO_CONTENT.into_response()
 }
 
-#[derive(Deserialize, Default)]
-#[serde(default)]
-pub struct ResumeVisibilityQuery { #[serde(rename = "Hide")] pub hide: Option<String> }
-#[derive(Deserialize, Default)]
-#[serde(default)]
-pub struct ResumeVisibilityBody { #[serde(rename = "Hide")] pub hide: bool }
-
-pub async fn emby_hide_from_resume(AxumPath((_user_id, _item_id)): AxumPath<(String, String)>, Query(query): Query<ResumeVisibilityQuery>, body: Bytes) -> Response {
-    let query_hide = match query.hide.as_deref().map(str::parse::<bool>).transpose() { Ok(value) => value, Err(_) => return StatusCode::BAD_REQUEST.into_response() };
-    let body_hide = if body.is_empty() { None } else { match serde_json::from_slice::<ResumeVisibilityBody>(&body) { Ok(body) => Some(body.hide), Err(_) => return StatusCode::BAD_REQUEST.into_response() } };
-    let hidden = match (query_hide, body_hide) { (Some(q), Some(b)) if q != b => return StatusCode::BAD_REQUEST.into_response(), (Some(h), _) | (_, Some(h)) => h, (None, None) => return StatusCode::BAD_REQUEST.into_response() };
-    Json(json!({ "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "HideFromResume": hidden })).into_response()
+pub async fn emby_mark_favorite(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    if item_id.starts_with("boxset_") {
+        let _ = conn.execute("INSERT OR IGNORE INTO boxset_favorites (user_id, boxset_id) VALUES (?1, ?2)", rusqlite::params![req_user_id, &item_id]);
+    } else if let Ok(_numeric_id) = item_id.parse::<i64>() {
+        let _ = conn.execute("INSERT INTO user_data (user_id, item_id, is_favorite) VALUES (?1, ?2, 1) ON CONFLICT(user_id, item_id) DO UPDATE SET is_favorite = 1", rusqlite::params![req_user_id, &item_id]);
+    }
+    Json(json!({ "IsFavorite": true, "ItemId": item_id })).into_response()
 }
 
-pub async fn emby_thumbnail_set(AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse { Json(json!({ "Id": item_id.to_string(), "ThumbnailSet": {} })) }
-
-pub async fn emby_item_counts(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
+pub async fn emby_unmark_favorite(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let movie_count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE type='movies'", [], |r| r.get(0)).unwrap_or(0);
-    let series_count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE type='tvshows' OR type='Series'", [], |r| r.get(0)).unwrap_or(0);
-    Json(json!({ "MovieCount": movie_count, "SeriesCount": series_count, "EpisodeCount": 0, "ArtistCount": 0, "SongCount": 0, "AlbumCount": 0, "MusicVideoCount": 0, "BoxSetCount": 0, "BookCount": 0, "TrailerCount": 0 }))
+    if item_id.starts_with("boxset_") {
+        let _ = conn.execute("DELETE FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", rusqlite::params![req_user_id, &item_id]);
+    } else if let Ok(_numeric_id) = item_id.parse::<i64>() {
+        let _ = conn.execute("INSERT INTO user_data (user_id, item_id, is_favorite) VALUES (?1, ?2, 0) ON CONFLICT(user_id, item_id) DO UPDATE SET is_favorite = 0", rusqlite::params![req_user_id, &item_id]);
+    }
+    Json(json!({ "IsFavorite": false, "ItemId": item_id })).into_response()
+}
+
+pub async fn api_generate_covers(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
+    let pool_clone = pool.clone();
+    tokio::spawn(async move { crate::covers::generate_all_covers(pool_clone).await; });
+    Json(json!({"status": "started"}))
+}
+
+pub async fn api_get_users(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT id, username FROM users WHERE id != 1").unwrap();
+    let users: Vec<Value> = stmt.query_map([], |r| {
+        let id: i64 = r.get(0).unwrap_or_default();
+        let name: String = r.get(1).unwrap_or_default();
+        Ok((id, name))
+    }).unwrap().filter_map(Result::ok).map(|(id, name)| {
+        let mut access_stmt = conn.prepare("SELECT library_id FROM user_library_access WHERE user_id = ?1").unwrap();
+        let libs: Vec<i64> = access_stmt.query_map([id], |r| r.get(0)).unwrap().filter_map(Result::ok).collect();
+        json!({ "id": id, "username": name, "libraries": libs })
+    }).collect();
+    Json(users)
 }
 
 #[derive(Deserialize)]
-pub struct SearchQuery { #[serde(rename = "SearchTerm")] pub search_term: Option<String>, #[serde(rename = "Limit")] pub limit: Option<i64> }
-pub async fn emby_search_hints(State(pool): State<Arc<Mutex<Connection>>>, Query(q): Query<SearchQuery>) -> impl IntoResponse {
-    let term = q.search_term.unwrap_or_default();
-    if term.is_empty() { return Json(json!({ "SearchHints": [], "TotalRecordCount": 0 })); }
-    let limit = q.limit.unwrap_or(20);
+pub struct CreateUserReq { username: String, password: String, libraries: Vec<i64> }
+pub async fn api_create_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<CreateUserReq>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id, title, type, year, poster_path FROM items WHERE title LIKE ?1 ORDER BY id DESC LIMIT ?2").unwrap();
-    let pattern = format!("%{}%", term);
-    let hints: Vec<Value> = stmt.query_map(rusqlite::params![pattern, limit], |row| {
-        let id: i64 = row.get(0).unwrap_or_default();
-        let r_type: String = row.get(2).unwrap_or_default();
-        let has_poster = !row.get::<_, String>(4).unwrap_or_default().is_empty();
-        Ok(json!({ "ItemId": id.to_string(), "Id": id.to_string(), "Name": row.get::<_, String>(1).unwrap_or_default(), "Type": if r_type == "movies" { "Movie" } else { "Series" }, "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0), "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) }, "MatchedTerm": term, "PrimaryImageTag": if has_poster { format!("tag_{}", id) } else { "".to_string() } }))
-    }).unwrap().filter_map(Result::ok).collect();
-    Json(json!({ "SearchHints": hints, "TotalRecordCount": hints.len() }))
+    
+    let user_id: i64 = conn.query_row("SELECT id FROM users WHERE username = ?1", [&payload.username], |r| r.get(0)).unwrap_or(0);
+    
+    if user_id == 0 {
+        if payload.password.is_empty() { return (StatusCode::BAD_REQUEST, "新建用户密码不能为空").into_response(); }
+        let mut hasher = Sha256::new(); hasher.update(&payload.password);
+        let hash = format!("{:x}", hasher.finalize());
+        let _ = conn.execute("INSERT INTO users (username, password) VALUES (?1, ?2)", [&payload.username, &hash]);
+    } else if user_id > 1 {
+        if !payload.password.is_empty() {
+            let mut hasher = Sha256::new(); hasher.update(&payload.password);
+            let hash = format!("{:x}", hasher.finalize());
+            let _ = conn.execute("UPDATE users SET password = ?1 WHERE id = ?2", [&hash, &user_id.to_string()]);
+        }
+    } else {
+        return (StatusCode::FORBIDDEN, "不能修改管理员").into_response();
+    }
+    
+    let user_id: i64 = conn.query_row("SELECT id FROM users WHERE username = ?1", [&payload.username], |r| r.get(0)).unwrap_or(0);
+    
+    if user_id > 1 {
+        let _ = conn.execute("DELETE FROM user_library_access WHERE user_id = ?1", [user_id]);
+        for lib_id in payload.libraries {
+            let _ = conn.execute("INSERT INTO user_library_access (user_id, library_id) VALUES (?1, ?2)", [user_id, lib_id]);
+        }
+    }
+    StatusCode::OK.into_response()
 }
 
-pub async fn emby_display_preferences(_: AxumPath<String>) -> impl IntoResponse {
-    Json(json!({"Id": "default", "ViewType": "Poster", "SortBy": "SortName", "PrimaryImageHeight": 250, "PrimaryImageWidth": 250, "ScrollDirection": "Horizontal"}))
+pub async fn api_delete_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(id): AxumPath<i64>) -> impl IntoResponse {
+    if id == 1 { return StatusCode::BAD_REQUEST.into_response(); }
+    let conn = pool.lock().unwrap();
+    let _ = conn.execute("DELETE FROM users WHERE id = ?1", [id]);
+    let _ = conn.execute("DELETE FROM user_library_access WHERE user_id = ?1", [id]);
+    StatusCode::OK.into_response()
 }
 
-// ==============================================================================
-// Emby API 播放与进度
-// ==============================================================================
+pub async fn emby_action() -> impl IntoResponse { StatusCode::OK.into_response() }
+pub async fn emby_sessions() -> impl IntoResponse { Json(json!([])) }
+pub async fn emby_playing() -> impl IntoResponse { StatusCode::OK.into_response() }
+pub async fn emby_playing_stopped() -> impl IntoResponse { StatusCode::OK.into_response() }
 
 pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, Extension(req_user_id): Extension<i64>, body: Bytes) -> impl IntoResponse {
     if let Ok(val) = serde_json::from_slice::<Value>(&body) {
@@ -1463,6 +1541,7 @@ pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, E
                 let conn = pool.lock().unwrap();
                 
                 let mut runtime_secs: i32 = conn.query_row("SELECT runtime FROM items WHERE id = ?1", [item_id], |r| r.get(0)).unwrap_or(0);
+                let _current_ticks: i64 = conn.query_row("SELECT playback_position_ticks FROM user_data WHERE user_id = ?1 AND item_id = ?2", rusqlite::params![req_user_id, item_id.to_string()], |r| r.get(0)).unwrap_or(0);
                 
                 if let Some(client_ticks) = val["RunTimeTicks"].as_i64() {
                     if client_ticks > 0 {
@@ -1504,35 +1583,24 @@ pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, E
     StatusCode::OK.into_response()
 }
 
-pub async fn emby_mark_favorite(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
-    let conn = pool.lock().unwrap();
-    if item_id.starts_with("boxset_") {
-        let _ = conn.execute("INSERT OR IGNORE INTO boxset_favorites (user_id, boxset_id) VALUES (?1, ?2)", rusqlite::params![req_user_id, &item_id]);
-    } else if let Ok(_numeric_id) = item_id.parse::<i64>() {
-        let _ = conn.execute("INSERT INTO user_data (user_id, item_id, is_favorite) VALUES (?1, ?2, 1) ON CONFLICT(user_id, item_id) DO UPDATE SET is_favorite = 1", rusqlite::params![req_user_id, &item_id]);
-    }
-    Json(json!({ "IsFavorite": true, "ItemId": item_id })).into_response()
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct ResumeVisibilityQuery { #[serde(rename = "Hide")] pub hide: Option<String> }
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct ResumeVisibilityBody { #[serde(rename = "Hide")] pub hide: bool }
+
+pub async fn emby_hide_from_resume(AxumPath((_user_id, _item_id)): AxumPath<(String, String)>, Query(query): Query<ResumeVisibilityQuery>, body: Bytes) -> Response {
+    let query_hide = match query.hide.as_deref().map(str::parse::<bool>).transpose() { Ok(value) => value, Err(_) => return StatusCode::BAD_REQUEST.into_response() };
+    let body_hide = if body.is_empty() { None } else { match serde_json::from_slice::<ResumeVisibilityBody>(&body) { Ok(body) => Some(body.hide), Err(_) => return StatusCode::BAD_REQUEST.into_response() } };
+    let hidden = match (query_hide, body_hide) { (Some(q), Some(b)) if q != b => return StatusCode::BAD_REQUEST.into_response(), (Some(h), _) | (_, Some(h)) => h, (None, None) => return StatusCode::BAD_REQUEST.into_response() };
+    Json(json!({ "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "HideFromResume": hidden })).into_response()
 }
 
-pub async fn emby_unmark_favorite(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
-    let conn = pool.lock().unwrap();
-    if item_id.starts_with("boxset_") {
-        let _ = conn.execute("DELETE FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", rusqlite::params![req_user_id, &item_id]);
-    } else if let Ok(_numeric_id) = item_id.parse::<i64>() {
-        let _ = conn.execute("INSERT INTO user_data (user_id, item_id, is_favorite) VALUES (?1, ?2, 0) ON CONFLICT(user_id, item_id) DO UPDATE SET is_favorite = 0", rusqlite::params![req_user_id, &item_id]);
-    }
-    Json(json!({ "IsFavorite": false, "ItemId": item_id })).into_response()
-}
+pub async fn emby_thumbnail_set(AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse { Json(json!({ "Id": item_id.to_string(), "ThumbnailSet": {} })) }
 
-// ==============================================================================
-// 其他杂项与占位
-// ==============================================================================
-
-pub async fn emby_action() -> impl IntoResponse { StatusCode::OK.into_response() }
-pub async fn emby_sessions() -> impl IntoResponse { Json(json!([])) }
-pub async fn emby_playing() -> impl IntoResponse { StatusCode::OK.into_response() }
-pub async fn emby_playing_stopped() -> impl IntoResponse { StatusCode::OK.into_response() }
 pub async fn emby_danmu(_: AxumPath<String>) -> impl IntoResponse { Json(json!([])) }
+
 pub async fn emby_person_image(_: AxumPath<(String, String)>) -> impl IntoResponse {
     let png_bytes: [u8; 67] = [
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
@@ -1543,6 +1611,12 @@ pub async fn emby_person_image(_: AxumPath<(String, String)>) -> impl IntoRespon
     ];
     (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response()
 }
+
 pub async fn emby_subtitle_stream(_: AxumPath<(String, String)>) -> impl IntoResponse { StatusCode::OK.into_response() }
 pub async fn emby_subtitle_stream_with_source(_: AxumPath<(String, String, String)>) -> impl IntoResponse { StatusCode::OK.into_response() }
+
+pub async fn emby_display_preferences(_: AxumPath<String>) -> impl IntoResponse {
+    Json(json!({"Id": "default", "ViewType": "Poster", "SortBy": "SortName", "PrimaryImageHeight": 250, "PrimaryImageWidth": 250, "ScrollDirection": "Horizontal"}))
+}
+
 pub async fn emby_item_image_user_only(_: AxumPath<(String, String)>) -> Response { StatusCode::NOT_FOUND.into_response() }
