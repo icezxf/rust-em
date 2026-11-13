@@ -1103,21 +1103,30 @@ pub async fn emby_shows_seasons(State(pool): State<Arc<Mutex<Connection>>>, Axum
     
     let items: Vec<Value> = stmt.query_map([sid], |r| {
         let id: i64 = r.get(0).unwrap_or_default();
+        let title: String = r.get(1).unwrap_or_default();
+        let num: i32 = r.get(2).unwrap_or(1);
+        let poster: String = r.get(3).unwrap_or_default();
         let ep_count: i64 = r.get(4).unwrap_or(0);
+        
+        let mut image_tags = serde_json::Map::new();
+        if !poster.is_empty() { image_tags.insert("Primary".to_string(), json!(format!("season_{}", id))); }
+
         Ok(json!({
-            "Name": r.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server", 
-            "Type": "Season", "IsFolder": true, "MediaType": "Video", "IndexNumber": r.get::<_, i32>(2).unwrap_or(1), "SeriesId": series_id,
-            "ChildCount": ep_count, "RecursiveItemCount": ep_count, "UserData": { "Played": false, "UnplayedItemCount": ep_count }
+            "Name": title, "Id": id.to_string(), "ServerId": "rust-em-server", 
+            "Type": "Season", "IsFolder": true, "MediaType": "Video",
+            "IndexNumber": num, "SeriesId": series_id,
+            "ChildCount": ep_count, "RecursiveItemCount": ep_count,
+            "ImageTags": image_tags,
+            "UserData": { 
+                "Played": false, 
+                "UnplayedItemCount": ep_count,
+                "PlaybackPositionTicks": 0,
+                "PlayCount": 0,
+                "IsFavorite": false
+            }
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-pub struct EpisodesQuery { 
-    #[serde(rename = "SeasonId")] season_id: Option<String>,
-    #[serde(rename = "ParentId")] parent_id: Option<String>,
 }
 
 pub async fn emby_shows_episodes(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(series_id): AxumPath<String>, Query(query): Query<EpisodesQuery>) -> impl IntoResponse {
@@ -1294,7 +1303,6 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
                        else if typ == "Season" { season_total_eps - season_played_eps } 
                        else { 0 };
         let recursive_count = if typ == "Series" { total_eps } else if typ == "Season" { season_total_eps } else { 0 };
-        // 对于 Series，ChildCount 是季数；对于 Season，ChildCount 是集数
         let child_count = if typ == "Series" { total_seasons } else if typ == "Season" { season_total_eps } else { 0 };
 
         Ok(json!({
@@ -1310,7 +1318,10 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
             "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(), "OriginalLanguage": json!(if !original_language.is_empty() { original_language } else { language }),
             "SetName": json!(set_name), "SeriesName": json!(if typ == "tvshows" { series } else { "".to_string() }),
             "Path": decode_url(&real_path), "Container": "mp4", "MediaSourceCount": media_sources.len(), "MediaSources": media_sources,
-            "RecursiveItemCount": recursive_count, "ChildCount": child_count, "SeasonCount": if typ == "Series" { total_seasons } else { 0 },
+            "RecursiveItemCount": recursive_count, 
+            "ChildCount": child_count, 
+            "SeasonCount": if typ == "Series" { total_seasons } else { 0 },
+            "SeriesStudio": if typ == "Series" { json!({ "Name": studios_str.split(" / ").next().unwrap_or(""), "Id": "" }) } else { json!(null) },
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &typ),
             "ProbeEngine": "rust-native", "LocationType": "FileSystem", "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
             "UserData": { 
