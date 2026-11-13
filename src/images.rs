@@ -185,7 +185,16 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
             let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
             match image_type.to_lowercase().as_str() {
                 "primary" | "poster" => conn.query_row("SELECT poster_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-                "thumb" => conn.query_row("SELECT thumb_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
+                "thumb" => {
+                    // 先查 thumb_path，如果为空或者该条目是 Episode，直接回退去读 poster_path
+                    let thumb_opt: Option<String> = conn.query_row("SELECT thumb_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok();
+                    let is_ep: bool = conn.query_row("SELECT type FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).map(|t| t == "Episode").unwrap_or(false);
+                    if is_ep || thumb_opt.as_deref().unwrap_or("").is_empty() {
+                        conn.query_row("SELECT poster_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok()
+                    } else {
+                        thumb_opt
+                    }
+                },
                 "logo" => conn.query_row("SELECT logo_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
                 "banner" => conn.query_row("SELECT banner_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
                 "backdrop" | "fanart" => {
