@@ -540,6 +540,7 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
             "Type": if item_type == "movies" { "Movie" } else if item_type == "Series" { "Series" } else { "Episode" },
             "IsFolder": false, "MediaType": "Video", "RunTimeTicks": total_ticks,
+            "CommunityRating": row.get::<_, f64>(8).unwrap_or(0.0),
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &item_type),
