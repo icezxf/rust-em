@@ -160,14 +160,14 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
                             if let Some(start) = nfo_text.find("<durationinseconds>") {
                                 let rest = &nfo_text[start + 19..];
                                 if let Some(end) = rest.find("</durationinseconds>") {
-                                    if let Ok(secs) = rest[..end].trim().parse::<i32>() { runtime = (secs + 59) / 60; }
+                                    if let Ok(secs) = rest[..end].trim().parse::<i32>() { runtime = secs; }
                                 }
                             }
                             if runtime <= 0 {
                                 if let Some(start) = nfo_text.find("<duration>") {
                                     let rest = &nfo_text[start + 10..];
                                     if let Some(end) = rest.find("</duration>") {
-                                        if let Ok(mins) = rest[..end].trim().parse::<i32>() { runtime = mins; }
+                                        if let Ok(mins) = rest[..end].trim().parse::<i32>() { runtime = mins * 60; }
                                     }
                                 }
                             }
@@ -218,7 +218,7 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
                 let ms = src.get("MediaStreams").cloned().unwrap_or(json!([]));
                 let ms_str = serde_json::to_string(&ms).unwrap_or_else(|_| "[]".to_string());
                 if let Some(rt_ticks) = src.get("RunTimeTicks").and_then(|v| v.as_i64()) {
-                    if rt_ticks > 0 { runtime = (rt_ticks / 10_000_000 / 60) as i32; }
+                    if rt_ticks > 0 { runtime = (rt_ticks / 10_000_000) as i32; }
                 }
                 (s, ms_str)
             } else { (0, "[]".to_string()) }

@@ -75,7 +75,7 @@ pub async fn emby_playback_info(
         exts.push(ext);
     }
     let play_session_id = uuid::Uuid::new_v4().to_string();
-    let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
+    let run_time_ticks = (runtime as i64) * 10_000_000;
     
     let mut parsed_streams: Value = serde_json::from_str(&media_streams_json).unwrap_or(json!([]));
     sanitize_media_streams(&mut parsed_streams);

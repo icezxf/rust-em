@@ -373,8 +373,8 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let hash_hexf: String = hashf.iter().map(|b| format!("{:02x}", b)).collect();
         let backdrop_tag = if has_fanart { format!("backdrop_{}_{}", id, &hash_hexf[..8]) } else { String::new() };
 
-        let runtime_mins: i32 = row.get(7).unwrap_or(0);
-        let total_ticks: i64 = (runtime_mins as i64) * 60 * 10_000_000;
+        let runtime_secs: i32 = row.get(7).unwrap_or(0);
+        let total_ticks: i64 = (runtime_secs as i64) * 10_000_000;
         let size: i64 = row.get(14).unwrap_or(0);
         let mtime = row.get::<_, i64>(15).unwrap_or(0);
         let date_str = format_iso8601(mtime);
@@ -440,12 +440,12 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let hash_hexf: String = hashf.iter().map(|b| format!("{:02x}", b)).collect();
         let backdrop_tag = if has_fanart { format!("backdrop_{}_{}", id, &hash_hexf[..8]) } else { String::new() };
 
-        let mut runtime_mins: i32 = row.get(7).unwrap_or(0);
-        if runtime_mins <= 0 {
-            let current_pct = playback_ticks / 10_000_000 / 60;
-            runtime_mins = if current_pct > 0 { current_pct as i32 + 30 } else { 100 };
+        let mut runtime_secs: i32 = row.get(7).unwrap_or(0);
+        if runtime_secs <= 0 {
+            let current_pct = playback_ticks / 10_000_000;
+            runtime_secs = if current_pct > 0 { current_pct as i32 + 1800 } else { 6000 };
         }
-        let total_ticks: i64 = (runtime_mins as i64) * 60 * 10_000_000;
+        let total_ticks: i64 = (runtime_secs as i64) * 10_000_000;
         let play_count: i32 = row.get(20).unwrap_or(0);
         let last_played_str: String = row.get(21).unwrap_or_default();
         
@@ -918,8 +918,8 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         let hash_hexf: String = hashf.iter().map(|b| format!("{:02x}", b)).collect();
         let backdrop_tag = if has_fanart { format!("backdrop_{}_{}", id, &hash_hexf[..8]) } else { String::new() };
         
-        let runtime_mins: i32 = row.get(7).unwrap_or(0);
-        let total_ticks: i64 = (runtime_mins as i64) * 60 * 10_000_000;
+        let runtime_secs: i32 = row.get(7).unwrap_or(0);
+        let total_ticks: i64 = (runtime_secs as i64) * 10_000_000;
         let size: i64 = row.get(14).unwrap_or(0);
         let mtime: i64 = row.get(15).unwrap_or(0);
         let date_created: i64 = row.get(20).unwrap_or(0);
@@ -1068,7 +1068,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
             }
 
             let date_created_ts = if date_created > 0 { date_created } else { mtime };
-            let run_time_ticks = (runtime as i64) * 60 * 10_000_000;
+            let run_time_ticks = (runtime as i64) * 10_000_000;
             let est_bitrate = if size > 0 && run_time_ticks > 0 { (size * 8) / (run_time_ticks / 10_000_000) } else { 0 };
 
             let media_sources: Vec<Value> = if parts.is_empty() { vec![] } else {
@@ -1133,13 +1133,13 @@ pub async fn emby_playing_progress(State(pool): State<Arc<Mutex<Connection>>>, E
                 
                 if let Some(client_ticks) = val["RunTimeTicks"].as_i64() {
                     if client_ticks > 0 {
-                        runtime_mins = (client_ticks / 10_000_000 / 60) as i32;
+                        runtime_mins = (client_ticks / 10_000_000) as i32;
                         let _ = conn.execute("UPDATE items SET runtime = ?1 WHERE id = ?2", rusqlite::params![runtime_mins, item_id]);
                     }
                 }
                 
                 if runtime_mins <= 0 && ticks > 0 {
-                    runtime_mins = (ticks / 10_000_000 / 60) as i32 + 30;
+                    runtime_mins = (ticks / 10_000_000) as i32 + 1800;
                     let _ = conn.execute("UPDATE items SET runtime = ?1 WHERE id = ?2", rusqlite::params![runtime_mins, item_id]);
                     
                     let pool_clone = pool.clone();
