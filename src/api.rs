@@ -122,7 +122,13 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
     let mut params: Vec<String> = Vec::new();
     
     if let Some(lid) = query.library_id { sql.push_str(" AND library_id = ?"); params.push(lid.to_string()); }
-    if let Some(lt) = &query.lib_type { sql.push_str(" AND type = ?"); params.push(lt.to_string()); }
+    if let Some(lt) = &query.lib_type { 
+        if lt == "tvshows" {
+            sql.push_str(" AND type = 'Series'");
+        } else if lt == "movies" {
+            sql.push_str(" AND type = 'movies'");
+        }
+    }
     
     if let Some(a) = &query.actor { 
         sql.push_str(" AND (actors LIKE ? OR actors LIKE ? OR directors = ? OR directors LIKE ? OR directors LIKE ? OR directors LIKE ?)");
@@ -711,7 +717,18 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     if let Some(types) = &query.include_item_types {
         let t = types.to_lowercase();
         if t.contains("movie") { sql.push_str(" AND type = 'movies'"); } 
-        else if t.contains("series") || t.contains("episode") { sql.push_str(" AND type = 'tvshows'"); }
+        else if t.contains("series") { sql.push_str(" AND type = 'Series'"); }
+        else if t.contains("episode") { sql.push_str(" AND type = 'Episode'"); }
+    } else {
+        // 如果没有传类型，且 ParentId 是剧集库，默认只查 Series，防止季和集乱入
+        if let Some(pid) = &query.parent_id {
+            if pid.starts_with("lib_") { 
+                if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
+                    let lib_type: String = conn.query_row("SELECT type FROM libraries WHERE id = ?1", [lib_id], |r| r.get(0)).unwrap_or_default();
+                    if lib_type == "tvshows" { sql.push_str(" AND type = 'Series'"); }
+                }
+            }
+        }
     }
 
     if let Some(filters) = &query.filters {
@@ -991,7 +1008,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
 
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let item_opt = conn.query_row(
-        "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.studios, items.parts, items.runtime, items.actors, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.series, items.label, items.set_name, items.tagline, items.tags, items.directors, items.num, items.stills, items.releasedate, items.original_title, items.sort_title, items.country, items.language, items.writers, items.trailer, items.media_streams, items.date_created, items.primary_image_aspect_ratio, items.original_language, items.fanart_path, items.logo_path, items.thumb_path, items.banner_path, items.strm_content, IFNULL(ud.playback_position_ticks, 0), IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0), IFNULL(ud.last_played_date, '') FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE items.id = ?",
+        "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.studios, items.parts, items.runtime, items.actors, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.series, items.label, items.set_name, items.tagline, items.tags, items.directors, items.num, items.stills, items.releasedate, items.original_title, items.sort_title, items.country, items.language, items.writers, items.trailer, items.media_streams, items.date_created, items.primary_image_aspect_ratio, items.original_language, items.fanart_path, items.logo_path, items.thumb_path, items.banner_path, items.strm_content, IFNULL(ud.playback_position_ticks, 0), IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0), IFNULL(ud.last_played_date, ''), IFNULL(items.parent_id, 0), IFNULL(items.season_number, 0), IFNULL(items.episode_number, 0), items.type FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE items.id = ?",
         rusqlite::params![req_user_id, id],
         |row| {
             let title: String = row.get(1).unwrap_or_default(); let typ: String = row.get(2).unwrap_or_default();
@@ -1018,6 +1035,10 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
             let banner_path: String = row.get(41).unwrap_or_default(); let strm_content: String = row.get(42).unwrap_or_default();
             let playback_ticks: i64 = row.get(43).unwrap_or(0); let play_count: i32 = row.get(44).unwrap_or(0); let is_favorite: i32 = row.get(45).unwrap_or(0);
             let last_played_str: String = row.get(46).unwrap_or_default();
+            let parent_id: i64 = row.get(47).unwrap_or(0);
+            let s_num: i32 = row.get(48).unwrap_or(0);
+            let e_num: i32 = row.get(49).unwrap_or(0);
+            let r_type: String = row.get(50).unwrap_or_default();
 
             let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
             let actors: Vec<Value> = serde_json::from_str(&actors_json).unwrap_or_default();
@@ -1097,6 +1118,10 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
                 "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(), "OriginalLanguage": json!(if !original_language.is_empty() { original_language } else { language }),
                 "SetName": json!(set_name), "SeriesName": json!(if typ == "tvshows" { series } else { "".to_string() }),
                 "Path": decode_url(&real_path), "Container": "mp4", "MediaSourceCount": media_sources.len(), "MediaSources": media_sources,
+                "SeriesId": if r_type == "Episode" { json!(parent_id.to_string()) } else { json!(null) },
+                "SeasonId": if r_type == "Episode" { json!(parent_id.to_string()) } else { json!(null) },
+                "IndexNumber": if r_type == "Episode" { json!(e_num) } else { json!(null) },
+                "ParentIndexNumber": if r_type == "Episode" { json!(s_num) } else { json!(null) },
                 "ProbeEngine": "rust-native", "LocationType": "FileSystem", "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
                 "UserData": { 
                     "ItemId": id.to_string(), "Key": id.to_string(), 
@@ -1289,8 +1314,58 @@ pub async fn emby_search_hints(State(pool): State<Arc<Mutex<Connection>>>, Query
 }
 
 pub async fn emby_shows_next_up() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_shows_seasons(_: AxumPath<String>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
-pub async fn emby_shows_episodes(_: AxumPath<String>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
+
+pub async fn emby_shows_seasons(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(series_id): AxumPath<String>) -> impl IntoResponse {
+    let Ok(sid) = series_id.parse::<i64>() else { return Json(json!({"Items": [], "TotalRecordCount": 0})); };
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT id, title, season_number FROM items WHERE type = 'Season' AND parent_id = ?1 ORDER BY season_number ASC").unwrap();
+    let items: Vec<Value> = stmt.query_map([sid], |r| {
+        let id: i64 = r.get(0).unwrap_or_default();
+        let title: String = r.get(1).unwrap_or_default();
+        let num: i32 = r.get(2).unwrap_or(1);
+        Ok(json!({
+            "Name": title, "Id": id.to_string(), "ServerId": "rust-em-server", "Type": "Season", "IsFolder": true, "MediaType": "Video",
+            "IndexNumber": num, "SeriesId": series_id,
+            "ImageTags": {}, "BackdropImageTags": [], "UserData": { "Played": false }
+        }))
+    }).unwrap().filter_map(Result::ok).collect();
+    Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct EpisodesQuery { #[serde(rename = "SeasonId")] season_id: Option<String> }
+pub async fn emby_shows_episodes(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(series_id): AxumPath<String>, Query(query): Query<EpisodesQuery>) -> impl IntoResponse {
+    let Ok(sid) = series_id.parse::<i64>() else { return Json(json!({"Items": [], "TotalRecordCount": 0})); };
+    let conn = pool.lock().unwrap();
+    let mut sql = "SELECT id, title, season_number, episode_number, plot, runtime FROM items WHERE type = 'Episode' AND series_id = ?1".to_string();
+    let mut params = vec![sid.to_string()];
+    if let Some(season_id) = &query.season_id {
+        sql.push_str(" AND parent_id = ?");
+        params.push(season_id.clone());
+    }
+    sql.push_str(" ORDER BY season_number ASC, episode_number ASC");
+    
+    let mut stmt = conn.prepare(&sql).unwrap();
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+    
+    let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |r| {
+        let id: i64 = r.get(0).unwrap_or_default();
+        let title: String = r.get(1).unwrap_or_default();
+        let s_num: i32 = r.get(2).unwrap_or(1);
+        let e_num: i32 = r.get(3).unwrap_or(1);
+        let plot: String = r.get(4).unwrap_or_default();
+        let runtime: i32 = r.get(5).unwrap_or(0);
+        let run_time_ticks = (runtime as i64) * 10_000_000;
+        
+        Ok(json!({
+            "Name": title, "Id": id.to_string(), "ServerId": "rust-em-server", "Type": "Episode", "IsFolder": false, "MediaType": "Video",
+            "IndexNumber": e_num, "ParentIndexNumber": s_num, "Overview": plot, "RunTimeTicks": run_time_ticks, "SeriesId": series_id,
+            "ImageTags": {}, "BackdropImageTags": [], "UserData": { "Played": false }
+        }))
+    }).unwrap().filter_map(Result::ok).collect();
+    Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
+}
 pub async fn emby_danmu(_: AxumPath<String>) -> impl IntoResponse { Json(json!([])) }
 
 pub async fn emby_subtitle_stream(_: AxumPath<(String, String)>) -> impl IntoResponse { StatusCode::OK.into_response() }
