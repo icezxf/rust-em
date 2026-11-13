@@ -13,6 +13,7 @@ use tokio::net::TcpListener;
 mod api;
 mod auth;
 mod scanner;
+mod streamer;
 mod db;
 mod nfo;
 mod probe;
@@ -115,22 +116,22 @@ fn emby_routes() -> Router<AppState> {
         .route("/Shows/NextUp", get(api::emby_shows_next_up))
         .route("/Shows/{series_id}/Seasons", get(api::emby_shows_seasons))
         .route("/Shows/{series_id}/Episodes", get(api::emby_shows_episodes))
-        .route("/Items/{item_id}/PlaybackInfo", get(api::emby_playback_info).post(api::emby_playback_info))
-        .route("/Items/{item_id}/Download", get(api::emby_download).head(api::emby_download))
-        .route("/Videos/{item_id}/stream", get(api::emby_stream).head(api::emby_stream))
-        .route("/Videos/{item_id}/original.mp4", get(api::emby_stream).head(api::emby_stream))
-        .route("/Videos/{item_id}/original.strm", get(api::emby_stream).head(api::emby_stream))
-        .route("/Videos/{item_id}/original.{ext}", get(api::emby_stream_with_ext).head(api::emby_stream_with_ext))
-        .route("/Videos/{item_id}/stream.{ext}", get(api::emby_stream_with_ext).head(api::emby_stream_with_ext))
-        .route("/Videos/{item_id}/{source_id}/stream", get(api::emby_stream_with_source).head(api::emby_stream_with_source))
-        .route("/Videos/{item_id}/{source_id}/stream.{ext}", get(api::emby_stream_with_source_ext).head(api::emby_stream_with_source_ext))
-        .route("/videos/{item_id}/stream", get(api::emby_stream).head(api::emby_stream))
-        .route("/videos/{item_id}/original.mp4", get(api::emby_stream).head(api::emby_stream))
-        .route("/videos/{item_id}/original.strm", get(api::emby_stream).head(api::emby_stream))
-        .route("/videos/{item_id}/original.{ext}", get(api::emby_stream_with_ext).head(api::emby_stream_with_ext))
-        .route("/videos/{item_id}/stream.{ext}", get(api::emby_stream_with_ext).head(api::emby_stream_with_ext))
-        .route("/videos/{item_id}/{source_id}/stream", get(api::emby_stream_with_source).head(api::emby_stream_with_source))
-        .route("/videos/{item_id}/{source_id}/stream.{ext}", get(api::emby_stream_with_source_ext).head(api::emby_stream_with_source_ext))
+        .route("/Items/{item_id}/PlaybackInfo", get(streamer::emby_playback_info).post(streamer::emby_playback_info))
+        .route("/Items/{item_id}/Download", get(streamer::emby_download).head(streamer::emby_download))
+        .route("/Videos/{item_id}/stream", get(streamer::emby_stream).head(streamer::emby_stream))
+        .route("/Videos/{item_id}/original.mp4", get(streamer::emby_stream).head(streamer::emby_stream))
+        .route("/Videos/{item_id}/original.strm", get(streamer::emby_stream).head(streamer::emby_stream))
+        .route("/Videos/{item_id}/original.{ext}", get(streamer::emby_stream_with_ext).head(streamer::emby_stream_with_ext))
+        .route("/Videos/{item_id}/stream.{ext}", get(streamer::emby_stream_with_ext).head(streamer::emby_stream_with_ext))
+        .route("/Videos/{item_id}/{source_id}/stream", get(streamer::emby_stream_with_source).head(streamer::emby_stream_with_source))
+        .route("/Videos/{item_id}/{source_id}/stream.{ext}", get(streamer::emby_stream_with_source_ext).head(streamer::emby_stream_with_source_ext))
+        .route("/videos/{item_id}/stream", get(streamer::emby_stream).head(streamer::emby_stream))
+        .route("/videos/{item_id}/original.mp4", get(streamer::emby_stream).head(streamer::emby_stream))
+        .route("/videos/{item_id}/original.strm", get(streamer::emby_stream).head(streamer::emby_stream))
+        .route("/videos/{item_id}/original.{ext}", get(streamer::emby_stream_with_ext).head(streamer::emby_stream_with_ext))
+        .route("/videos/{item_id}/stream.{ext}", get(streamer::emby_stream_with_ext).head(streamer::emby_stream_with_ext))
+        .route("/videos/{item_id}/{source_id}/stream", get(streamer::emby_stream_with_source).head(streamer::emby_stream_with_source))
+        .route("/videos/{item_id}/{source_id}/stream.{ext}", get(streamer::emby_stream_with_source_ext).head(streamer::emby_stream_with_source_ext))
         .route("/Videos/{item_id}/{source_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream_with_source))
         .route("/Items/{item_id}/Subtitles/{stream_index}/Stream", get(api::emby_subtitle_stream))
         .route("/Sessions", get(api::emby_sessions))
