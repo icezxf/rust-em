@@ -1,6 +1,6 @@
 use axum::{
     extract::{State, Path as AxumPath, Query},
-    http::{StatusCode, header::CONTENT_TYPE, header::LOCATION},
+    http::{StatusCode, header::CONTENT_TYPE},
     response::{IntoResponse, Response},
 };
 use std::sync::{Arc, Mutex};
@@ -51,33 +51,34 @@ pub fn get_cover_tag(folder: &str, prefix: &str, name: &str) -> String {
 }
 
 pub async fn serve_file(path_str: &str) -> Response {
-    // 标准 Emby 行为：如果是网络图片，直接返回 302 让客户端重定向去拉
+    // 恢复你最初版本：如果是网络图，返回 1x1 透明图兜底
     if path_str.starts_with("http") { 
-        return (StatusCode::FOUND, [(LOCATION, path_str.to_string())], "").into_response(); 
+        let png_bytes: [u8; 67] = [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+            0x42, 0x60, 0x82
+        ];
+        return (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response(); 
     }
-    // 本地图片：直接读取文件字节流返回
-    if let Ok(bytes) = tokio::fs::read(path_str).await {
+    // 恢复你最初版本：如果是本地图，直接读字节返回
+    if let Ok(bytes) = tokio::fs::read(&path_str).await {
         let mime = if path_str.to_lowercase().ends_with(".png") { "image/png" } else { "image/jpeg" };
         return (StatusCode::OK, [(CONTENT_TYPE, mime)], bytes).into_response();
     }
     StatusCode::NOT_FOUND.into_response()
 }
 
-pub async fn emby_item_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type)): AxumPath<(String, String)>, Query(query): Query<HashMap<String, String>>) -> Response { 
-    emby_item_image_inner(pool, item_id, image_type, 0, query).await 
-}
-pub async fn emby_item_image_with_index(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type, index)): AxumPath<(String, String, String)>, Query(query): Query<HashMap<String, String>>) -> Response { 
-    emby_item_image_inner(pool, item_id, image_type, index.parse::<usize>().unwrap_or(0), query).await 
-}
+pub async fn emby_item_image(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type)): AxumPath<(String, String)>, Query(query): Query<HashMap<String, String>>) -> Response { emby_item_image_inner(pool, item_id, image_type, 0, query).await }
+pub async fn emby_item_image_with_index(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, image_type, index)): AxumPath<(String, String, String)>, Query(query): Query<HashMap<String, String>>) -> Response { emby_item_image_inner(pool, item_id, image_type, index.parse::<usize>().unwrap_or(0), query).await }
 
 async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, image_type: String, index: usize, query: HashMap<String, String>) -> Response {
-    // 演员/工作室占位图
     if item_id.starts_with("person_") || item_id.starts_with("studio_") {
         let png_bytes: [u8; 67] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82];
         return (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response();
     }
 
-    // 虚拟 ID 的拼接图（媒体库、类型等）
     if item_id.starts_with("lib_") || item_id.starts_with("genre_") || item_id.starts_with("tag_") || item_id.starts_with("boxset_") {
         let clean_id = item_id.replace("_cover", "");
         let (folder, prefix) = if clean_id.starts_with("lib_") { ("library", "lib") } 
@@ -118,7 +119,7 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
                     if let (Some(w), Some(h)) = (req_w, req_h) {
                         if w > 0 && h > 0 {
                             if let Ok(img) = image::load_from_memory(&bytes) {
-                                let resized = img.resize(w, h, image::imageops::FilterType::Lanczos3);
+                                let resized = img.resize_exact(w, h, image::imageops::FilterType::Triangle);
                                 let mut out = std::io::Cursor::new(Vec::new());
                                 let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 80);
                                 if encoder.encode_image(&resized).is_ok() {
@@ -138,7 +139,6 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
         }
     }
 
-    // 查数据库找电影/剧集的真实图片
     let path_opt = {
         let conn = pool.lock().unwrap();
         if item_id.starts_with("boxset_") {
@@ -189,13 +189,7 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
 }
 
 pub async fn emby_person_image(_: AxumPath<(String, String)>) -> impl IntoResponse {
-    let png_bytes: [u8; 67] = [
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-        0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-        0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
-        0x42, 0x60, 0x82
-    ];
+    let png_bytes: [u8; 67] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82];
     (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response()
 }
 
