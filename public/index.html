@@ -340,7 +340,12 @@
                 const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : null });
                 const text = await res.text();
                 if (!res.ok) {
-                    if (res.status === 401) { return { error: "登录凭证已过期，请手动退出重登" }; }
+                    if (res.status === 401) { 
+                        alert("登录凭证已过期，点击确定重新登录。");
+                        localStorage.removeItem('token'); 
+                        location.reload(); 
+                        return { error: "登录已过期" }; 
+                    }
                     return { error: `HTTP ${res.status}: ${text || '无返回内容'}` };
                 }
                 if (!text) return {};
@@ -437,6 +442,12 @@
                 else { banner.classList.add('hidden'); }
 
                 const resumeRes = await fetch('/emby/Users/1/Items/Resume', { headers: { 'Authorization': `Bearer ${token}` } });
+                if (resumeRes.status === 401) {
+                    alert("登录凭证已过期，点击确定重新登录。");
+                    localStorage.removeItem('token');
+                    location.reload();
+                    return;
+                }
                 if (resumeRes.ok) {
                     const resumeData = await resumeRes.json();
                     const resumeSection = document.getElementById('resume-section');
