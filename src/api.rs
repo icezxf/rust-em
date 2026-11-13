@@ -1185,11 +1185,35 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
         let studios: Vec<Value> = studios_str.split(" / ").filter(|s| !s.trim().is_empty()).map(|s| json!({ "Name": s, "Id": format!("studio_{}", s) })).collect();
 
         let mut people: Vec<Value> = Vec::new();
+        let mut director_names = HashSet::new();
+        
+        // 1. 组装导演列表，严格标记为 Director 且 Role 为空
         for d in directors_str.split(" / ").filter(|s| !s.is_empty()) {
-            people.push(json!({ "Name": d.trim(), "Type": "Director", "Id": format!("person_{}", d.trim()), "PrimaryImageTag": "" }));
+            let name = d.trim().to_string();
+            if !name.is_empty() {
+                director_names.insert(name.clone());
+                people.push(json!({ 
+                    "Name": name, 
+                    "Type": "Director", 
+                    "Role": "", 
+                    "Id": format!("person_{}", name), 
+                    "PrimaryImageTag": "" 
+                }));
+            }
         }
+        
+        // 2. 组装演员列表，如果发现此人在导演名单里，直接跳过（避免混入演员表）
         for a in actors.iter() {
-            people.push(json!({ "Name": a["name"].as_str().unwrap_or_default(), "Role": a["role"].as_str().unwrap_or_default(), "Type": "Actor", "Id": format!("person_{}", a["name"].as_str().unwrap_or_default()), "PrimaryImageTag": "" }));
+            let name = a["name"].as_str().unwrap_or_default().trim();
+            if !name.is_empty() && !director_names.contains(name) {
+                people.push(json!({ 
+                    "Name": name, 
+                    "Role": a["role"].as_str().unwrap_or_default(), 
+                    "Type": "Actor", 
+                    "Id": format!("person_{}", name), 
+                    "PrimaryImageTag": "" 
+                }));
+            }
         }
 
         let mut image_tags = serde_json::Map::new();
