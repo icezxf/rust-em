@@ -503,6 +503,7 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
     }
     
     let where_str = where_clauses.join(" AND ");
+    // 查询中包含了 fanart_path (索引 19)
     let sql = format!("SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path, ud.play_count, ud.last_played_date, items.series_id, items.parent_id, items.season_number, items.episode_number FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE {} ORDER BY ud.last_played_date DESC LIMIT 30", req_user_id, where_str);
     
     let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
@@ -513,7 +514,25 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let item_type: String = row.get(2).unwrap_or_default();
         let runtime_secs: i32 = row.get(7).unwrap_or(0);
         let total_ticks = (runtime_secs as i64) * 10_000_000;
+        let playback_ticks: i64 = row.get(18).unwrap_or(0);
         let play_count: i32 = row.get(20).unwrap_or(0);
+        
+        let poster_path: String = row.get(5).unwrap_or_default();
+        let has_poster = !poster_path.is_empty();
+        let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
+        let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+        let poster_tag = if has_poster { format!("tag_{}_{}", id, &hash_hex[..8]) } else { String::new() };
+
+        // 💡 修复 1：提取横版背景图（fanart），用于继续观看的宽屏海报
+        let fanart_path: String = row.get(19).unwrap_or_default();
+        let has_fanart = !fanart_path.is_empty();
+        let mut hf = Sha256::new(); hf.update(fanart_path.as_bytes()); let hashf = hf.finalize();
+        let hash_hexf: String = hashf.iter().map(|b| format!("{:02x}", b)).collect();
+        let backdrop_tag = if has_fanart { format!("backdrop_{}_{}", id, &hash_hexf[..8]) } else { String::new() };
+
+        // 💡 修复 2：计算播放进度百分比
+        let played_pct = if total_ticks > 0 { (playback_ticks as f64 / total_ticks as f64) * 100.0 } else { 0.0 };
+
         let tmdb_id: String = row.get(12).unwrap_or_default();
         let imdb_id: String = row.get(13).unwrap_or_default();
         
@@ -521,13 +540,20 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
             "Type": if item_type == "movies" { "Movie" } else if item_type == "Series" { "Series" } else { "Episode" },
             "IsFolder": false, "MediaType": "Video", "RunTimeTicks": total_ticks,
+            "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
+            "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &item_type),
             "SeriesId": if item_type == "Episode" { json!(row.get::<_, i64>(22).unwrap_or(0)) } else { json!(null) },
             "SeasonId": if item_type == "Episode" { json!(row.get::<_, i64>(23).unwrap_or(0)) } else { json!(null) },
             "IndexNumber": if item_type == "Episode" { json!(row.get::<_, i32>(25).unwrap_or(0)) } else { json!(null) },
             "ParentIndexNumber": if item_type == "Episode" { json!(row.get::<_, i32>(24).unwrap_or(0)) } else { json!(null) },
-            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
-            "UserData": { "Played": play_count > 0, "PlaybackPositionTicks": row.get::<_, i64>(18).unwrap_or(0) }
+            "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "RunTimeTicks": total_ticks }],
+            "UserData": { 
+                "Played": play_count > 0, 
+                "PlaybackPositionTicks": playback_ticks,
+                "PlayedPercentage": played_pct,
+                "PlayCount": play_count
+            }
         }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response()
