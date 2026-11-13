@@ -22,7 +22,6 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 use crate::utils::{decode_url, to_hex, from_hex, format_iso8601, sanitize_media_streams};
-use crate::auth::get_allowed_libs;
 use crate::auth::{TOKENS, get_allowed_libs};
 
 static SCAN_STATUS: OnceLock<Mutex<bool>> = OnceLock::new();
