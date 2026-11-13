@@ -68,7 +68,11 @@ pub fn init_db(conn: &Connection) {
             playback_ticks INTEGER DEFAULT 0,
             play_count INTEGER DEFAULT 0,
             is_favorite INTEGER DEFAULT 0,
-            updated_at INTEGER DEFAULT 0
+            updated_at INTEGER DEFAULT 0,
+            series_id INTEGER,
+            season_number INTEGER,
+            episode_number INTEGER,
+            parent_id INTEGER
         );
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -123,6 +127,7 @@ pub fn ensure_extra_columns(conn: &Connection) {
         ("primary_image_aspect_ratio", "REAL DEFAULT 0"), ("original_language", "TEXT"),
         ("playback_ticks", "INTEGER DEFAULT 0"), ("updated_at", "INTEGER DEFAULT 0"),
         ("play_count", "INTEGER DEFAULT 0"), ("is_favorite", "INTEGER DEFAULT 0"),
+        ("series_id", "INTEGER"), ("season_number", "INTEGER"), ("episode_number", "INTEGER"), ("parent_id", "INTEGER"),
     ];
     
     for (col_name, col_type) in missing_columns {

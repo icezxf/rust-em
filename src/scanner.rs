@@ -84,6 +84,9 @@ fn parse_nfo_stream_details(nfo_text: &str) -> Value {
 
 pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: String, dir_path: String) {
     println!("🔍 开始扫描目录: {:?}", dir_path);
+
+    let re_tv = regex::Regex::new(r"(?i)S(\d{1,2})E(\d{1,3})").unwrap();
+
     let mut count = 0;
     let mut strm_files = Vec::new();
     for entry in walkdir::WalkDir::new(&dir_path).into_iter().filter_map(|e| e.ok()) {
@@ -100,6 +103,16 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
         count += 1;
         paths.sort();
         let first_path = &paths[0];
+        
+        // 判断是否是剧集
+        let mut is_tv = false;
+        let mut s_num = 0;
+        let mut e_num = 0;
+        if let Some(caps) = re_tv.captures(&base_stem) {
+            is_tv = true;
+            s_num = caps.get(1).unwrap().as_str().parse::<i32>().unwrap_or(1);
+            e_num = caps.get(2).unwrap().as_str().parse::<i32>().unwrap_or(1);
+        }
         let metadata = match std::fs::metadata(first_path) { Ok(m) => m, Err(_) => continue };
         let size: i64 = paths.iter().filter_map(|p| std::fs::metadata(p).ok().map(|m| m.len() as i64)).sum();
         let mtime = metadata.modified().unwrap_or(UNIX_EPOCH).duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
