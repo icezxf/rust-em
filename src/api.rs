@@ -1759,6 +1759,14 @@ pub async fn emby_subtitle_stream_with_source(State(pool): State<Arc<Mutex<Conne
     serve_subtitle_inner(pool, item_id, stream_index).await
 }
 
+pub async fn emby_subtitle_stream_ext(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, stream_index, _ext)): AxumPath<(String, String, String)>) -> Response {
+    serve_subtitle_inner(pool, item_id, stream_index).await
+}
+
+pub async fn emby_subtitle_stream_with_source_ext(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, _source_id, stream_index, _ext)): AxumPath<(String, String, String, String)>) -> Response {
+    serve_subtitle_inner(pool, item_id, stream_index).await
+}
+
 async fn serve_subtitle_inner(pool: Arc<Mutex<Connection>>, item_id: String, stream_index: String) -> Response {
     let idx = stream_index.parse::<usize>().unwrap_or(0);
     let path_opt = {
