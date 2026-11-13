@@ -474,8 +474,8 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &r_type),
-            "RecursiveItemCount": row.get::<_, i64>("recursive_item_count").unwrap_or(0),
-            "ChildCount": row.get::<_, i64>("recursive_item_count").unwrap_or(0),
+            "RecursiveItemCount": if r_type == "Series" { row.get::<_, i64>("recursive_item_count").unwrap_or(0) } else { 0 },
+            "ChildCount": if r_type == "Series" { row.get::<_, i64>("recursive_item_count").unwrap_or(0) } else { 0 },
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
             "UserData": {
                 "Played": row.get::<_, i32>("play_count").unwrap_or(0) > 0,
@@ -1072,7 +1072,8 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             "Container": "mp4", "CanDelete": false, "CanDownload": false, "LocationType": "FileSystem", "Status": "Released",
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
-            "RecursiveItemCount": recursive_count, "ChildCount": recursive_count,
+            "RecursiveItemCount": if r_type == "Series" || r_type == "Season" { recursive_count } else { 0 }, 
+            "ChildCount": if r_type == "Series" || r_type == "Season" { recursive_count } else { 0 },
             "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &r_type),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
@@ -1293,6 +1294,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
                        else if typ == "Season" { season_total_eps - season_played_eps } 
                        else { 0 };
         let recursive_count = if typ == "Series" { total_eps } else if typ == "Season" { season_total_eps } else { 0 };
+        // 对于 Series，ChildCount 是季数；对于 Season，ChildCount 是集数
         let child_count = if typ == "Series" { total_seasons } else if typ == "Season" { season_total_eps } else { 0 };
 
         Ok(json!({
