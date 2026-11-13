@@ -339,18 +339,25 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
                 let series_path = series_dir.to_string_lossy().to_string();
                 let series_virtual_path = format!("{}/series_virtual", series_path);
                 
+                // 💡 获取或创建 Series
+                // 如果剧集本身没有评分，且当前解析到的季有评分，就把季的评分补给剧集
+                let mut final_tv_rating = tv_rating;
+                if final_tv_rating <= 0.0 && season_rating > 0.0 {
+                    final_tv_rating = season_rating;
+                }
+
                 let series_id = match conn.query_row("SELECT id FROM items WHERE type = 'Series' AND file_path = ?1", [&series_virtual_path], |r| r.get::<_, i64>(0)) {
                     Ok(id) => {
                         let _ = conn.execute(
                             "UPDATE items SET title = ?1, plot = ?2, year = ?3, rating = ?4, genres = ?5, premiered = ?6, studios = ?7, tmdb_id = ?8, imdb_id = ?9, actors = ?10, poster_path = ?11, fanart_path = ?12, updated_at = ?13 WHERE id = ?14", 
-                            rusqlite::params![tv_title, tv_plot, tv_year, tv_rating, tv_genres, tv_premiered, tv_studios, tv_tmdb_id, tv_imdb_id, tv_actors_json, tv_poster, tv_fanart, updated_at, id]
+                            rusqlite::params![tv_title, tv_plot, tv_year, final_tv_rating, tv_genres, tv_premiered, tv_studios, tv_tmdb_id, tv_imdb_id, tv_actors_json, tv_poster, tv_fanart, updated_at, id]
                         );
                         id
                     },
                     Err(_) => {
                         let _ = conn.execute(
                             "INSERT INTO items (library_id, title, type, file_path, poster_path, fanart_path, plot, year, rating, genres, premiered, studios, tmdb_id, imdb_id, actors, updated_at) VALUES (?1, ?2, 'Series', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-                            rusqlite::params![lib_id, tv_title, series_virtual_path, tv_poster, tv_fanart, tv_plot, tv_year, tv_rating, tv_genres, tv_premiered, tv_studios, tv_tmdb_id, tv_imdb_id, tv_actors_json, updated_at]
+                            rusqlite::params![lib_id, tv_title, series_virtual_path, tv_poster, tv_fanart, tv_plot, tv_year, final_tv_rating, tv_genres, tv_premiered, tv_studios, tv_tmdb_id, tv_imdb_id, tv_actors_json, updated_at]
                         );
                         conn.last_insert_rowid()
                     }
