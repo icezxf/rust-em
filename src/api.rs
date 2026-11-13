@@ -414,6 +414,11 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
     let mut sql = "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path, ud.play_count, ud.last_played_date FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE ud.playback_position_ticks > 0".to_string();
     let mut params: Vec<String> = vec![req_user_id.to_string()];
 
+    if let Some(types) = query.get("IncludeItemTypes") {
+        if types.contains("Movie") { sql.push_str(" AND items.type = 'movies'"); }
+        else if types.contains("Episode") { sql.push_str(" AND items.type = 'Episode'"); }
+    }
+
     if let Some(libs) = &allowed_libs {
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
         sql.push_str(&format!(" AND items.library_id IN ({})", libs_str.join(",")));

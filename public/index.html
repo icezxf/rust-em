@@ -464,7 +464,8 @@
                 if (currentFilter.type) { banner.classList.remove('hidden'); document.getElementById('filter-text').innerText = currentFilter.value; } 
                 else { banner.classList.add('hidden'); }
 
-                const resumeRes = await fetch('/emby/Users/1/Items/Resume', { headers: { 'Authorization': `Bearer ${token}` } });
+                const includeType = currentMediaType === 'movies' ? 'Movie' : 'Episode';
+                const resumeRes = await fetch(`/emby/Users/1/Items/Resume?IncludeItemTypes=${includeType}`, { headers: { 'Authorization': `Bearer ${token}` } });
                 if (resumeRes.status === 401) {
                     alert("登录凭证已过期，点击确定重新登录。");
                     localStorage.removeItem('token');
