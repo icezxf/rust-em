@@ -932,7 +932,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     for raw_id in tag_filters {
         let name = raw_id.replace("tag_", "").trim().to_string();
         if name.is_empty() { continue; }
-        where_clauses.push("(tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)".to_string());
+        sql.push_str(" AND (tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)");
         params.push(name.clone()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name));
     }
 
