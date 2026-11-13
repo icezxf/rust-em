@@ -1192,6 +1192,32 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
     if let Some(item) = item_opt { Json(item).into_response() } else { StatusCode::NOT_FOUND.into_response() }
 }
 
+
+pub async fn emby_item_counts(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let movie_count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE type='movies'", [], |r| r.get(0)).unwrap_or(0);
+    let series_count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE type='tvshows' OR type='Series'", [], |r| r.get(0)).unwrap_or(0);
+    Json(json!({ "MovieCount": movie_count, "SeriesCount": series_count, "EpisodeCount": 0, "ArtistCount": 0, "SongCount": 0, "AlbumCount": 0, "MusicVideoCount": 0, "BoxSetCount": 0, "BookCount": 0, "TrailerCount": 0 }))
+}
+
+#[derive(Deserialize)]
+pub struct SearchQuery { #[serde(rename = "SearchTerm")] pub search_term: Option<String>, #[serde(rename = "Limit")] pub limit: Option<i64> }
+pub async fn emby_search_hints(State(pool): State<Arc<Mutex<Connection>>>, Query(q): Query<SearchQuery>) -> impl IntoResponse {
+    let term = q.search_term.unwrap_or_default();
+    if term.is_empty() { return Json(json!({ "SearchHints": [], "TotalRecordCount": 0 })); }
+    let limit = q.limit.unwrap_or(20);
+    let conn = pool.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT id, title, type, year, poster_path FROM items WHERE title LIKE ?1 ORDER BY id DESC LIMIT ?2").unwrap();
+    let pattern = format!("%{}%", term);
+    let hints: Vec<Value> = stmt.query_map(rusqlite::params![pattern, limit], |row| {
+        let id: i64 = row.get(0).unwrap_or_default();
+        let r_type: String = row.get(2).unwrap_or_default();
+        let has_poster = !row.get::<_, String>(4).unwrap_or_default().is_empty();
+        Ok(json!({ "ItemId": id.to_string(), "Id": id.to_string(), "Name": row.get::<_, String>(1).unwrap_or_default(), "Type": if r_type == "movies" { "Movie" } else { "Series" }, "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0), "ImageTags": if has_poster { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) }, "MatchedTerm": term, "PrimaryImageTag": if has_poster { format!("tag_{}", id) } else { "".to_string() } }))
+    }).unwrap().filter_map(Result::ok).collect();
+    Json(json!({ "SearchHints": hints, "TotalRecordCount": hints.len() }))
+}
+
 pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let (genres_str, tags_str): (String, String) = conn.query_row("SELECT genres, tags FROM items WHERE id = ?1", [item_id], |r| Ok((r.get::<_, String>(0).unwrap_or_default(), r.get::<_, String>(1).unwrap_or_default()))).unwrap_or_default();
@@ -1462,68 +1488,6 @@ pub async fn emby_unmark_favorite(State(pool): State<Arc<Mutex<Connection>>>, Ax
         let _ = conn.execute("INSERT INTO user_data (user_id, item_id, is_favorite) VALUES (?1, ?2, 0) ON CONFLICT(user_id, item_id) DO UPDATE SET is_favorite = 0", rusqlite::params![req_user_id, &item_id]);
     }
     Json(json!({ "IsFavorite": false, "ItemId": item_id })).into_response()
-}
-
-pub async fn api_generate_covers(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
-    let pool_clone = pool.clone();
-    tokio::spawn(async move { crate::covers::generate_all_covers(pool_clone).await; });
-    Json(json!({"status": "started"}))
-}
-
-pub async fn api_get_users(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
-    let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id, username FROM users WHERE id != 1").unwrap();
-    let users: Vec<Value> = stmt.query_map([], |r| {
-        let id: i64 = r.get(0).unwrap_or_default();
-        let name: String = r.get(1).unwrap_or_default();
-        Ok((id, name))
-    }).unwrap().filter_map(Result::ok).map(|(id, name)| {
-        let mut access_stmt = conn.prepare("SELECT library_id FROM user_library_access WHERE user_id = ?1").unwrap();
-        let libs: Vec<i64> = access_stmt.query_map([id], |r| r.get(0)).unwrap().filter_map(Result::ok).collect();
-        json!({ "id": id, "username": name, "libraries": libs })
-    }).collect();
-    Json(users)
-}
-
-#[derive(Deserialize)]
-pub struct CreateUserReq { username: String, password: String, libraries: Vec<i64> }
-pub async fn api_create_user(State(pool): State<Arc<Mutex<Connection>>>, Json(payload): Json<CreateUserReq>) -> impl IntoResponse {
-    let conn = pool.lock().unwrap();
-    
-    let user_id: i64 = conn.query_row("SELECT id FROM users WHERE username = ?1", [&payload.username], |r| r.get(0)).unwrap_or(0);
-    
-    if user_id == 0 {
-        if payload.password.is_empty() { return (StatusCode::BAD_REQUEST, "新建用户密码不能为空").into_response(); }
-        let mut hasher = Sha256::new(); hasher.update(&payload.password);
-        let hash = format!("{:x}", hasher.finalize());
-        let _ = conn.execute("INSERT INTO users (username, password) VALUES (?1, ?2)", [&payload.username, &hash]);
-    } else if user_id > 1 {
-        if !payload.password.is_empty() {
-            let mut hasher = Sha256::new(); hasher.update(&payload.password);
-            let hash = format!("{:x}", hasher.finalize());
-            let _ = conn.execute("UPDATE users SET password = ?1 WHERE id = ?2", [&hash, &user_id.to_string()]);
-        }
-    } else {
-        return (StatusCode::FORBIDDEN, "不能修改管理员").into_response();
-    }
-    
-    let user_id: i64 = conn.query_row("SELECT id FROM users WHERE username = ?1", [&payload.username], |r| r.get(0)).unwrap_or(0);
-    
-    if user_id > 1 {
-        let _ = conn.execute("DELETE FROM user_library_access WHERE user_id = ?1", [user_id]);
-        for lib_id in payload.libraries {
-            let _ = conn.execute("INSERT INTO user_library_access (user_id, library_id) VALUES (?1, ?2)", [user_id, lib_id]);
-        }
-    }
-    StatusCode::OK.into_response()
-}
-
-pub async fn api_delete_user(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(id): AxumPath<i64>) -> impl IntoResponse {
-    if id == 1 { return StatusCode::BAD_REQUEST.into_response(); }
-    let conn = pool.lock().unwrap();
-    let _ = conn.execute("DELETE FROM users WHERE id = ?1", [id]);
-    let _ = conn.execute("DELETE FROM user_library_access WHERE user_id = ?1", [id]);
-    StatusCode::OK.into_response()
 }
 
 pub async fn emby_action() -> impl IntoResponse { StatusCode::OK.into_response() }
