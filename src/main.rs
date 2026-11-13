@@ -11,6 +11,7 @@ use rusqlite::Connection;
 use tokio::net::TcpListener;
 
 mod api;
+mod auth;
 mod db;
 mod nfo;
 mod probe;
@@ -61,8 +62,8 @@ async fn main() {
         .fallback_service(tower_http::services::ServeDir::new("public").append_index_html_on_directories(true))
 
         // 4. 中间件挂载
-        .layer(middleware::from_fn(api::logger_middleware))
-        .layer(middleware::from_fn(api::auth))
+        .layer(middleware::from_fn(auth::logger_middleware))
+        .layer(middleware::from_fn(auth::auth))
         .with_state(state);
 
     // 5. 启动服务
