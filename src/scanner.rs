@@ -141,6 +141,8 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
                     if let Some(r) = meta.rating { rating = r; }
                     if let Some(m) = &meta.mpaa { mpaa = m.clone(); }
                     if let Some(rt) = meta.runtime { runtime = rt; }
+                    if let Some(s_val) = meta.season { s_num = s_val; }
+                    if let Some(e_val) = meta.episode { e_num = e_val; }
                     if let Some(tg) = &meta.tagline { tagline = tg.clone(); }
                     if let Some(s) = &meta.series { series = s.clone(); }
                     if let Some(l) = &meta.label { label = l.clone(); }
