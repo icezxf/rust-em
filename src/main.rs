@@ -14,6 +14,7 @@ mod api;
 mod db;
 mod nfo;
 mod probe;
+mod utils;
 
 pub type AppState = Arc<Mutex<Connection>>;
 
