@@ -1263,9 +1263,10 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
         }))
     }).ok();
 
-    match item_opt {
-        Ok(Some(item)) => Json(item).into_response(),
-        _ => StatusCode::NOT_FOUND.into_response(),
+    if let Some(item) = item_opt {
+        Json(item).into_response()
+    } else {
+        StatusCode::NOT_FOUND.into_response()
     }
 }
 
