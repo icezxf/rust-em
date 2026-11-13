@@ -240,7 +240,8 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
             }
         }
 
-        let final_size = if probe_size > 0 { probe_size } else { size };
+        let mut final_size = if probe_size > 0 { probe_size } else { size };
+        if final_size < 1024 * 1024 { final_size = 0; }
         let updated_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
 
         {
