@@ -331,7 +331,9 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<HashMap<String, String>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
+pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(_query): Query<HashMap<String, String>>,
+    Extension(req_user_id): Extension<i64>,
+) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     
     let allowed_libs = get_allowed_libs(&conn, req_user_id);
@@ -415,7 +417,9 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
     Json(items).into_response()
 }
 
-pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<HashMap<String, String>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
+pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(_query): Query<HashMap<String, String>>,
+    Extension(req_user_id): Extension<i64>,
+) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let allowed_libs = get_allowed_libs(&conn, req_user_id);
     if let Some(libs) = &allowed_libs {
@@ -1459,6 +1463,13 @@ pub async fn emby_shows_seasons(State(pool): State<Arc<Mutex<Connection>>>, Axum
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct EpisodesQuery { 
+    #[serde(rename = "SeasonId")] season_id: Option<String>,
+    #[serde(rename = "ParentId")] parent_id: Option<String>,
+}
+
 pub async fn emby_shows_episodes(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(series_id): AxumPath<String>, Query(query): Query<EpisodesQuery>) -> impl IntoResponse {
     let Ok(sid) = series_id.parse::<i64>() else { return Json(json!({"Items": [], "TotalRecordCount": 0})); };
     let conn = pool.lock().unwrap();
@@ -1599,7 +1610,9 @@ pub async fn emby_display_preferences(_: AxumPath<String>) -> impl IntoResponse 
     Json(json!({"Id": "default", "ViewType": "Poster", "SortBy": "SortName", "PrimaryImageHeight": 250, "PrimaryImageWidth": 250, "ScrollDirection": "Horizontal"}))
 }
 
-pub async fn emby_items_filters(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<HashMap<String, String>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
+pub async fn emby_items_filters(State(pool): State<Arc<Mutex<Connection>>>, Query(_query): Query<HashMap<String, String>>,
+    Extension(req_user_id): Extension<i64>,
+) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT genres, tags, mpaa, year FROM items WHERE 1=1".to_string();
     if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
@@ -1629,7 +1642,9 @@ pub async fn emby_items_filters(State(pool): State<Arc<Mutex<Connection>>>, Quer
     Json(json!({ "Genres": genre_items, "Tags": tag_items, "OfficialRatings": rating_items, "Years": year_list }))
 }
 
-pub async fn emby_genres(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<HashMap<String, String>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
+pub async fn emby_genres(State(pool): State<Arc<Mutex<Connection>>>, Query(_query): Query<HashMap<String, String>>,
+    Extension(req_user_id): Extension<i64>,
+) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT genres FROM items WHERE genres != ''".to_string();
     if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
@@ -1654,7 +1669,9 @@ pub async fn emby_genres(State(pool): State<Arc<Mutex<Connection>>>, Query(query
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_tags(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<HashMap<String, String>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
+pub async fn emby_tags(State(pool): State<Arc<Mutex<Connection>>>, Query(_query): Query<HashMap<String, String>>,
+    Extension(req_user_id): Extension<i64>,
+) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT tags FROM items WHERE tags != ''".to_string();
     if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
@@ -1677,7 +1694,9 @@ pub async fn emby_tags(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_years(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<HashMap<String, String>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
+pub async fn emby_years(State(pool): State<Arc<Mutex<Connection>>>, Query(_query): Query<HashMap<String, String>>,
+    Extension(req_user_id): Extension<i64>,
+) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT DISTINCT year FROM items WHERE year != ''".to_string();
     if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
@@ -1698,7 +1717,9 @@ pub async fn emby_years(State(pool): State<Arc<Mutex<Connection>>>, Query(query)
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_studios(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<HashMap<String, String>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
+pub async fn emby_studios(State(pool): State<Arc<Mutex<Connection>>>, Query(_query): Query<HashMap<String, String>>,
+    Extension(req_user_id): Extension<i64>,
+) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT studios FROM items WHERE studios != ''".to_string();
     if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
@@ -1721,7 +1742,9 @@ pub async fn emby_studios(State(pool): State<Arc<Mutex<Connection>>>, Query(quer
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_official_ratings(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<HashMap<String, String>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
+pub async fn emby_official_ratings(State(pool): State<Arc<Mutex<Connection>>>, Query(_query): Query<HashMap<String, String>>,
+    Extension(req_user_id): Extension<i64>,
+) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
     let mut sql = "SELECT DISTINCT mpaa FROM items WHERE mpaa != ''".to_string();
     if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
