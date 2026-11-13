@@ -1615,6 +1615,28 @@ pub async fn emby_unmark_favorite(State(pool): State<Arc<Mutex<Connection>>>, Ax
     Json(json!({ "IsFavorite": false, "ItemId": item_id })).into_response()
 }
 
+
+pub async fn emby_mark_played(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+    let _ = conn.execute(
+        "INSERT INTO user_data (user_id, item_id, play_count, playback_position_ticks, last_played_date) VALUES (?1, ?2, 1, 0, ?3) 
+         ON CONFLICT(user_id, item_id) DO UPDATE SET play_count = 1, playback_position_ticks = 0, last_played_date = excluded.last_played_date", 
+        rusqlite::params![req_user_id, item_id, now.to_string()]
+    );
+    Json(json!({ "Played": true, "PlayCount": 1, "PlaybackPositionTicks": 0 })).into_response()
+}
+
+pub async fn emby_mark_unplayed(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    let _ = conn.execute(
+        "INSERT INTO user_data (user_id, item_id, play_count, playback_position_ticks) VALUES (?1, ?2, 0, 0) 
+         ON CONFLICT(user_id, item_id) DO UPDATE SET play_count = 0, playback_position_ticks = 0", 
+        rusqlite::params![req_user_id, item_id]
+    );
+    Json(json!({ "Played": false, "PlayCount": 0, "PlaybackPositionTicks": 0 })).into_response()
+}
+
 pub async fn emby_action() -> impl IntoResponse { StatusCode::OK.into_response() }
 pub async fn emby_sessions() -> impl IntoResponse { Json(json!([])) }
 pub async fn emby_playing() -> impl IntoResponse { StatusCode::OK.into_response() }

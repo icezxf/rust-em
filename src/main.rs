@@ -146,7 +146,7 @@ fn emby_routes() -> Router<AppState> {
         .route("/Sessions/Playing/Stopped", post(api::emby_playing_stopped))
         .route("/Users/{user_id}/Items/{item_id}/HideFromResume", post(api::emby_hide_from_resume))
         .route("/Items/{item_id}/Refresh", post(api::emby_action))
-        .route("/Users/{user_id}/PlayedItems/{item_id}", post(api::emby_action).delete(api::emby_action))
+        .route("/Users/{user_id}/PlayedItems/{item_id}", post(api::emby_mark_played).delete(api::emby_mark_unplayed))
         .route("/Users/{user_id}/FavoriteItems/{item_id}", post(api::emby_mark_favorite).delete(api::emby_unmark_favorite))
         .route("/Sessions/Logout", post(api::emby_action))
         .route("/api/danmu/{item_id}", get(api::emby_danmu))
