@@ -404,6 +404,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
+            "ExternalUrls": build_external_urls(&row.get::<_, String>(12).unwrap_or_default(), &row.get::<_, String>(13).unwrap_or_default()),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
             "RecursiveItemCount": row.get::<_, i64>(19).unwrap_or(0),
             "ChildCount": row.get::<_, i64>(19).unwrap_or(0),
@@ -985,6 +986,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
+            "ExternalUrls": build_external_urls(&row.get::<_, String>(12).unwrap_or_default(), &row.get::<_, String>(13).unwrap_or_default()),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
             "RecursiveItemCount": row.get::<_, i64>(28).unwrap_or(0),
             "ChildCount": row.get::<_, i64>(28).unwrap_or(0),
@@ -1145,6 +1147,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
                 "Genres": genres_vec, "GenreItems": genre_items, "Tags": tags_vec, "TagItems": tag_items,
                 "Taglines": if tagline.is_empty() { json!([]) } else { json!([tagline]) }, "Studios": studios, "People": people,
                 "ProviderIds": json!({ "Tmdb": tmdb_id, "Imdb": imdb_id, "num": num }),
+                "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id),
                 "ImageTags": image_tags, "BackdropImageTags": backdrop_tags, "PrimaryImageAspectRatio": if r_type == "Episode" { json!(1.7777777777777777) } else if aspect_ratio > 0.0 { json!(aspect_ratio) } else { json!(0.6666666666666666) },
                 "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(), "OriginalLanguage": json!(if !original_language.is_empty() { original_language } else { language }),
                 "SetName": json!(set_name), "SeriesName": json!(if typ == "tvshows" { &series } else { "" }),
@@ -1698,3 +1701,21 @@ pub async fn emby_unmark_favorite(State(pool): State<Arc<Mutex<Connection>>>, Ax
 
 pub async fn emby_danmu(_: AxumPath<String>) -> impl IntoResponse { Json(json!([])) }
 pub async fn emby_item_image_user_only(_: AxumPath<(String, String)>) -> Response { StatusCode::NOT_FOUND.into_response() }
+
+
+fn build_external_urls(tmdb_id: &str, imdb_id: &str) -> Value {
+    let mut urls = Vec::new();
+    if !tmdb_id.is_empty() && tmdb_id != "0" {
+        urls.push(json!({
+            "Name": "MovieDb",
+            "Url": format!("https://www.themoviedb.org/movie/{}", tmdb_id)
+        }));
+    }
+    if !imdb_id.is_empty() && imdb_id != "0" && imdb_id.starts_with("tt") {
+        urls.push(json!({
+            "Name": "IMDb",
+            "Url": format!("https://www.imdb.com/title/{}", imdb_id)
+        }));
+    }
+    json!(urls)
+}
