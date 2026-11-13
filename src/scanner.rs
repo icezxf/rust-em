@@ -286,40 +286,83 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
             let conn = match pool.lock() { Ok(c) => c, Err(_) => continue };
 
             if is_tv {
-                // 读取或创建主剧集 NFO (tvshow.nfo)
+                // ==========================================
+                // 1. 解析主剧集 NFO (tvshow.nfo) 并更新 Series 节点
+                // ==========================================
                 let tv_nfo_path = series_dir.join("tvshow.nfo");
                 let mut tv_title = series_title.clone();
-                let mut tv_poster = String::new();
-                let mut tv_fanart = String::new();
                 let mut tv_plot = String::new();
+                let mut tv_year = String::new();
+                let mut tv_rating = 0.0;
+                let mut tv_genres = String::new();
+                let mut tv_premiered = String::new();
+                let mut tv_studios = String::new();
+                let mut tv_tmdb_id = String::new();
+                let mut tv_imdb_id = String::new();
+                let mut tv_actors_json = "[]".to_string();
                 
                 if tv_nfo_path.exists() {
                     if let Some(tv_meta) = crate::nfo::read_nfo(&tv_nfo_path) {
                         if let Some(t) = &tv_meta.title { tv_title = t.clone(); }
                         if let Some(p) = &tv_meta.plot { tv_plot = p.clone(); }
+                        if let Some(y) = &tv_meta.year { tv_year = y.clone(); }
+                        if let Some(r) = tv_meta.rating { tv_rating = r; }
+                        if !tv_meta.genres.is_empty() { tv_genres = tv_meta.genres.join(" / "); }
+                        if let Some(pr) = &tv_meta.premiered { tv_premiered = pr.clone(); }
+                        if !tv_meta.studios.is_empty() { tv_studios = tv_meta.studios.join(" / "); }
+                        for uid in tv_meta.unique_ids {
+                            if uid.0 == "tmdb" { tv_tmdb_id = uid.1.clone(); }
+                            if uid.0 == "imdb" { tv_imdb_id = uid.1.clone(); }
+                        }
+                        let actors_arr: Vec<Value> = tv_meta.actors.into_iter().filter(|a| a.name.is_some()).map(|a| json!({ "name": a.name.unwrap_or_default(), "role": a.role.unwrap_or_default(), "thumb": a.thumb.unwrap_or_default() })).collect();
+                        tv_actors_json = serde_json::to_string(&actors_arr).unwrap_or_default();
                     }
                 }
+                
+                let mut tv_poster = String::new();
+                let mut tv_fanart = String::new();
                 for ext in &["jpg", "png"] {
                     if tv_poster.is_empty() && series_dir.join(format!("poster.{}", ext)).exists() { tv_poster = series_dir.join(format!("poster.{}", ext)).to_string_lossy().to_string(); }
                     if tv_fanart.is_empty() && series_dir.join(format!("fanart.{}", ext)).exists() { tv_fanart = series_dir.join(format!("fanart.{}", ext)).to_string_lossy().to_string(); }
                 }
                 let series_path = series_dir.to_string_lossy().to_string();
-
-                let series_id = match conn.query_row("SELECT id FROM items WHERE type = 'Series' AND title = ?1", [&tv_title], |r| r.get::<_, i64>(0)) {
+                let series_virtual_path = format!("{}/series_virtual", series_path);
+                
+                let series_id = match conn.query_row("SELECT id FROM items WHERE type = 'Series' AND file_path = ?1", [&series_virtual_path], |r| r.get::<_, i64>(0)) {
                     Ok(id) => {
-                        let _ = conn.execute("UPDATE items SET poster_path = ?1, fanart_path = ?2, plot = ?3 WHERE id = ?4", rusqlite::params![tv_poster, tv_fanart, tv_plot, id]);
+                        let _ = conn.execute(
+                            "UPDATE items SET title = ?1, plot = ?2, year = ?3, rating = ?4, genres = ?5, premiered = ?6, studios = ?7, tmdb_id = ?8, imdb_id = ?9, actors = ?10, poster_path = ?11, fanart_path = ?12, updated_at = ?13 WHERE id = ?14", 
+                            rusqlite::params![tv_title, tv_plot, tv_year, tv_rating, tv_genres, tv_premiered, tv_studios, tv_tmdb_id, tv_imdb_id, tv_actors_json, tv_poster, tv_fanart, updated_at, id]
+                        );
                         id
                     },
                     Err(_) => {
                         let _ = conn.execute(
-                            "INSERT INTO items (library_id, title, type, file_path, poster_path, fanart_path, plot, updated_at) VALUES (?1, ?2, 'Series', ?3, ?4, ?5, ?6, ?7)",
-                            rusqlite::params![lib_id, tv_title, format!("{}/series_virtual", series_path), tv_poster, tv_fanart, tv_plot, updated_at]
+                            "INSERT INTO items (library_id, title, type, file_path, poster_path, fanart_path, plot, year, rating, genres, premiered, studios, tmdb_id, imdb_id, actors, updated_at) VALUES (?1, ?2, 'Series', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                            rusqlite::params![lib_id, tv_title, series_virtual_path, tv_poster, tv_fanart, tv_plot, tv_year, tv_rating, tv_genres, tv_premiered, tv_studios, tv_tmdb_id, tv_imdb_id, tv_actors_json, updated_at]
                         );
                         conn.last_insert_rowid()
                     }
                 };
 
-                // 找季海报
+                // ==========================================
+                // 2. 解析季 NFO (season.nfo) 并更新 Season 节点
+                // ==========================================
+                let season_nfo_path = parent.join("season.nfo");
+                let mut season_title = format!("Season {}", s_num);
+                let mut season_rating = 0.0;
+                let mut season_premiered = String::new();
+                let mut season_plot = String::new();
+                
+                if season_nfo_path.exists() {
+                    if let Some(s_meta) = crate::nfo::read_nfo(&season_nfo_path) {
+                        if let Some(t) = &s_meta.title { season_title = t.clone(); }
+                        if let Some(r) = s_meta.rating { season_rating = r; }
+                        if let Some(pr) = &s_meta.premiered { season_premiered = pr.clone(); }
+                        if let Some(p) = &s_meta.plot { season_plot = p.clone(); }
+                    }
+                }
+                
                 let mut season_poster = String::new();
                 let s_pad = format!("{:02}", s_num);
                 if series_dir.join(format!("season{}-poster.jpg", s_pad)).exists() {
@@ -330,22 +373,25 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
                     season_poster = parent.join("poster.jpg").to_string_lossy().to_string();
                 }
 
-                let season_title = format!("Season {}", s_num);
                 let season_path = format!("{}/season_{}", series_path, s_num);
                 let season_id = match conn.query_row("SELECT id FROM items WHERE type = 'Season' AND parent_id = ?1 AND season_number = ?2", rusqlite::params![series_id, s_num], |r| r.get::<_, i64>(0)) {
                     Ok(id) => {
-                        let _ = conn.execute("UPDATE items SET poster_path = ?1 WHERE id = ?2", rusqlite::params![season_poster, id]);
+                        let _ = conn.execute("UPDATE items SET title = ?1, rating = ?2, premiered = ?3, plot = ?4, poster_path = ?5, updated_at = ?6 WHERE id = ?7", 
+                            rusqlite::params![season_title, season_rating, season_premiered, season_plot, season_poster, updated_at, id]);
                         id
                     },
                     Err(_) => {
                         let _ = conn.execute(
-                            "INSERT INTO items (library_id, title, type, file_path, parent_id, series_id, season_number, poster_path, updated_at) VALUES (?1, ?2, 'Season', ?3, ?4, ?5, ?6, ?7, ?8)",
-                            rusqlite::params![lib_id, season_title, season_path, series_id, series_id, s_num, season_poster, updated_at]
+                            "INSERT INTO items (library_id, title, type, file_path, parent_id, series_id, season_number, poster_path, rating, premiered, plot, updated_at) VALUES (?1, ?2, 'Season', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                            rusqlite::params![lib_id, season_title, season_path, series_id, series_id, s_num, season_poster, season_rating, season_premiered, season_plot, updated_at]
                         );
                         conn.last_insert_rowid()
                     }
                 };
 
+                // ==========================================
+                // 3. 插入 Episode (此时 title 和 plot 已经由前面的单集 NFO 获取)
+                // ==========================================
                 let mut ep_title = title.clone();
                 if ep_title.is_empty() || ep_title.to_lowercase().contains(&format!("s{:02}e{:02}", s_num, e_num)) {
                     ep_title = format!("第 {} 集", e_num);
