@@ -1,20 +1,19 @@
 use axum::{
-    extract::{State, Request, Json, Query, Path as AxumPath},
-    http::{StatusCode, header::{LOCATION, USER_AGENT, CONTENT_TYPE}, HeaderMap, Method},
-    middleware::Next, response::{IntoResponse, Response}, body::Bytes,
+    extract::{State, Json, Query, Path as AxumPath},
+    http::{StatusCode, header::CONTENT_TYPE, HeaderMap},
+    response::{IntoResponse, Response}, body::Bytes,
     Extension,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant, UNIX_EPOCH, SystemTime};
+use std::time::Duration;
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use tokio::io::AsyncReadExt;
 
-use crate::utils::{decode_url, to_hex, from_hex, format_iso8601, extract_extension_from_url, sanitize_media_streams};
+use crate::utils::{decode_url, to_hex, from_hex, format_iso8601, sanitize_media_streams};
 use crate::auth::{TOKENS, get_allowed_libs};
 
 static SCAN_STATUS: OnceLock<Mutex<bool>> = OnceLock::new();
