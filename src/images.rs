@@ -57,7 +57,7 @@ pub fn get_cover_tag(folder: &str, prefix: &str, name: &str) -> String {
     tag
 }
 
-pub pub async fn serve_file(path_str: &str) -> Response {
+pub async fn serve_file(path_str: &str) -> Response {
     // 如果是网络图片，服务器代下载后再返回，防止客户端网络被墙
     if path_str.starts_with("http") { 
         let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).build().unwrap();
