@@ -8,8 +8,17 @@ use regex::Regex;
 
 fn get_image_type(stem: &str) -> Option<&'static str> {
     let lower = stem.to_lowercase();
-    let base = if let Some((b, suffix)) = lower.rsplit_once('-') { if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) { b } else { &lower } } else { &lower };
-    match base { "poster" => Some("poster"), "fanart" | "backdrop" => Some("fanart"), "logo" | "clearlogo" => Some("logo"), "thumb" | "thumbnail" => Some("thumb"), "banner" => Some("banner"), _ => None }
+    let base = if let Some((b, suffix)) = lower.rsplit_once('-') {
+        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) { b } else { &lower }
+    } else { &lower };
+    match base {
+        "poster" => Some("poster"),
+        "fanart" | "backdrop" => Some("fanart"),
+        "logo" | "clearlogo" => Some("logo"),
+        "thumb" | "thumbnail" => Some("thumb"),
+        "banner" => Some("banner"),
+        _ => None
+    }
 }
 
 fn get_base_stem(stem: &str) -> String {
@@ -82,10 +91,15 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
     println!("🔍 开始扫描目录: {:?} (类型: {})", dir_path, lib_type);
     let mut count = 0;
     let mut strm_files = Vec::new();
+    
+    // 1. 收集所有 .strm 文件
     for entry in walkdir::WalkDir::new(&dir_path).into_iter().filter_map(|e| e.ok()) {
-        if entry.path().is_file() && entry.path().extension().and_then(|e| e.to_str()).map_or(false, |e| e.eq_ignore_ascii_case("strm")) { strm_files.push(entry.path().to_path_buf()); }
+        if entry.path().is_file() && entry.path().extension().and_then(|e| e.to_str()).map_or(false, |e| e.eq_ignore_ascii_case("strm")) {
+            strm_files.push(entry.path().to_path_buf());
+        }
     }
     
+    // 2. 按目录和基础文件名分组（合并分段视频）
     let mut grouped: HashMap<(PathBuf, String), Vec<PathBuf>> = HashMap::new();
     for path in strm_files {
         let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
@@ -103,7 +117,6 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
         paths.sort();
         let first_path = &paths[0];
         
-        // 强制根据媒体库类型决定
         let is_tv = lib_type == "tvshows";
         let mut s_num = 1;
         let mut e_num = 1;
@@ -113,7 +126,7 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
         if is_tv {
             let parent_name = parent.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
             
-            // 1. 判断是否在 Season 目录下
+            // 判断是否在 Season 目录下
             if parent_name.starts_with("season") || parent_name.starts_with("s0") || parent_name.starts_with("s1") {
                 if let Some(p_parent) = parent.parent() {
                     series_dir = p_parent.to_path_buf();
@@ -123,7 +136,7 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
                 }
             }
             
-            // 2. 提取集号
+            // 提取集号
             if let Some(caps) = re_tv.captures(&base_stem) {
                 s_num = caps.get(1).unwrap().as_str().parse::<i32>().unwrap_or(s_num);
                 e_num = caps.get(2).unwrap().as_str().parse::<i32>().unwrap_or(e_num);
@@ -131,7 +144,7 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
                 e_num = caps.get(1).unwrap().as_str().parse::<i32>().unwrap_or(e_num);
             }
 
-            // 3. 提取剧名（根目录名）
+            // 提取剧名（根目录名，去掉年份）
             series_title = series_dir.file_name().unwrap_or_default().to_string_lossy().to_string();
             if let Some(idx) = series_title.rfind('(') {
                 series_title = series_title[..idx].trim().to_string();
@@ -147,6 +160,7 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
         let strm_content = combined_content.trim().to_string();
         let parts_json = serde_json::to_string(&paths.iter().map(|p| p.to_string_lossy().to_string()).collect::<Vec<_>>()).unwrap_or_default();
 
+        // 解析单集/电影的 NFO
         let nfo_candidates = vec![parent.join(format!("{}.nfo", base_stem)), parent.join("movie.nfo")];
         let mut title = base_stem.clone(); let mut plot = String::new(); let mut year = String::new();
         let mut rating = 0.0; let mut mpaa = String::new(); let mut genres = String::new(); let mut tags = String::new();
@@ -215,6 +229,8 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
                 }
             }
         }
+
+        // 本地图片匹配
         let mut final_poster = nfo_poster; let mut final_fanart = nfo_fanart;
         let mut logo = String::new(); let mut thumb = String::new(); let mut banner = String::new();
         
@@ -222,12 +238,10 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
         if is_tv {
             for ext in &["jpg", "png", "webp"] {
                 let ep_img = parent.join(format!("{}.{}", base_stem, ext));
-                if ep_img.exists() {
-                    final_poster = ep_img.to_string_lossy().to_string();
-                    break;
-                }
+                if ep_img.exists() { final_poster = ep_img.to_string_lossy().to_string(); break; }
             }
         }
+        
         if let Ok(entries) = std::fs::read_dir(&parent) {
             for entry in entries.flatten() {
                 let p = entry.path(); if !p.is_file() { continue; }
@@ -238,7 +252,7 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
                     let test_stem = if is_match_media { file_stem.trim_start_matches(&format!("{}-", base_stem)) } else { file_stem };
                     if let Some(img_type) = get_image_type(test_stem) {
                         let p_str = p.to_string_lossy().to_string();
-                        match img_type { "poster" => final_poster = p_str, "fanart" => final_fanart = p_str, "logo" => if logo.is_empty() { logo = p_str }, "thumb" => if thumb.is_empty() { thumb = p_str }, "banner" => if banner.is_empty() { banner = p_str }, _ => {} }
+                        match img_type { "poster" => if final_poster.is_empty() { final_poster = p_str }, "fanart" => if final_fanart.is_empty() { final_fanart = p_str }, "logo" => if logo.is_empty() { logo = p_str }, "thumb" => if thumb.is_empty() { thumb = p_str }, "banner" => if banner.is_empty() { banner = p_str }, _ => {} }
                     }
                 }
             }
@@ -260,6 +274,7 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
         stills.sort();
         let stills_json = serde_json::to_string(&stills).unwrap_or_default();
         
+        // 读取 Probe 探测缓存
         let mediainfo_json_path = crate::probe::get_mediainfo_json_path(first_path);
         let (probe_size, mut media_streams_json_str) = if mediainfo_json_path.exists() {
             if let Some(src) = crate::probe::load_cached_source(&mediainfo_json_path) {
@@ -297,9 +312,7 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
             let conn = match pool.lock() { Ok(c) => c, Err(_) => continue };
 
             if is_tv {
-                // ==========================================
-                // 1. 解析主剧集 NFO (tvshow.nfo) 并更新 Series 节点
-                // ==========================================
+                // === 剧集流程 ===
                 let tv_nfo_path = series_dir.join("tvshow.nfo");
                 let mut tv_title = series_title.clone();
                 let mut tv_plot = String::new();
@@ -339,33 +352,25 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
                 let series_path = series_dir.to_string_lossy().to_string();
                 let series_virtual_path = format!("{}/series_virtual", series_path);
                 
-                // 💡 获取或创建 Series
-                // 如果剧集本身没有评分，且当前解析到的季有评分，就把季的评分补给剧集
-                let mut final_tv_rating = tv_rating;
-                if final_tv_rating <= 0.0 && season_rating > 0.0 {
-                    final_tv_rating = season_rating;
-                }
-
+                // 获取或创建 Series
                 let series_id = match conn.query_row("SELECT id FROM items WHERE type = 'Series' AND file_path = ?1", [&series_virtual_path], |r| r.get::<_, i64>(0)) {
                     Ok(id) => {
                         let _ = conn.execute(
                             "UPDATE items SET title = ?1, plot = ?2, year = ?3, rating = ?4, genres = ?5, premiered = ?6, studios = ?7, tmdb_id = ?8, imdb_id = ?9, actors = ?10, poster_path = ?11, fanart_path = ?12, updated_at = ?13 WHERE id = ?14", 
-                            rusqlite::params![tv_title, tv_plot, tv_year, final_tv_rating, tv_genres, tv_premiered, tv_studios, tv_tmdb_id, tv_imdb_id, tv_actors_json, tv_poster, tv_fanart, updated_at, id]
+                            rusqlite::params![tv_title, tv_plot, tv_year, tv_rating, tv_genres, tv_premiered, tv_studios, tv_tmdb_id, tv_imdb_id, tv_actors_json, tv_poster, tv_fanart, updated_at, id]
                         );
                         id
                     },
                     Err(_) => {
                         let _ = conn.execute(
                             "INSERT INTO items (library_id, title, type, file_path, poster_path, fanart_path, plot, year, rating, genres, premiered, studios, tmdb_id, imdb_id, actors, updated_at) VALUES (?1, ?2, 'Series', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-                            rusqlite::params![lib_id, tv_title, series_virtual_path, tv_poster, tv_fanart, tv_plot, tv_year, final_tv_rating, tv_genres, tv_premiered, tv_studios, tv_tmdb_id, tv_imdb_id, tv_actors_json, updated_at]
+                            rusqlite::params![lib_id, tv_title, series_virtual_path, tv_poster, tv_fanart, tv_plot, tv_year, tv_rating, tv_genres, tv_premiered, tv_studios, tv_tmdb_id, tv_imdb_id, tv_actors_json, updated_at]
                         );
                         conn.last_insert_rowid()
                     }
                 };
 
-                // ==========================================
-                // 2. 解析季 NFO (season.nfo) 并更新 Season 节点
-                // ==========================================
+                // 解析季 NFO
                 let season_nfo_path = parent.join("season.nfo");
                 let mut season_title = format!("Season {}", s_num);
                 let mut season_rating = 0.0;
@@ -381,6 +386,11 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
                     }
                 }
                 
+                // 💡 评分兜底：如果剧集没评分，且季有评分，把季的评分补给剧集
+                if tv_rating <= 0.0 && season_rating > 0.0 {
+                    let _ = conn.execute("UPDATE items SET rating = ?1 WHERE id = ?2", rusqlite::params![season_rating, series_id]);
+                }
+
                 let mut season_poster = String::new();
                 let s_pad = format!("{:02}", s_num);
                 if series_dir.join(format!("season{}-poster.jpg", s_pad)).exists() {
@@ -407,9 +417,6 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
                     }
                 };
 
-                // ==========================================
-                // 3. 插入 Episode (此时 title 和 plot 已经由前面的单集 NFO 获取)
-                // ==========================================
                 let mut ep_title = title.clone();
                 if ep_title.is_empty() || ep_title.to_lowercase().contains(&format!("s{:02}e{:02}", s_num, e_num)) {
                     ep_title = format!("第 {} 集", e_num);
@@ -422,6 +429,7 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
                     rusqlite::params![lib_id, ep_title, e_num.to_string(), virtual_path, plot, year, final_poster, final_fanart, final_size, mtime, rating, mpaa, genres, tags, directors, actors_json, runtime, premiered, studios, tmdb_id, imdb_id, tv_title, strm_content, stills_json, parts_json, media_streams_json_str, updated_at, series_id, s_num, e_num, season_id]
                 );
             } else {
+                // === 电影流程 ===
                 let _ = conn.execute(
                     "INSERT INTO items (library_id, title, num, file_path, type, plot, year, poster_path, fanart_path, logo_path, thumb_path, banner_path, size, mtime, rating, mpaa, genres, tags, directors, actors, runtime, premiered, tagline, studios, tmdb_id, imdb_id, series, label, set_name, strm_content, stills, parts, original_title, sort_title, country, language, writers, trailer, releasedate, media_streams, updated_at) 
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41)
