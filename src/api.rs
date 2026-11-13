@@ -140,7 +140,7 @@ pub async fn get_items(State(pool): State<Arc<Mutex<Connection>>>, Query(query):
         params.push(g.clone()); params.push(format!("{} / %", g)); params.push(format!("% / {}", g)); params.push(format!("% / {} / %", g));
     }
     if let Some(t) = &query.tag { 
-        where_clauses.push("(tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)".to_string());
+        sql.push_str(" AND (tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)");
         params.push(t.clone()); params.push(format!("{} / %", t)); params.push(format!("% / {}", t)); params.push(format!("% / {} / %", t));
     }
     if let Some(st) = &query.studio { 
@@ -563,14 +563,14 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         let is_dict_only = !t_lower.contains("movie") && !t_lower.contains("series");
 
         if is_dict_only && t_lower.contains("tag") {
-            let mut sql = "SELECT tags FROM items WHERE tags != ''".to_string();
+            let mut where_clauses = vec!["1=1".to_string()];
             if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
                 if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
                 let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
-                sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+                where_clauses.push(&format!(" AND library_id IN ({})", libs_str.join(",")))
             }
             if let Some(pid) = &query.parent_id {
-                if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
+                if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { where_clauses.push(&format!(" AND library_id = {}", lib_id)) } }
             }
             let mut set = std::collections::HashSet::new();
             if let Ok(mut stmt) = conn.prepare(&sql) {
@@ -591,10 +591,10 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
                 if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
                 let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
-                sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+                where_clauses.push(&format!(" AND library_id IN ({})", libs_str.join(",")))
             }
             if let Some(pid) = &query.parent_id {
-                if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
+                if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { where_clauses.push(&format!(" AND library_id = {}", lib_id)) } }
             }
             let mut set = std::collections::HashSet::new();
             if let Ok(mut stmt) = conn.prepare(&sql) {
@@ -615,12 +615,12 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
                 if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
                 let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
-                sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+                where_clauses.push(&format!(" AND library_id IN ({})", libs_str.join(",")))
             }
             if let Some(pid) = &query.parent_id {
-                if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
+                if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { where_clauses.push(&format!(" AND library_id = {}", lib_id)) } }
             }
-            sql.push_str(" ORDER BY year DESC");
+            where_clauses.push(" ORDER BY year DESC")
             let mut items = Vec::new();
             if let Ok(mut stmt) = conn.prepare(&sql) {
                 if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
@@ -637,12 +637,12 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
                 if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
                 let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
-                sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+                where_clauses.push(&format!(" AND library_id IN ({})", libs_str.join(",")))
             }
             if let Some(pid) = &query.parent_id {
-                if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
+                if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { where_clauses.push(&format!(" AND library_id = {}", lib_id)) } }
             }
-            sql.push_str(" ORDER BY mpaa ASC");
+            where_clauses.push(" ORDER BY mpaa ASC")
             let mut items = Vec::new();
             if let Ok(mut stmt) = conn.prepare(&sql) {
                 if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
@@ -659,10 +659,10 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
                 if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
                 let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
-                sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+                where_clauses.push(&format!(" AND library_id IN ({})", libs_str.join(",")))
             }
             if let Some(pid) = &query.parent_id {
-                if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { sql.push_str(&format!(" AND library_id = {}", lib_id)); } }
+                if pid.starts_with("lib_") { if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() { where_clauses.push(&format!(" AND library_id = {}", lib_id)) } }
             }
             let mut boxsets = Vec::new();
             if let Ok(mut stmt) = conn.prepare(&sql) {
@@ -741,7 +741,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
 
     if let Some(libs) = &allowed_libs {
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
-        sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+        where_clauses.push(&format!(" AND library_id IN ({})", libs_str.join(",")))
     }
 
     if let Some(types) = &query.include_item_types {
@@ -755,7 +755,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         if t.contains("season") { type_conditions.push("type = 'Season'"); }
         
         if !type_conditions.is_empty() {
-            sql.push_str(&format!(" AND ({})", type_conditions.join(" OR ")));
+            where_clauses.push(&format!(" AND ({})", type_conditions.join(" OR ")))
         }
     } else {
         // 如果没传 IncludeItemTypes，但指定了库 ID，则根据库类型过滤
@@ -763,13 +763,13 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             if pid.starts_with("lib_") { 
                 if let Ok(lib_id) = pid.trim_start_matches("lib_").parse::<i64>() {
                     let lib_type: String = conn.query_row("SELECT type FROM libraries WHERE id = ?1", [lib_id], |r| r.get(0)).unwrap_or_default();
-                    if lib_type == "tvshows" { sql.push_str(" AND type = 'Series'"); }
-                    else if lib_type == "movies" { sql.push_str(" AND type = 'movies'"); }
+                    if lib_type == "tvshows" { where_clauses.push("type = 'Series'") }
+                    else if lib_type == "movies" { where_clauses.push("type = 'movies'") }
                 }
             }
         } else if query.recursive == Some(true) {
             // 如果是全局根目录的随机推荐（没有父级 ID），只返回电影和剧，绝对不返回单集
-            sql.push_str(" AND (type = 'movies' OR type = 'Series')");
+            where_clauses.push("(type = 'movies' OR type = 'Series')")
         }
     }
 
@@ -843,8 +843,8 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         if wants_person {
             let lib_id_opt = query.parent_id.as_deref().filter(|p| p.starts_with("lib_")).and_then(|p| p.trim_start_matches("lib_").parse::<i64>().ok());
             let mut person_sql = String::from("SELECT actors, directors FROM items WHERE (actors LIKE ? OR directors LIKE ?)");
-            if lib_id_opt.is_some() { person_sql.push_str(" AND library_id = ?"); }
-            person_sql.push_str(" LIMIT 500");
+            if lib_id_opt.is_some() { person_where_clauses.push("library_id = ?") }
+            person_where_clauses.push(" LIMIT 500")
 
             if let Ok(mut pstmt) = conn.prepare(&person_sql) {
                 let mut names_set: HashSet<String> = HashSet::new();
@@ -932,15 +932,16 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     for raw_id in tag_filters {
         let name = raw_id.replace("tag_", "").trim().to_string();
         if name.is_empty() { continue; }
-        sql.push_str(" AND (tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)");
+        where_clauses.push("(tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)")
         params.push(name.clone()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name));
     }
 
+    let where_str = where_clauses.join(" AND ");
+    
     let total: i64 = if is_search {
         0
     } else {
-        let from_idx = sql.find(" FROM items").unwrap_or(0);
-        let count_sql = format!("SELECT COUNT(*){}", &sql[from_idx..]);
+        let count_sql = format!("SELECT COUNT(*) FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE {}", req_user_id, where_str);
         // 💡 核心修复：统计总数时如果报错（参数数量不匹配），兜底返回 0，绝不 panic 导致整个服务崩溃
         conn.query_row(&count_sql, rusqlite::params_from_iter(params.iter()), |r| r.get(0)).unwrap_or(0)
     };
