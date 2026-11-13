@@ -422,7 +422,7 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
     }
 
-    let mut sql = "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path, ud.play_count, ud.last_played_date FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE ud.playback_position_ticks > 0".to_string();
+    let mut sql = "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path, ud.play_count, ud.last_played_date, items.series_id, items.parent_id, items.season_number, items.episode_number FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE ud.playback_position_ticks > 0".to_string();
     let mut params: Vec<String> = vec![req_user_id.to_string()];
 
     if let Some(types) = query.get("IncludeItemTypes") {
@@ -456,6 +456,11 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let poster_tag = if has_poster { format!("tag_{}_{}", id, &hash_hex[..8]) } else { String::new() };
         
         let playback_ticks: i64 = row.get(18).unwrap_or(0);
+        let series_id: Option<i64> = row.get(22).ok();
+        let parent_id: Option<i64> = row.get(23).ok();
+        let s_num: Option<i32> = row.get(24).ok();
+        let e_num: Option<i32> = row.get(25).ok();
+        let item_type: String = row.get(2).unwrap_or_default();
         let fanart_path: String = row.get(19).unwrap_or_default();
         let has_fanart = !fanart_path.is_empty();
         let mut hf = Sha256::new(); hf.update(fanart_path.as_bytes()); let hashf = hf.finalize();
@@ -482,6 +487,10 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>(6).unwrap_or_default()),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true }],
+            "SeriesId": if item_type == "Episode" { json!(series_id) } else { json!(null) },
+            "SeasonId": if item_type == "Episode" { json!(parent_id) } else { json!(null) },
+            "IndexNumber": if item_type == "Episode" { json!(e_num) } else { json!(null) },
+            "ParentIndexNumber": if item_type == "Episode" { json!(s_num) } else { json!(null) },
             "UserData": {
                 "PlaybackPositionTicks": playback_ticks,
                 "PlayCount": play_count,
@@ -957,6 +966,11 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         } else { String::new() };
         
         let playback_ticks: i64 = row.get(18).unwrap_or(0);
+        let series_id: Option<i64> = row.get(22).ok();
+        let parent_id: Option<i64> = row.get(23).ok();
+        let s_num: Option<i32> = row.get(24).ok();
+        let e_num: Option<i32> = row.get(25).ok();
+        let item_type: String = row.get(2).unwrap_or_default();
         let fanart_path: String = row.get(19).unwrap_or_default();
         let has_fanart = !fanart_path.is_empty();
         let mut hf = Sha256::new(); hf.update(fanart_path.as_bytes()); let hashf = hf.finalize();
@@ -1361,7 +1375,64 @@ pub async fn emby_search_hints(State(pool): State<Arc<Mutex<Connection>>>, Query
     Json(json!({ "SearchHints": hints, "TotalRecordCount": hints.len() }))
 }
 
-pub async fn emby_shows_next_up() -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
+pub async fn emby_shows_next_up(State(pool): State<Arc<Mutex<Connection>>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
+    let conn = pool.lock().unwrap();
+    
+    // 核心逻辑：
+    // 1. 找出该用户播放进度 > 0 的集（没看完的，直接推这个）
+    // 2. 找出该用户最近刚看完的集，推它接下来的下一集（没看过的）
+    let sql = "
+        SELECT e.id, e.title, e.season_number, e.episode_number, e.plot, e.runtime, e.poster_path, e.series_id, e.parent_id, e.series
+        FROM items e
+        JOIN user_data ud ON ud.item_id = CAST(e.id AS TEXT) AND ud.user_id = ?1
+        WHERE e.type = 'Episode' AND (
+            ud.playback_position_ticks > 0
+            OR (
+                ud.play_count > 0 
+                AND ud.item_id = (
+                    SELECT ud2.item_id FROM user_data ud2 
+                    JOIN items e2 ON e2.id = CAST(ud2.item_id AS INTEGER)
+                    WHERE ud2.user_id = ?1 AND e2.series_id = e.series_id 
+                    ORDER BY ud2.last_played_date DESC LIMIT 1
+                )
+            )
+        )
+        ORDER BY ud.last_played_date DESC LIMIT 20
+    ";
+    
+    let mut items = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(sql) {
+        if let Ok(mapped) = stmt.query_map([req_user_id], |r| {
+            let id: i64 = r.get(0).unwrap_or_default();
+            let title: String = r.get(1).unwrap_or_default();
+            let s_num: i32 = r.get(2).unwrap_or(1);
+            let e_num: i32 = r.get(3).unwrap_or(1);
+            let plot: String = r.get(4).unwrap_or_default();
+            let runtime: i32 = r.get(5).unwrap_or(0);
+            let poster: String = r.get(6).unwrap_or_default();
+            let series_id: i64 = r.get(7).unwrap_or(0);
+            let season_id: i64 = r.get(8).unwrap_or(0);
+            let series_name: String = r.get(9).unwrap_or_default();
+            
+            Ok(json!({
+                "Id": id.to_string(), "Name": title, "Type": "Episode", "IsFolder": false, "MediaType": "Video",
+                "IndexNumber": e_num, "ParentIndexNumber": s_num,
+                "SeriesId": series_id.to_string(), "SeasonId": season_id.to_string(),
+                "SeriesName": series_name, "SeasonName": format!("Season {}", s_num),
+                "Overview": plot, "RunTimeTicks": (runtime as i64) * 10_000_000,
+                "PrimaryImageAspectRatio": 1.7777777777777777,
+                "ImageTags": if !poster.is_empty() { json!({"Primary": format!("tag_{}", id)}) } else { json!({}) },
+                "UserData": { "Played": false, "PlaybackPositionTicks": 0 }
+            }))
+        }) {
+            for res in mapped.flatten() {
+                items.push(res);
+            }
+        }
+    }
+    
+    Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response()
+}
 
 pub async fn emby_shows_seasons(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(series_id): AxumPath<String>) -> impl IntoResponse {
     let Ok(sid) = series_id.parse::<i64>() else { return Json(json!({"Items": [], "TotalRecordCount": 0})); };
