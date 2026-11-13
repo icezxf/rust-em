@@ -198,7 +198,17 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
                     if !meta.writers.is_empty() { writers = meta.writers.join(" / "); }
                     if let Some(v) = &meta.trailer { trailer = v.clone(); }
                     
-                    let actors_arr: Vec<Value> = meta.actors.into_iter().filter(|a| a.name.is_some()).map(|a| json!({ "name": a.name.unwrap_or_default(), "role": a.role.unwrap_or_default(), "thumb": a.thumb.unwrap_or_default() })).collect();
+                    // 💡 核心修复：入库前清洗数据，将混在演员表里的导演剔除
+                    let director_names: std::collections::HashSet<String> = meta.directors.iter().cloned().collect();
+                    let actors_arr: Vec<Value> = meta.actors.into_iter()
+                        .filter(|a| {
+                            if let Some(name) = &a.name {
+                                !director_names.contains(name) // 如果该演员是导演，直接过滤掉
+                            } else {
+                                false
+                            }
+                        })
+                        .map(|a| json!({ "name": a.name.unwrap_or_default(), "role": a.role.unwrap_or_default(), "thumb": a.thumb.unwrap_or_default() })).collect();
                     actors_json = serde_json::to_string(&actors_arr).unwrap_or_default();
                     for uid in meta.unique_ids { if uid.0 == "tmdb" { tmdb_id = uid.1.clone(); } if uid.0 == "imdb" { imdb_id = uid.1.clone(); } }
                     let resolve_path = |p: &str| -> String { if p.is_empty() { return String::new(); } if p.starts_with("http") || p.starts_with("/") { return p.to_string(); } parent.join(p).to_string_lossy().to_string() };
