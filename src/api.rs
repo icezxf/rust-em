@@ -331,7 +331,7 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(_query): Query<HashMap<String, String>>,
+pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<HashMap<String, String>>,
     Extension(req_user_id): Extension<i64>,
 ) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
@@ -417,7 +417,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
     Json(items).into_response()
 }
 
-pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(_query): Query<HashMap<String, String>>,
+pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<HashMap<String, String>>,
     Extension(req_user_id): Extension<i64>,
 ) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
@@ -460,11 +460,11 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let poster_tag = if has_poster { format!("tag_{}_{}", id, &hash_hex[..8]) } else { String::new() };
         
         let playback_ticks: i64 = row.get(18).unwrap_or(0);
-        let _series_id: Option<i64> = row.get(22).ok();
-        let _parent_id: Option<i64> = row.get(23).ok();
-        let _s_num: Option<i32> = row.get(24).ok();
-        let _e_num: Option<i32> = row.get(25).ok();
-        let _item_type: String = row.get(2).unwrap_or_default();
+        let series_id: Option<i64> = row.get(22).ok();
+        let parent_id: Option<i64> = row.get(23).ok();
+        let s_num: Option<i32> = row.get(24).ok();
+        let e_num: Option<i32> = row.get(25).ok();
+        let item_type: String = row.get(2).unwrap_or_default();
         let fanart_path: String = row.get(19).unwrap_or_default();
         let has_fanart = !fanart_path.is_empty();
         let mut hf = Sha256::new(); hf.update(fanart_path.as_bytes()); let hashf = hf.finalize();
@@ -970,11 +970,11 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         } else { String::new() };
         
         let playback_ticks: i64 = row.get(18).unwrap_or(0);
-        let _series_id: Option<i64> = row.get(22).ok();
-        let _parent_id: Option<i64> = row.get(23).ok();
-        let _s_num: Option<i32> = row.get(24).ok();
-        let _e_num: Option<i32> = row.get(25).ok();
-        let _item_type: String = row.get(2).unwrap_or_default();
+        let series_id: Option<i64> = row.get(22).ok();
+        let parent_id: Option<i64> = row.get(23).ok();
+        let s_num: Option<i32> = row.get(24).ok();
+        let e_num: Option<i32> = row.get(25).ok();
+        let item_type: String = row.get(2).unwrap_or_default();
         let fanart_path: String = row.get(19).unwrap_or_default();
         let has_fanart = !fanart_path.is_empty();
         let mut hf = Sha256::new(); hf.update(fanart_path.as_bytes()); let hashf = hf.finalize();
@@ -1610,7 +1610,7 @@ pub async fn emby_display_preferences(_: AxumPath<String>) -> impl IntoResponse 
     Json(json!({"Id": "default", "ViewType": "Poster", "SortBy": "SortName", "PrimaryImageHeight": 250, "PrimaryImageWidth": 250, "ScrollDirection": "Horizontal"}))
 }
 
-pub async fn emby_items_filters(State(pool): State<Arc<Mutex<Connection>>>, Query(_query): Query<HashMap<String, String>>,
+pub async fn emby_items_filters(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<HashMap<String, String>>,
     Extension(req_user_id): Extension<i64>,
 ) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
@@ -1642,7 +1642,7 @@ pub async fn emby_items_filters(State(pool): State<Arc<Mutex<Connection>>>, Quer
     Json(json!({ "Genres": genre_items, "Tags": tag_items, "OfficialRatings": rating_items, "Years": year_list }))
 }
 
-pub async fn emby_genres(State(pool): State<Arc<Mutex<Connection>>>, Query(_query): Query<HashMap<String, String>>,
+pub async fn emby_genres(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<HashMap<String, String>>,
     Extension(req_user_id): Extension<i64>,
 ) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
@@ -1669,7 +1669,7 @@ pub async fn emby_genres(State(pool): State<Arc<Mutex<Connection>>>, Query(_quer
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_tags(State(pool): State<Arc<Mutex<Connection>>>, Query(_query): Query<HashMap<String, String>>,
+pub async fn emby_tags(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<HashMap<String, String>>,
     Extension(req_user_id): Extension<i64>,
 ) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
@@ -1694,7 +1694,7 @@ pub async fn emby_tags(State(pool): State<Arc<Mutex<Connection>>>, Query(_query)
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_years(State(pool): State<Arc<Mutex<Connection>>>, Query(_query): Query<HashMap<String, String>>,
+pub async fn emby_years(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<HashMap<String, String>>,
     Extension(req_user_id): Extension<i64>,
 ) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
@@ -1717,7 +1717,7 @@ pub async fn emby_years(State(pool): State<Arc<Mutex<Connection>>>, Query(_query
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_studios(State(pool): State<Arc<Mutex<Connection>>>, Query(_query): Query<HashMap<String, String>>,
+pub async fn emby_studios(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<HashMap<String, String>>,
     Extension(req_user_id): Extension<i64>,
 ) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
@@ -1742,7 +1742,7 @@ pub async fn emby_studios(State(pool): State<Arc<Mutex<Connection>>>, Query(_que
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
 
-pub async fn emby_official_ratings(State(pool): State<Arc<Mutex<Connection>>>, Query(_query): Query<HashMap<String, String>>,
+pub async fn emby_official_ratings(State(pool): State<Arc<Mutex<Connection>>>, Query(query): Query<HashMap<String, String>>,
     Extension(req_user_id): Extension<i64>,
 ) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
