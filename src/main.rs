@@ -14,6 +14,7 @@ mod api;
 mod auth;
 mod scanner;
 mod streamer;
+mod images;
 mod db;
 mod nfo;
 mod probe;
@@ -109,10 +110,10 @@ fn emby_routes() -> Router<AppState> {
         .route("/Items/{item_id}/Similar", get(api::emby_similar))
         .route("/Items/{item_id}/ThumbnailSet", get(api::emby_thumbnail_set))
         .route("/Persons/{person_id}", get(api::emby_person))
-        .route("/Persons/{person_id}/Images/{image_type}", get(api::emby_person_image))
-        .route("/Items/{item_id}/Images/{image_type}", get(api::emby_item_image).head(api::emby_item_image))
-        .route("/Items/{item_id}/Images/{image_type}/{index}", get(api::emby_item_image_with_index).head(api::emby_item_image_with_index))
-        .route("/Users/{user_id}/Images/{image_type}", get(api::emby_item_image_user_only))
+        .route("/Persons/{person_id}/Images/{image_type}", get(images::emby_person_image))
+        .route("/Items/{item_id}/Images/{image_type}", get(images::emby_item_image).head(images::emby_item_image))
+        .route("/Items/{item_id}/Images/{image_type}/{index}", get(images::emby_item_image_with_index).head(images::emby_item_image_with_index))
+        .route("/Users/{user_id}/Images/{image_type}", get(images::emby_item_image_user_only))
         .route("/Shows/NextUp", get(api::emby_shows_next_up))
         .route("/Shows/{series_id}/Seasons", get(api::emby_shows_seasons))
         .route("/Shows/{series_id}/Episodes", get(api::emby_shows_episodes))
