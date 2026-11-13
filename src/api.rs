@@ -483,9 +483,15 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
                 "IsFavorite": row.get::<_, i32>("is_favorite").unwrap_or(0) > 0,
                 "PlaybackPositionTicks": row.get::<_, i64>("playback_position_ticks").unwrap_or(0),
                 "PlayedPercentage": if total_ticks > 0 { (row.get::<_, i64>("playback_position_ticks").unwrap_or(0) as f64 / total_ticks as f64) * 100.0 } else { 0.0 },
-                "UnplayedItemCount": if r_type == "movies" || r_type == "Episode" { 
-                    if row.get::<_, i32>("play_count").unwrap_or(0) > 0 { 0 } else { 1 } 
-                } else { 0 }
+                "UnplayedItemCount": if row.get::<_, i32>("play_count").unwrap_or(0) > 0 { 
+                    0 
+                } else if r_type == "Series" || r_type == "Season" {
+                    // 如果算不出具体未看集数，默认给 1，防止全打勾
+                    let rec_count = row.get::<_, i64>("recursive_item_count").unwrap_or(0);
+                    if rec_count > 0 { rec_count } else { 1 }
+                } else { 
+                    1 
+                }
             }
         }))
     }).unwrap().filter_map(Result::ok).collect();
