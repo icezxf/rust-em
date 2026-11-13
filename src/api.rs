@@ -453,10 +453,10 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let hash_hexf: String = hashf.iter().map(|b| format!("{:02x}", b)).collect();
         let backdrop_tag = if has_fanart { format!("backdrop_{}_{}", id, &hash_hexf[..8]) } else { String::new() };
 
-        let runtime_secs: i32 = row.get(7).unwrap_or(0);
+        let runtime_secs: i32 = row.get("runtime").unwrap_or(0);
         let total_ticks: i64 = (runtime_secs as i64) * 10_000_000;
-        let size: i64 = row.get(14).unwrap_or(0);
-        let mtime = row.get::<_, i64>(15).unwrap_or(0);
+        let size: i64 = row.get("size").unwrap_or(0);
+        let mtime = row.get::<_, i64>("mtime").unwrap_or(0);
         let date_str = format_iso8601(mtime);
         let tmdb_id: String = row.get(12).unwrap_or_default();
         let imdb_id: String = row.get(13).unwrap_or_default();
@@ -467,7 +467,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "Type": if r_type == "movies" { "Movie" } else if r_type == "Series" { "Series" } else { "Episode" },
             "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
             "Overview": row.get::<_, String>(4).unwrap_or_default(), 
-            "CommunityRating": row.get::<_, f64>(6).unwrap_or(0.0), "RunTimeTicks": total_ticks, "Size": size,
+            "CommunityRating": row.get::<_, f64>("rating").unwrap_or(0.0), "RunTimeTicks": total_ticks, "Size": size,
             "DateCreated": date_str.clone(), "EndDate": date_str, "PrimaryImageAspectRatio": 0.6666666666666666,
             "Container": "mp4", "CanDelete": false, "CanDownload": false, "LocationType": "FileSystem", "Status": "Released",
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
@@ -512,10 +512,10 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
     let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
         let id: i64 = row.get(0).unwrap_or_default();
         let item_type: String = row.get(2).unwrap_or_default();
-        let runtime_secs: i32 = row.get(7).unwrap_or(0);
+        let runtime_secs: i32 = row.get("runtime").unwrap_or(0);
         let total_ticks = (runtime_secs as i64) * 10_000_000;
-        let playback_ticks: i64 = row.get(18).unwrap_or(0);
-        let play_count: i32 = row.get(20).unwrap_or(0);
+        let playback_ticks: i64 = row.get("playback_position_ticks").unwrap_or(0);
+        let play_count: i32 = row.get("play_count").unwrap_or(0);
         
         let poster_path: String = row.get(5).unwrap_or_default();
         let has_poster = !poster_path.is_empty();
@@ -1047,7 +1047,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         let hash_hexf: String = hashf.iter().map(|b| format!("{:02x}", b)).collect();
         let backdrop_tag = if has_fanart { format!("backdrop_{}_{}", id, &hash_hexf[..8]) } else { String::new() };
         
-        let runtime_secs: i32 = row.get(7).unwrap_or(0);
+        let runtime_secs: i32 = row.get("runtime").unwrap_or(0);
         let total_ticks: i64 = (runtime_secs as i64) * 10_000_000;
         let size: i64 = row.get(14).unwrap_or(0);
         let play_count: i32 = row.get(25).unwrap_or(0);
@@ -1061,7 +1061,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             "Type": if r_type == "movies" { "Movie" } else if r_type == "Series" { "Series" } else if r_type == "Season" { "Season" } else { "Episode" },
             "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
             "Overview": row.get::<_, String>(4).unwrap_or_default(), 
-            "CommunityRating": row.get::<_, f64>(6).unwrap_or(0.0), "RunTimeTicks": total_ticks, "Size": size,
+            "CommunityRating": row.get::<_, f64>("rating").unwrap_or(0.0), "RunTimeTicks": total_ticks, "Size": size,
             "DateCreated": format_iso8601(row.get::<_, i64>(20).unwrap_or(0)), "PrimaryImageAspectRatio": 0.6666666666666666,
             "Container": "mp4", "CanDelete": false, "CanDownload": false, "LocationType": "FileSystem", "Status": "Released",
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
@@ -1342,7 +1342,7 @@ pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(i
         let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
         let poster_tag = if has_poster { format!("tag_{}_{}", id, &hash_hex[..8]) } else { String::new() };
         
-        let runtime_secs: i32 = row.get(7).unwrap_or(0);
+        let runtime_secs: i32 = row.get("runtime").unwrap_or(0);
         let total_ticks = (runtime_secs as i64) * 10_000_000;
         
         Ok(json!({
@@ -1350,7 +1350,7 @@ pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(i
             "Type": if r_type == "movies" { "Movie" } else { "Series" },
             "IsFolder": false, "MediaType": "Video", "ProductionYear": row.get::<_, String>(3).unwrap_or_default().parse::<i32>().unwrap_or(0),
             "Overview": row.get::<_, String>(4).unwrap_or_default(),
-            "CommunityRating": row.get::<_, f64>(6).unwrap_or(0.0), "RunTimeTicks": total_ticks,
+            "CommunityRating": row.get::<_, f64>("rating").unwrap_or(0.0), "RunTimeTicks": total_ticks,
             "PrimaryImageAspectRatio": 0.6666666666666666,
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
             "BackdropImageTags": [],
