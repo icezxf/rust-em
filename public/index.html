@@ -322,6 +322,7 @@
 
     <script>
         let token = localStorage.getItem('token');
+        let isExpired = false;
         let currentPath = '/media';
         let selectedPaths = [];
         let allLibraries = [];
@@ -349,7 +350,8 @@
                 const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : null });
                 const text = await res.text();
                 if (!res.ok) {
-                    if (res.status === 401) { 
+                    if (res.status === 401 && !isExpired) { 
+                        isExpired = true;
                         alert("登录凭证已过期，点击确定重新登录。");
                         localStorage.removeItem('token'); 
                         location.reload(); 
@@ -466,7 +468,8 @@
 
                 const includeType = currentMediaType === 'movies' ? 'Movie' : 'Episode';
                 const resumeRes = await fetch(`/emby/Users/1/Items/Resume?IncludeItemTypes=${includeType}`, { headers: { 'Authorization': `Bearer ${token}` } });
-                if (resumeRes.status === 401) {
+                if (resumeRes.status === 401 && !isExpired) {
+                    isExpired = true;
                     alert("登录凭证已过期，点击确定重新登录。");
                     localStorage.removeItem('token');
                     location.reload();
