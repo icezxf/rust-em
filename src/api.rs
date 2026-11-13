@@ -482,7 +482,10 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
                 "PlayCount": row.get::<_, i32>("play_count").unwrap_or(0),
                 "IsFavorite": row.get::<_, i32>("is_favorite").unwrap_or(0) > 0,
                 "PlaybackPositionTicks": row.get::<_, i64>("playback_position_ticks").unwrap_or(0),
-                "PlayedPercentage": if total_ticks > 0 { (row.get::<_, i64>("playback_position_ticks").unwrap_or(0) as f64 / total_ticks as f64) * 100.0 } else { 0.0 }
+                "PlayedPercentage": if total_ticks > 0 { (row.get::<_, i64>("playback_position_ticks").unwrap_or(0) as f64 / total_ticks as f64) * 100.0 } else { 0.0 },
+                "UnplayedItemCount": if r_type == "movies" || r_type == "Episode" { 
+                    if row.get::<_, i32>("play_count").unwrap_or(0) > 0 { 0 } else { 1 } 
+                } else { 0 }
             }
         }))
     }).unwrap().filter_map(Result::ok).collect();
