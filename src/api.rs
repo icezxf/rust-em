@@ -339,7 +339,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         if libs.is_empty() { return Json(json!([])).into_response(); }
     }
 
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path, (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count, (SELECT COUNT(*) FROM items s WHERE s.series_id = items.id AND s.type = 'Season') as season_count FROM items WHERE 1=1".to_string();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path, (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count, (SELECT COUNT(*) FROM items s WHERE s.series_id = items.id AND s.type = 'Season') as season_count, (SELECT COUNT(*) FROM items e JOIN user_data ud2 ON ud2.item_id = CAST(e.id AS TEXT) AND ud2.user_id = ? WHERE e.series_id = items.id AND e.type = 'Episode' AND ud2.play_count > 0) as played_eps, (SELECT COUNT(*) FROM items e JOIN user_data ud3 ON ud3.item_id = CAST(e.id AS TEXT) AND ud3.user_id = ? WHERE e.parent_id = items.id AND e.type = 'Episode' AND ud3.play_count > 0) as season_played_eps FROM items WHERE 1=1".to_string();
     let mut params: Vec<String> = Vec::new();
 
     if let Some(libs) = &allowed_libs {
@@ -721,7 +721,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         }
     }
 
-    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, IFNULL(ud.playback_position_ticks, 0), fanart_path, date_created, actors, directors, tags, studios, IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0), IFNULL(ud.last_played_date, ''), (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count, (SELECT COUNT(*) FROM items s WHERE s.series_id = items.id AND s.type = 'Season') as season_count FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE 1=1".to_string();
+    let mut sql = "SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, IFNULL(ud.playback_position_ticks, 0), fanart_path, date_created, actors, directors, tags, studios, IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0), IFNULL(ud.last_played_date, ''), (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count, (SELECT COUNT(*) FROM items s WHERE s.series_id = items.id AND s.type = 'Season') as season_count, (SELECT COUNT(*) FROM items e JOIN user_data ud2 ON ud2.item_id = CAST(e.id AS TEXT) AND ud2.user_id = ? WHERE e.series_id = items.id AND e.type = 'Episode' AND ud2.play_count > 0) as played_eps, (SELECT COUNT(*) FROM items e JOIN user_data ud3 ON ud3.item_id = CAST(e.id AS TEXT) AND ud3.user_id = ? WHERE e.parent_id = items.id AND e.type = 'Episode' AND ud3.play_count > 0) as season_played_eps FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE 1=1".to_string();
     let mut params: Vec<String> = Vec::new();
     params.push(req_user_id.to_string());
 
@@ -1040,7 +1040,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let item_opt = conn.query_row(
         "SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.studios, items.parts, items.runtime, items.actors, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.series, items.label, items.set_name, items.tagline, items.tags, items.directors, items.num, items.stills, items.releasedate, items.original_title, items.sort_title, items.country, items.language, items.writers, items.trailer, items.media_streams, items.date_created, items.primary_image_aspect_ratio, items.original_language, items.fanart_path, items.logo_path, items.thumb_path, items.banner_path, items.strm_content, IFNULL(ud.playback_position_ticks, 0), IFNULL(ud.play_count, 0), IFNULL(ud.is_favorite, 0), IFNULL(ud.last_played_date, ''), IFNULL(items.parent_id, 0), IFNULL(items.season_number, 0), IFNULL(items.episode_number, 0), items.type FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = ? WHERE items.id = ?",
-        rusqlite::params![req_user_id, id],
+        rusqlite::params![req_user_id, req_user_id, req_user_id, id],
         |row| {
             let title: String = row.get(1).unwrap_or_default(); let typ: String = row.get(2).unwrap_or_default();
             let year_str: String = row.get(3).unwrap_or_default(); let plot: String = row.get(4).unwrap_or_default();
@@ -1072,6 +1072,8 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
             let r_type: String = row.get(50).unwrap_or_default();
             let recursive_item_count: i64 = row.get(51).unwrap_or(0);
             let season_count: i64 = row.get(52).unwrap_or(0);
+            let played_eps: i64 = row.get(53).unwrap_or(0);
+            let season_played_eps: i64 = row.get(54).unwrap_or(0);
 
             let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
             let actors: Vec<Value> = serde_json::from_str(&actors_json).unwrap_or_default();
@@ -1154,6 +1156,9 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
                 "SetName": json!(set_name), "SeriesName": json!(if typ == "tvshows" { &series } else { "" }),
                 "Path": decode_url(&real_path), "Container": "mp4", "MediaSourceCount": media_sources.len(), "MediaSources": media_sources,
                 "RecursiveItemCount": if r_type == "Series" { recursive_item_count } else { 0 },
+                "UnplayedItemCount": if r_type == "Series" { recursive_item_count - played_eps } 
+                                     else if r_type == "Season" { recursive_item_count - season_played_eps } 
+                                     else { 0 },
                 "ChildCount": if r_type == "Series" { season_count } else { recursive_item_count },
                 "SeasonCount": if r_type == "Series" { season_count } else { 0 },
                 "SeriesId": if r_type == "Episode" { json!(parent_id.to_string()) } else { json!(null) },
@@ -1170,7 +1175,10 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
                     "PlayedPercentage": if run_time_ticks > 0 { playback_ticks * 100 / run_time_ticks } else { 0 },
                     "LastPlayedDate": if !last_played_str.is_empty() {
                         if let Ok(ts) = last_played_str.parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
-                    } else { json!(null) }
+                    } else { json!(null) },
+                    "UnplayedItemCount": if r_type == "Series" { recursive_item_count - played_eps } 
+                                         else if r_type == "Season" { recursive_item_count - season_played_eps } 
+                                         else { 0 }
                 }
             }))
         }
