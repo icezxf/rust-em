@@ -303,6 +303,49 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
             } else { (0, "[]".to_string()) }
         } else { (0, "[]".to_string()) };
 
+        // 💡 新增：扫描同目录下的外挂字幕 (.srt, .ass)
+        let mut ext_streams: Vec<Value> = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&parent) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+                    let ext = ext.to_lowercase();
+                    if ext == "srt" || ext == "ass" {
+                        let f_stem = p.file_stem().unwrap_or_default().to_string_lossy();
+                        // 只要文件名包含当前视频的基础名，就认作字幕
+                        if f_stem.contains(&base_stem) {
+                            let lang = if f_stem.ends_with(".zh") || f_stem.ends_with(".chs") || f_stem.ends_with(".chi") { "chi" }
+                                       else if f_stem.ends_with(".en") || f_stem.ends_with(".eng") { "eng" } else { "und" };
+                            
+                            // 计算外挂字幕的绝对路径，暂时借用 title 字段传给接口
+                            ext_streams.push(json!({
+                                "Type": "Subtitle",
+                                "Codec": ext,
+                                "Language": lang,
+                                "IsExternal": true,
+                                "IsDefault": false,
+                                "DisplayTitle": format!("外挂字幕 ({})", ext.to_uppercase()),
+                                "Path": p.to_string_lossy().to_string()
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 把外挂字幕合并进 JSON
+        if !ext_streams.is_empty() {
+            let mut ms_val: Value = serde_json::from_str(&media_streams_json_str).unwrap_or(json!([]));
+            if let Some(arr) = ms_val.as_array_mut() {
+                let start_idx = arr.len();
+                for (i, mut st) in ext_streams.into_iter().enumerate() {
+                    st["Index"] = json!(start_idx + i);
+                    arr.push(st);
+                }
+            }
+            media_streams_json_str = serde_json::to_string(&ms_val).unwrap_or_else(|_| "[]".to_string());
+        }
+
         if media_streams_json_str == "[]" {
             for nfo in &nfo_candidates {
                 if nfo.exists() {

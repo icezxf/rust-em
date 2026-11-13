@@ -1699,8 +1699,44 @@ pub async fn emby_person_image(_: AxumPath<(String, String)>) -> impl IntoRespon
     (StatusCode::OK, [(CONTENT_TYPE, "image/png")], png_bytes).into_response()
 }
 
-pub async fn emby_subtitle_stream(_: AxumPath<(String, String)>) -> impl IntoResponse { StatusCode::OK.into_response() }
-pub async fn emby_subtitle_stream_with_source(_: AxumPath<(String, String, String)>) -> impl IntoResponse { StatusCode::OK.into_response() }
+
+
+
+pub async fn emby_subtitle_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, stream_index)): AxumPath<(String, String)>) -> Response {
+    serve_subtitle_inner(pool, item_id, stream_index).await
+}
+
+pub async fn emby_subtitle_stream_with_source(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, _source_id, stream_index)): AxumPath<(String, String, String)>) -> Response {
+    serve_subtitle_inner(pool, item_id, stream_index).await
+}
+
+async fn serve_subtitle_inner(pool: Arc<Mutex<Connection>>, item_id: String, stream_index: String) -> Response {
+    let idx = stream_index.parse::<usize>().unwrap_or(0);
+    let path_opt = {
+        let conn = pool.lock().unwrap();
+        if let Ok(id) = item_id.parse::<i64>() {
+            let ms_json: String = conn.query_row("SELECT media_streams FROM items WHERE id = ?1", [id], |r| r.get(0)).unwrap_or_else(|_| "[]".to_string());
+            let ms: Value = serde_json::from_str(&ms_json).unwrap_or(json!([]));
+            ms.as_array().and_then(|arr| arr.get(idx)).and_then(|stream| stream.get("Path")).and_then(|p| p.as_str()).map(|s| s.to_string())
+        } else { None }
+    };
+
+    if let Some(path) = path_opt {
+        if let Ok(content) = tokio::fs::read_to_string(&path).await {
+            // 如果客户端需要 WebVTT，我们把 SRT 转成 VTT（简单替换）
+            if path.ends_with(".srt") {
+                let mut vtt = String::from("WEBVTT\n\n");
+                let re = regex::Regex::new(r"(\d{2}:\d{2}:\d{2}),\d{3}").unwrap();
+                let processed = re.replace_all(&content, "$1.000");
+                vtt.push_str(&processed);
+                return (StatusCode::OK, [(CONTENT_TYPE, "text/vtt")], vtt).into_response();
+            } else if path.ends_with(".ass") {
+                return (StatusCode::OK, [(CONTENT_TYPE, "text/plain; charset=utf-8")], content).into_response();
+            }
+        }
+    }
+    StatusCode::NOT_FOUND.into_response()
+}
 
 pub async fn emby_display_preferences(_: AxumPath<String>) -> impl IntoResponse {
     Json(json!({"Id": "default", "ViewType": "Poster", "SortBy": "SortName", "PrimaryImageHeight": 250, "PrimaryImageWidth": 250, "ScrollDirection": "Horizontal"}))
