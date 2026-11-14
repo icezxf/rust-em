@@ -13,7 +13,7 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-use crate::utils::{decode_url, to_hex, from_hex, format_iso8601, sanitize_media_streams};
+use crate::utils::{decode_url, format_iso8601, sanitize_media_streams};
 use crate::auth::{TOKENS, get_allowed_libs};
 
 static SCAN_STATUS: OnceLock<Mutex<bool>> = OnceLock::new();
@@ -382,7 +382,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
     let allowed_libs = get_allowed_libs(&conn, req_user_id);
     if let Some(libs) = &allowed_libs { if libs.is_empty() { return Json(json!([])).into_response(); } }
 
-    let mut sql = format!("SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path, (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count, IFNULL(ud.play_count, 0) as play_count, IFNULL(ud.is_favorite, 0) as is_favorite, IFNULL(ud.playback_position_ticks, 0) as playback_position_ticks FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE 1=1", req_user_id);
+    let mut sql = format!("SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path, (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count, (SELECT COUNT(*) FROM items s WHERE s.series_id = items.id AND s.type = 'Season') as total_seasons, IFNULL(ud.play_count, 0) as play_count, IFNULL(ud.is_favorite, 0) as is_favorite, IFNULL(ud.playback_position_ticks, 0) as playback_position_ticks FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE 1=1", req_user_id);
     let mut params: Vec<String> = Vec::new();
 
     if let Some(libs) = &allowed_libs {
@@ -439,6 +439,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let tmdb_id: String = row.get("tmdb_id").unwrap_or_default();
         let imdb_id: String = row.get("imdb_id").unwrap_or_default();
         let recursive_count: i64 = row.get("recursive_item_count").unwrap_or(0);
+        let total_seasons: i64 = row.get("total_seasons").unwrap_or(0);
         
         Ok(json!({
             "Name": row.get::<_, String>("title").unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
@@ -917,7 +918,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     let mut stmt = match conn.prepare(&data_sql) { Ok(s) => s, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
     
-    let mut items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
+    let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
         let id: i64 = row.get("id").unwrap_or_default();
         let poster_path: String = row.get("poster_path").unwrap_or_default();
         let has_poster = !poster_path.is_empty();
@@ -1162,8 +1163,8 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
         let unplayed = if typ == "Series" { total_eps - played_eps } 
                        else if typ == "Season" { season_total_eps - season_played_eps } 
                        else { 0 };
-        let recursive_count = if typ == "Series" { total_eps } else if typ == "Season" { season_total_eps } else { 0 };
-        let child_count = if typ == "Series" { total_seasons } else if typ == "Season" { season_total_eps } else { 0 };
+        let _recursive_count = if typ == "Series" { total_eps } else if typ == "Season" { season_total_eps } else { 0 };
+        let _child_count = if typ == "Series" { total_seasons } else if typ == "Season" { season_total_eps } else { 0 };
 
         Ok(json!({
             "Id": id.to_string(), "ServerId": "rust-em-server", "Name": title.clone(),
