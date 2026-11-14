@@ -620,6 +620,7 @@ pub async fn emby_items_with_user(State(pool): State<Arc<Mutex<Connection>>>, Ax
 
 async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, req_user_id: i64) -> Response {
     let conn = pool.lock().unwrap();
+    let mut mixed_boxsets = Vec::new();
     
     if let Some(list_ids) = &query.list_item_ids {
         if let Ok(item_id) = list_ids.parse::<i64>() {
@@ -732,7 +733,6 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             return Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response();
         }
 
-        let mut mixed_boxsets = Vec::new();
         if types.to_lowercase().contains("boxset") {
             let mut sql = "SELECT set_name FROM items WHERE set_name != ''".to_string();
             if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
@@ -1032,7 +1032,6 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         }
     }
 
-    let final_total = total + items.len() as i64 - (total as i64 - items.len() as i64); // 重新计算
     let actual_total = items.len() as i64;
     Json(json!({ "Items": items, "TotalRecordCount": actual_total })).into_response()
 }
