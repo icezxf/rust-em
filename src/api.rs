@@ -562,7 +562,7 @@ pub async fn emby_shows_next_up(State(pool): State<Arc<Mutex<Connection>>>, Exte
     let conn = pool.lock().unwrap();
     let lib_filter = match get_allowed_libs(&conn, req_user_id) {
         Some(libs) => {
-            if libs.is_empty() { return Json(json!({"Items": [], "TotalRecordCount": 0})); }
+            if libs.is_empty() { return Json(json!({"Items": [], "TotalRecordCount": 0})).into_response(); }
             format!(" AND e.library_id IN ({})", libs.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(","))
         }
         None => String::new(),
