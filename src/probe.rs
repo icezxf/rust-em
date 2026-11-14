@@ -112,7 +112,7 @@ pub async fn probe_strm(
     limiter.acquire().await;
     
     // 恢复 16MB 读取，确保撞到关键帧
-    const CHUNK_SIZE: u64 = 16 * 1024 * 1024;
+    const CHUNK_SIZE: u64 = 4 * 1024 * 1024;
     
     // 1. 请求头部
     let mut resp = client.get(&direct_url)

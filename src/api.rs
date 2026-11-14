@@ -476,8 +476,16 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
 
 pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_user_id): AxumPath<String>, Query(query): Query<HashMap<String, String>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let mut where_clauses = vec!["ud.playback_position_ticks > 0".to_string()];
+    let mut where_clauses = vec![
+        "ud.playback_position_ticks > 0".to_string(),
+        "(items.runtime = 0 OR ud.playback_position_ticks < items.runtime * 10000000)".to_string(),
+    ];
     let mut params: Vec<String> = Vec::new();
+    if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+        if libs.is_empty() { return Json(json!({"Items": [], "TotalRecordCount": 0})).into_response(); }
+        let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+        where_clauses.push(format!("items.library_id IN ({})", libs_str.join(",")));
+    }
 
     if let Some(types) = query.get("IncludeItemTypes") {
         if types.contains("Movie") { where_clauses.push("items.type = 'movies'".to_string()); }
@@ -612,7 +620,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             for name in set_name_str.split(" / ").filter(|s| !s.trim().is_empty()) {
                 let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
                 let boxset_id = format!("boxset_{:x}", hash);
-                let is_fav = conn.query_row("SELECT COUNT(1) FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", rusqlite::params![req_user_id, &item_id.to_string()], |r| r.get::<_, i64>(0)).map(|c| c > 0).unwrap_or(false);
+                let is_fav = conn.query_row("SELECT COUNT(1) FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", rusqlite::params![req_user_id, &boxset_id], |r| r.get::<_, i64>(0)).map(|c| c > 0).unwrap_or(false);
                 boxsets.push(json!({ "Name": name, "Id": boxset_id, "ServerId": "rust-em-server", "Type": "BoxSet", "IsFolder": true, "MediaType": "Video", "ImageTags": {"Primary": format!("{}_cover", boxset_id)}, "BackdropImageTags": [], "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": is_fav, "Played": false } }));
             }
             return Json(json!({ "Items": boxsets, "TotalRecordCount": boxsets.len() })).into_response();
@@ -861,7 +869,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     if !genre_filters.is_empty() {
         let mut or_clauses = Vec::new();
         for raw_id in genre_filters {
-            let name = raw_id.replace("genre_", "").trim().to_string();
+            let name = raw_id.strip_prefix("genre_").unwrap_or(raw_id.as_str()).trim().to_string();
             if name.is_empty() { continue; }
             or_clauses.push("(genres = ? OR genres LIKE ? OR genres LIKE ? OR genres LIKE ?)");
             params.push(name.clone()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name));
@@ -872,7 +880,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     if !studio_filters.is_empty() {
         let mut or_clauses = Vec::new();
         for raw_id in studio_filters {
-            let name = raw_id.replace("studio_", "").trim().to_string();
+            let name = raw_id.strip_prefix("studio_").unwrap_or(raw_id.as_str()).trim().to_string();
             if name.is_empty() { continue; }
             or_clauses.push("(studios = ? OR studios LIKE ? OR studios LIKE ? OR studios LIKE ?)");
             params.push(name.clone()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name));
@@ -883,7 +891,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     if !person_filters.is_empty() {
         let mut or_clauses = Vec::new();
         for raw_id in person_filters {
-            let name = raw_id.replace("person_", "").trim().to_string();
+            let name = raw_id.strip_prefix("person_").unwrap_or(raw_id.as_str()).trim().to_string();
             if name.is_empty() { continue; }
             or_clauses.push("(directors = ? OR directors LIKE ? OR directors LIKE ? OR directors LIKE ? OR actors LIKE ? OR actors LIKE ?)");
             params.push(name.clone()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name)); params.push(format!("%\"name\":\"{}\"%", name)); params.push(format!("%\"name\": \"{}\"%", name));
@@ -892,7 +900,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     }
 
     for raw_id in tag_filters {
-        let name = raw_id.replace("tag_", "").trim().to_string();
+        let name = raw_id.strip_prefix("tag_").unwrap_or(raw_id.as_str()).trim().to_string();
         if name.is_empty() { continue; }
         where_clauses.push("(tags = ? OR tags LIKE ? OR tags LIKE ? OR tags LIKE ?)".to_string());
         params.push(name.clone()); params.push(format!("{} / %", name)); params.push(format!("% / {}", name)); params.push(format!("% / {} / %", name));
@@ -900,10 +908,8 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
 
     let where_str = where_clauses.join(" AND ");
     
-    let total: i64 = if is_search { 0 } else {
-        let count_sql = format!("SELECT COUNT(*) FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE {}", req_user_id, where_str);
-        conn.query_row(&count_sql, rusqlite::params_from_iter(params.iter()), |r| r.get(0)).unwrap_or(0)
-    };
+    let count_sql = format!("SELECT COUNT(*) FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE {}", req_user_id, where_str);
+    let total: i64 = conn.query_row(&count_sql, rusqlite::params_from_iter(params.iter()), |r| r.get(0)).unwrap_or(0);
     
     let mut order_clause = " ORDER BY id DESC".to_string();
     if let Some(sort_by) = &query.sort_by {
@@ -918,7 +924,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     let start = query.start_index.unwrap_or(0);
     let limit = query.limit.unwrap_or(100);
     
-    let data_sql = format!("SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, IFNULL(ud.playback_position_ticks, 0) as playback_position_ticks, fanart_path, date_created, actors, directors, tags, studios, IFNULL(ud.play_count, 0) as play_count, IFNULL(ud.is_favorite, 0) as is_favorite, IFNULL(ud.last_played_date, '') as last_played_date, (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count, (SELECT COUNT(*) FROM items s WHERE s.series_id = items.id AND s.type = 'Season') as total_seasons FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE {} {} LIMIT {} OFFSET {}", req_user_id, where_str, order_clause, limit, start);
+    let data_sql = format!("SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, IFNULL(ud.playback_position_ticks, 0) as playback_position_ticks, fanart_path, date_created, actors, directors, tags, studios, IFNULL(ud.play_count, 0) as play_count, IFNULL(ud.is_favorite, 0) as is_favorite, IFNULL(ud.last_played_date, '') as last_played_date, (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count, (SELECT COUNT(*) FROM items s WHERE s.series_id = items.id AND s.type = 'Season') as total_seasons, (SELECT COUNT(*) FROM items e LEFT JOIN user_data ud2 ON ud2.item_id = CAST(e.id AS TEXT) AND ud2.user_id = {}) as unplayed_count FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE {} {} LIMIT {} OFFSET {}", req_user_id, req_user_id, where_str, order_clause, limit, start);
 
     let mut stmt = match conn.prepare(&data_sql) { Ok(s) => s, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
@@ -966,7 +972,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &r_type),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
             "UserData": if r_type == "Series" || r_type == "tvshows" || r_type == "Season" {
-                let unplayed = conn.query_row("SELECT COUNT(*) FROM items e LEFT JOIN user_data ud2 ON ud2.item_id = CAST(e.id AS TEXT) AND ud2.user_id = ?1 WHERE e.series_id = ?2 AND e.type = 'Episode' AND IFNULL(ud2.play_count, 0) = 0", rusqlite::params![req_user_id, id], |r| r.get::<_, i64>(0)).unwrap_or(0);
+                let unplayed: i64 = row.get("unplayed_count").unwrap_or(0);
                 json!({ 
                     "PlaybackPositionTicks": playback_ticks, 
                     "PlayCount": play_count, 
@@ -987,7 +993,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         }))
     }).unwrap().filter_map(Result::ok).collect();
     
-    let final_total = if is_search { items.len() as i64 } else { total };
+    let final_total = total;
     Json(json!({ "Items": items, "TotalRecordCount": final_total })).into_response()
 }
 
@@ -1153,7 +1159,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
             parts.iter().enumerate().map(|(i, _path)| {
                 let stream_url = format!("/Videos/{}/original.mp4?MediaSourceId={}_cd{}", id, id, i);
                 json!({
-                    "Id": format!("{}_cd{}", id, i), "ItemId": id.to_string(), "Path": decode_url(&real_path), "DirectStreamUrl": stream_url,
+                    "Id": format!("{}_cd{}", id, i), "ItemId": id.to_string(), "Path": real_path.clone(), "DirectStreamUrl": stream_url,
                     "Protocol": "Http", "Container": "mp4", "Name": title.clone(), "Type": "Default", "VideoType": "VideoFile", "IsRemote": true,
                     "Bitrate": est_bitrate, "RunTimeTicks": run_time_ticks, "Size": size, "DefaultAudioStreamIndex": 1, "DefaultSubtitleStreamIndex": -1,
                     "SupportsDirectPlay": true, "SupportsDirectStream": true, "SupportsProbing": true, "SupportsTranscoding": false,
@@ -1182,8 +1188,8 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
             "ProviderIds": json!({ "Tmdb": tmdb_id, "Imdb": imdb_id, "num": num }),
             "ImageTags": image_tags, "BackdropImageTags": backdrop_tags, "PrimaryImageAspectRatio": if typ == "Episode" { json!(1.7777777777777777) } else if aspect_ratio > 0.0 { json!(aspect_ratio) } else { json!(0.6666666666666666) },
             "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(), "OriginalLanguage": json!(if !original_language.is_empty() { original_language } else { language }),
-            "SetName": json!(set_name), "SeriesName": json!(if typ == "tvshows" { series } else { "".to_string() }),
-            "Path": decode_url(&real_path), "Container": "mp4", "MediaSourceCount": media_sources.len(), "MediaSources": media_sources,
+            "SetName": json!(set_name), "SeriesName": json!(if typ == "Series" || typ == "tvshows" { series } else { "".to_string() }),
+            "Path": real_path.clone(), "Container": "mp4", "MediaSourceCount": media_sources.len(), "MediaSources": media_sources,
             
             
             "RecursiveItemCount": if typ == "Series" || typ == "tvshows" { total_eps } else if typ == "Season" { season_total_eps } else { 0 },
@@ -1259,12 +1265,12 @@ pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(i
 }
 
 pub async fn emby_person(AxumPath(person_id): AxumPath<String>) -> impl IntoResponse {
-    let decoded = decode_url(&person_id); let name = decoded.replace("person_", "");
+    let decoded = decode_url(&person_id); let name = decoded.strip_prefix("person_").unwrap_or(decoded.as_str()).to_string();
     Json(json!({ "Name": name, "ServerId": "rust-em-server", "Id": person_id, "Type": "Person", "IsFolder": false, "ImageTags": {}, "BackdropImageTags": [], "UserData": { "PlayCount": 0, "IsFavorite": false, "Played": false } }))
 }
 
 pub async fn emby_studio(AxumPath(studio_id): AxumPath<String>) -> impl IntoResponse {
-    let decoded = decode_url(&studio_id); let name = decoded.replace("studio_", "");
+    let decoded = decode_url(&studio_id); let name = decoded.strip_prefix("studio_").unwrap_or(decoded.as_str()).to_string();
     Json(json!({ "Name": name, "ServerId": "rust-em-server", "Id": studio_id, "Type": "Studio", "IsFolder": false, "ImageTags": {}, "BackdropImageTags": [], "UserData": { "PlayCount": 0, "IsFavorite": false, "Played": false } }))
 }
 
@@ -1470,8 +1476,23 @@ pub async fn emby_mark_played(State(pool): State<Arc<Mutex<Connection>>>, AxumPa
     let _ = conn.execute(
         "INSERT INTO user_data (user_id, item_id, play_count, playback_position_ticks, last_played_date) VALUES (?1, ?2, 1, 0, ?3) 
          ON CONFLICT(user_id, item_id) DO UPDATE SET play_count = 1, playback_position_ticks = 0, last_played_date = excluded.last_played_date", 
-        rusqlite::params![req_user_id, item_id, now.to_string()]
+        rusqlite::params![req_user_id, &item_id, now.to_string()]
     );
+    if let Ok(num_id) = item_id.parse::<i64>() {
+        if let Ok(r_type) = conn.query_row("SELECT type FROM items WHERE id = ?1", [num_id], |r| r.get::<_, String>(0)) {
+            if r_type == "Series" || r_type == "tvshows" {
+                let _ = conn.execute(
+                    "INSERT INTO user_data (user_id, item_id, play_count, playback_position_ticks, last_played_date) SELECT ?1, CAST(id AS TEXT), 1, 0, ?2 FROM items WHERE series_id = ?3 AND type IN ('Episode','Season') ON CONFLICT(user_id, item_id) DO UPDATE SET play_count = 1, playback_position_ticks = 0, last_played_date = excluded.last_played_date",
+                    rusqlite::params![req_user_id, now.to_string(), num_id]
+                );
+            } else if r_type == "Season" {
+                let _ = conn.execute(
+                    "INSERT INTO user_data (user_id, item_id, play_count, playback_position_ticks, last_played_date) SELECT ?1, CAST(id AS TEXT), 1, 0, ?2 FROM items WHERE parent_id = ?3 AND type = 'Episode' ON CONFLICT(user_id, item_id) DO UPDATE SET play_count = 1, playback_position_ticks = 0, last_played_date = excluded.last_played_date",
+                    rusqlite::params![req_user_id, now.to_string(), num_id]
+                );
+            }
+        }
+    }
     Json(json!({ "Played": true, "PlayCount": 1, "PlaybackPositionTicks": 0 })).into_response()
 }
 

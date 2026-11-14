@@ -196,7 +196,16 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
 }
 
 pub async fn emby_download(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> Response {
-    let path_opt = { let conn = pool.lock().unwrap(); let mut stmt = conn.prepare("SELECT file_path FROM items WHERE id = ?1").unwrap(); stmt.query_row([item_id], |row| row.get::<_, String>(0)).ok() };
+    let path_opt = {
+        let conn = pool.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT parts, file_path FROM items WHERE id = ?1").unwrap();
+        stmt.query_row([item_id], |row| {
+            let parts_json: String = row.get(0).unwrap_or_default();
+            let file_path: String = row.get(1).unwrap_or_default();
+            let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
+            parts.into_iter().next().unwrap_or(file_path)
+        }).ok()
+    };
     let Some(strm_path) = path_opt else { return StatusCode::NOT_FOUND.into_response(); };
     let file = match tokio::fs::File::open(&strm_path).await { Ok(f) => f, Err(_) => return StatusCode::NOT_FOUND.into_response() };
     let mut contents = String::new();

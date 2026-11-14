@@ -5,10 +5,29 @@ use axum::{
 };
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use rusqlite::Connection;
+
+static COVER_TAG_CACHE: std::sync::OnceLock<Mutex<HashMap<String, (String, Instant)>>> =
+    std::sync::OnceLock::new();
 use sha2::{Digest, Sha256};
 
 pub fn get_cover_tag(folder: &str, prefix: &str, name: &str) -> String {
+    let key = format!("{}|{}|{}", folder, prefix, name);
+    let cache = COVER_TAG_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(lock) = cache.lock() {
+        if let Some((tag, exp)) = lock.get(&key) {
+            if Instant::now() < *exp { return tag.clone(); }
+        }
+    }
+    let tag = compute_cover_tag(folder, prefix, name);
+    if let Ok(mut lock) = cache.lock() {
+        lock.insert(key, (tag.clone(), Instant::now() + Duration::from_secs(60)));
+    }
+    tag
+}
+
+fn compute_cover_tag(folder: &str, prefix: &str, name: &str) -> String {
     let mut sanitized_name = String::new();
     for c in name.chars() {
         if c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' {
@@ -80,7 +99,7 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
     }
 
     if item_id.starts_with("lib_") || item_id.starts_with("genre_") || item_id.starts_with("tag_") || item_id.starts_with("boxset_") {
-        let clean_id = item_id.replace("_cover", "");
+        let clean_id = item_id.strip_suffix("_cover").unwrap_or(&item_id).to_string();
         let (folder, prefix) = if clean_id.starts_with("lib_") { ("library", "lib") } 
             else if clean_id.starts_with("genre_") { ("genre", "genre") } 
             else if clean_id.starts_with("boxset_") { ("boxset", "boxset") } 

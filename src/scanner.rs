@@ -108,7 +108,7 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
 
     let re_tv = Regex::new(r"(?i)(?:S|Season)\s*(\d{1,2})[\s._-]*E(?:P|pisode)?\s*(\d{1,3})").unwrap();
     let re_ep = Regex::new(r"(?i)(?:E|EP|第)\s*(\d{1,3})\s*集?").unwrap();
-    let re_s = Regex::new(r"(?i)(?:Season|S)\s*(\d{1,2})").unwrap();
+    let re_s = Regex::new(r"(?i)^(?:Season|S)\s*(\d{1,2})").unwrap();
 
     for ((parent, base_stem), mut paths) in grouped {
         count += 1;
@@ -125,7 +125,7 @@ pub fn scan_directory(pool: Arc<Mutex<Connection>>, lib_id: i64, lib_type: Strin
             let parent_name = parent.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
             
             // 判断是否在 Season 目录下
-            if parent_name.starts_with("season") || parent_name.starts_with("s0") || parent_name.starts_with("s1") {
+            if re_s.is_match(&parent_name) {
                 if let Some(p_parent) = parent.parent() {
                     series_dir = p_parent.to_path_buf();
                 }
