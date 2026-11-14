@@ -422,7 +422,19 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
     
     let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
+        // 💡 核心修复：强行补全所有变量，绝对不让后面报错
         let id: i64 = row.get("id").unwrap_or_default();
+        let r_type: String = row.get("type").unwrap_or_default();
+        let playback_ticks: i64 = row.get("playback_position_ticks").unwrap_or(0);
+        let play_count: i32 = row.get("play_count").unwrap_or(0);
+        let runtime_secs: i32 = row.get("runtime").unwrap_or(0);
+        let total_ticks: i64 = (runtime_secs as i64) * 10_000_000;
+        
+        // 💡 核心修复：把 unplayed_count 提前算好，避免类型不匹配
+        let unplayed_count = if r_type == "Series" || r_type == "tvshows" || r_type == "Season" {
+            if play_count > 0 { 0 } else { 1 }
+        } else { 0 };
+
         let poster_path: String = row.get("poster_path").unwrap_or_default();
         let has_poster = !poster_path.is_empty();
         let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
@@ -435,17 +447,11 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let hash_hexf: String = hashf.iter().map(|b| format!("{:02x}", b)).collect();
         let backdrop_tag = if has_fanart { format!("backdrop_{}_{}", id, &hash_hexf[..8]) } else { String::new() };
 
-        let runtime_secs: i32 = row.get("runtime").unwrap_or(0);
-        let total_ticks: i64 = (runtime_secs as i64) * 10_000_000;
         let size: i64 = row.get("size").unwrap_or(0);
         let mtime: i64 = row.get("mtime").unwrap_or(0);
         let date_str = format_iso8601(mtime);
         let tmdb_id: String = row.get("tmdb_id").unwrap_or_default();
         let imdb_id: String = row.get("imdb_id").unwrap_or_default();
-        let r_type: String = row.get("type").unwrap_or_default();
-        let playback_ticks: i64 = row.get("playback_position_ticks").unwrap_or(0);
-        let play_count: i32 = row.get("play_count").unwrap_or(0);
-        let recursive_count: i64 = row.get("recursive_item_count").unwrap_or(0);
         
         Ok(json!({
             "Name": row.get::<_, String>("title").unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
@@ -459,8 +465,8 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>("file_path").unwrap_or_default()),
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &r_type),
-            "RecursiveItemCount": if r_type == "Series" || r_type == "tvshows" { recursive_count } else if r_type == "Season" { recursive_count } else { 0 },
-            "ChildCount": if r_type == "Series" || r_type == "tvshows" { 0 } else if r_type == "Season" { recursive_count } else { 0 },
+            "RecursiveItemCount": if r_type == "Series" || r_type == "tvshows" || r_type == "Season" { row.get::<_, i64>("recursive_item_count").unwrap_or(0) } else { 0 },
+            "ChildCount": if r_type == "Series" || r_type == "tvshows" { row.get::<_, i64>("recursive_item_count").unwrap_or(0) } else if r_type == "Season" { row.get::<_, i64>("recursive_item_count").unwrap_or(0) } else { 0 },
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
             "UserData": {
                 "Played": play_count > 0,
@@ -468,11 +474,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
                 "IsFavorite": row.get::<_, i32>("is_favorite").unwrap_or(0) > 0,
                 "PlaybackPositionTicks": playback_ticks,
                 "PlayedPercentage": if total_ticks > 0 { (playback_ticks as f64 / total_ticks as f64) * 100.0 } else { 0.0 },
-                "UnplayedItemCount": if r_type == "Series" || r_type == "tvshows" || r_type == "Season" {
-                    if play_count > 0 { 0 } else { 1 }
-                } else {
-                    0
-                }
+                "UnplayedItemCount": unplayed_count
             }
         }))
     }).unwrap().filter_map(Result::ok).collect();
