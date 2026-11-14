@@ -773,6 +773,8 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
                     }
                     if let Ok(path_json) = conn.query_row("SELECT path FROM libraries WHERE id = ?1", [lib_id], |r| r.get::<_, String>(0)) { serde_json::from_str::<Vec<String>>(&path_json).ok().and_then(|p| p.first().cloned()) } else { None }
                 } else { None }
+            } else if let Some(hex) = pid.strip_prefix("folder_") {
+                crate::utils::from_hex(hex)
             } else { None }
         } else { None };
 
@@ -792,8 +794,8 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             }
             if !folders_set.is_empty() {
                 let mut folder_items = Vec::new();
-                for (name, _abs_path) in folders_set {
-                    folder_items.push(json!({ "Name": name, "Id": format!("folder_{}", name), "ServerId": "rust-em-server", "Type": "Folder", "IsFolder": true, "MediaType": "Video", "ImageTags": {}, "BackdropImageTags": [], "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false } }));
+                for (name, abs_path) in folders_set {
+                    folder_items.push(json!({ "Name": name, "Id": format!("folder_{}", crate::utils::to_hex(&abs_path)), "ServerId": "rust-em-server", "Type": "Folder", "IsFolder": true, "MediaType": "Video", "ImageTags": {}, "BackdropImageTags": [], "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false } }));
                 }
                 return Json(json!({ "Items": folder_items, "TotalRecordCount": folder_items.len() })).into_response();
             }
