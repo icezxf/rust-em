@@ -179,13 +179,27 @@ async fn emby_item_image_inner(pool: Arc<Mutex<Connection>>, item_id: String, im
             } else { None }
         } else {
             let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
+            let lib_filter = {
+                let token_opt = query.get("token").or_else(|| query.get("api_key")).or_else(|| query.get("apikey")).or_else(|| query.get("X-Emby-Token"));
+                let uid = token_opt.and_then(|t| crate::auth::TOKENS.get().and_then(|m| m.lock().ok().and_then(|l| l.get(t.as_str()).cloned())));
+                match uid {
+                    Some(1) | None => String::new(),
+                    Some(uid) => match crate::auth::get_allowed_libs(&conn, uid) {
+                        Some(libs) => {
+                            if libs.is_empty() { return StatusCode::NOT_FOUND.into_response(); }
+                            format!(" AND library_id IN ({})", libs.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(","))
+                        }
+                        None => String::new(),
+                    }
+                }
+            };
             match image_type.to_lowercase().as_str() {
-                "primary" | "poster" => conn.query_row("SELECT poster_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-                "thumb" => conn.query_row("SELECT thumb_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-                "logo" => conn.query_row("SELECT logo_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
-                "banner" => conn.query_row("SELECT banner_path FROM items WHERE id = ?1", [id], |r| r.get::<_, String>(0)).ok(),
+                "primary" | "poster" => conn.query_row(&format!("SELECT poster_path FROM items WHERE id = ?1{}", lib_filter), [id], |r| r.get::<_, String>(0)).ok(),
+                "thumb" => conn.query_row(&format!("SELECT thumb_path FROM items WHERE id = ?1{}", lib_filter), [id], |r| r.get::<_, String>(0)).ok(),
+                "logo" => conn.query_row(&format!("SELECT logo_path FROM items WHERE id = ?1{}", lib_filter), [id], |r| r.get::<_, String>(0)).ok(),
+                "banner" => conn.query_row(&format!("SELECT banner_path FROM items WHERE id = ?1{}", lib_filter), [id], |r| r.get::<_, String>(0)).ok(),
                 "backdrop" | "fanart" => {
-                    let mut stmt = conn.prepare("SELECT stills, fanart_path FROM items WHERE id = ?1").unwrap();
+                    let mut stmt = conn.prepare(&format!("SELECT stills, fanart_path FROM items WHERE id = ?1{}", lib_filter)).unwrap();
                     stmt.query_row([id], |row| Ok((row.get::<_, String>(0).unwrap_or_default(), row.get::<_, String>(1).unwrap_or_default()))).map(|(stills_json, fanart_path)| {
                         let mut backdrops: Vec<String> = Vec::new();
                         if !fanart_path.is_empty() { backdrops.push(fanart_path); }

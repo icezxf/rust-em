@@ -560,9 +560,16 @@ pub async fn emby_items_next_up(_: AxumPath<String>) -> impl IntoResponse { Json
 
 pub async fn emby_shows_next_up(State(pool): State<Arc<Mutex<Connection>>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let sql = "SELECT e.id, e.title, e.season_number, e.episode_number, e.plot, e.runtime, e.poster_path, e.series_id, e.parent_id, e.series FROM items e JOIN user_data ud ON ud.item_id = CAST(e.id AS TEXT) AND ud.user_id = ?1 WHERE e.type = 'Episode' AND ud.playback_position_ticks > 0 ORDER BY ud.last_played_date DESC LIMIT 20";
+    let lib_filter = match get_allowed_libs(&conn, req_user_id) {
+        Some(libs) => {
+            if libs.is_empty() { return Json(json!({"Items": [], "TotalRecordCount": 0})); }
+            format!(" AND e.library_id IN ({})", libs.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(","))
+        }
+        None => String::new(),
+    };
+    let sql = format!("SELECT e.id, e.title, e.season_number, e.episode_number, e.plot, e.runtime, e.poster_path, e.series_id, e.parent_id, e.series FROM items e JOIN user_data ud ON ud.item_id = CAST(e.id AS TEXT) AND ud.user_id = ?1 WHERE e.type = 'Episode' AND ud.playback_position_ticks > 0{} ORDER BY ud.last_played_date DESC LIMIT 20", lib_filter);
     let mut items = Vec::new();
-    if let Ok(mut stmt) = conn.prepare(sql) {
+    if let Ok(mut stmt) = conn.prepare(&sql) {
         if let Ok(mapped) = stmt.query_map([req_user_id], |r| {
             let id: i64 = r.get(0).unwrap_or_default();
             let s_num: i32 = r.get(2).unwrap_or(1);
@@ -995,10 +1002,18 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     Json(json!({ "Items": items, "TotalRecordCount": final_total })).into_response()
 }
 
-pub async fn emby_shows_seasons(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(series_id): AxumPath<String>) -> impl IntoResponse {
+pub async fn emby_shows_seasons(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(series_id): AxumPath<String>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let Ok(sid) = series_id.parse::<i64>() else { return Json(json!({"Items": [], "TotalRecordCount": 0})); };
     let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id, title, season_number, poster_path, (SELECT COUNT(*) FROM items e WHERE e.parent_id = items.id AND e.type = 'Episode') as ep_count FROM items WHERE type = 'Season' AND parent_id = ?1 ORDER BY season_number ASC").unwrap();
+    let lib_filter = match get_allowed_libs(&conn, req_user_id) {
+        Some(libs) => {
+            if libs.is_empty() { return Json(json!({"Items": [], "TotalRecordCount": 0})); }
+            format!(" AND library_id IN ({})", libs.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(","))
+        }
+        None => String::new(),
+    };
+    let sql = format!("SELECT id, title, season_number, poster_path, (SELECT COUNT(*) FROM items e WHERE e.parent_id = items.id AND e.type = 'Episode') as ep_count FROM items WHERE type = 'Season' AND parent_id = ?1{} ORDER BY season_number ASC", lib_filter);
+    let mut stmt = conn.prepare(&sql).unwrap();
     
     let items: Vec<Value> = stmt.query_map([sid], |r| {
         let id: i64 = r.get(0).unwrap_or_default();
@@ -1019,12 +1034,17 @@ pub struct EpisodesQuery {
     #[serde(rename = "ParentId")] parent_id: Option<String>,
 }
 
-pub async fn emby_shows_episodes(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(series_id): AxumPath<String>, Query(query): Query<EpisodesQuery>) -> impl IntoResponse {
+pub async fn emby_shows_episodes(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(series_id): AxumPath<String>, Query(query): Query<EpisodesQuery>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let Ok(sid) = series_id.parse::<i64>() else { return Json(json!({"Items": [], "TotalRecordCount": 0})); };
     let conn = pool.lock().unwrap();
     let series_name: String = conn.query_row("SELECT title FROM items WHERE id = ?1", [sid], |row| row.get::<_, String>(0)).unwrap_or_default();
     
     let mut sql = "SELECT id, title, season_number, episode_number, plot, runtime, poster_path, fanart_path, directors, actors FROM items WHERE type = 'Episode' AND series_id = ?1".to_string();
+    if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+        if libs.is_empty() { return Json(json!({"Items": [], "TotalRecordCount": 0})); }
+        let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+        sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+    }
     let mut params = vec![sid.to_string()];
     if let Some(season_id) = &query.season_id {
         sql.push_str(" AND parent_id = ?");
@@ -1230,15 +1250,23 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
     if let Some(item) = item_opt { Json(item).into_response() } else { StatusCode::NOT_FOUND.into_response() }
 }
 
-pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse {
+pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
+    let lib_filter = match get_allowed_libs(&conn, req_user_id) {
+        Some(libs) => {
+            if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })); }
+            format!(" AND library_id IN ({})", libs.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(","))
+        }
+        None => String::new(),
+    };
     let (genres_str, tags_str): (String, String) = conn.query_row("SELECT genres, tags FROM items WHERE id = ?1", [item_id], |r| Ok((r.get::<_, String>(0).unwrap_or_default(), r.get::<_, String>(1).unwrap_or_default()))).unwrap_or_default();
     let mut terms: Vec<(String, i64)> = Vec::new();
     for t in tags_str.split(" / ").map(str::trim).filter(|s| !s.is_empty()).take(8) { terms.push((t.to_string(), 2)); }
     for g in genres_str.split(" / ").map(str::trim).filter(|s| !s.is_empty()).take(8) { terms.push((g.to_string(), 1)); }
 
     if terms.is_empty() {
-        let mut stmt = conn.prepare("SELECT id, title, type, year, plot, poster_path, rating, runtime FROM items WHERE id != ?1 ORDER BY RANDOM() LIMIT 6").unwrap();
+        let sql = format!("SELECT id, title, type, year, plot, poster_path, rating, runtime FROM items WHERE id != ?1{} ORDER BY RANDOM() LIMIT 6", lib_filter);
+        let mut stmt = conn.prepare(&sql).unwrap();
         let items: Vec<Value> = stmt.query_map([item_id], |row| {
             let id: i64 = row.get(0).unwrap_or_default();
             let r_type: String = row.get(2).unwrap_or_default();
@@ -1254,7 +1282,7 @@ pub async fn emby_similar(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(i
         score_expr.push_str(&format!("((CASE WHEN tags LIKE ?{} THEN {} ELSE 0 END) + (CASE WHEN genres LIKE ?{} THEN {} ELSE 0 END))", p, weight * 2, p, weight));
         where_expr.push_str(&format!("genres LIKE ?{} OR tags LIKE ?{}", p, p));
     }
-    let sql = format!("SELECT id, title, type, year, plot, poster_path, rating, runtime, ({}) AS score FROM items WHERE id != ?1 AND ({}) ORDER BY score DESC, RANDOM() LIMIT 6", score_expr, where_expr);
+    let sql = format!("SELECT id, title, type, year, plot, poster_path, rating, runtime, ({}) AS score FROM items WHERE id != ?1{} AND ({}) ORDER BY score DESC, RANDOM() LIMIT 6", score_expr, lib_filter, where_expr);
     let mut params_vec: Vec<rusqlite::types::Value> = Vec::with_capacity(terms.len() + 1);
     params_vec.push(rusqlite::types::Value::Integer(item_id));
     for (term, _) in &terms { params_vec.push(rusqlite::types::Value::Text(format!("%{}%", term))); }
@@ -1577,21 +1605,38 @@ pub async fn emby_hide_from_resume(AxumPath((_user_id, _item_id)): AxumPath<(Str
 
 pub async fn emby_thumbnail_set(AxumPath(item_id): AxumPath<i64>) -> impl IntoResponse { Json(json!({ "Id": item_id.to_string(), "ThumbnailSet": {} })) }
 
-pub async fn emby_item_counts(State(pool): State<Arc<Mutex<Connection>>>) -> impl IntoResponse {
+pub async fn emby_item_counts(State(pool): State<Arc<Mutex<Connection>>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
-    let movie_count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE type='movies'", [], |r| r.get(0)).unwrap_or(0);
-    let series_count: i64 = conn.query_row("SELECT COUNT(*) FROM items WHERE type='tvshows' OR type='Series'", [], |r| r.get(0)).unwrap_or(0);
+    let lib_filter = match get_allowed_libs(&conn, req_user_id) {
+        Some(libs) => {
+            if libs.is_empty() { return Json(json!({ "MovieCount": 0, "SeriesCount": 0, "EpisodeCount": 0, "ArtistCount": 0, "SongCount": 0, "AlbumCount": 0, "MusicVideoCount": 0, "BoxSetCount": 0, "BookCount": 0, "TrailerCount": 0 })); }
+            format!(" AND library_id IN ({})", libs.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(","))
+        }
+        None => String::new(),
+    };
+    let movie_sql = format!("SELECT COUNT(*) FROM items WHERE type='movies'{}", lib_filter);
+    let series_sql = format!("SELECT COUNT(*) FROM items WHERE (type='tvshows' OR type='Series'){}", lib_filter);
+    let movie_count: i64 = conn.query_row(&movie_sql, [], |r| r.get(0)).unwrap_or(0);
+    let series_count: i64 = conn.query_row(&series_sql, [], |r| r.get(0)).unwrap_or(0);
     Json(json!({ "MovieCount": movie_count, "SeriesCount": series_count, "EpisodeCount": 0, "ArtistCount": 0, "SongCount": 0, "AlbumCount": 0, "MusicVideoCount": 0, "BoxSetCount": 0, "BookCount": 0, "TrailerCount": 0 }))
 }
 
 #[derive(Deserialize)]
 pub struct SearchQuery { #[serde(rename = "SearchTerm")] pub search_term: Option<String>, #[serde(rename = "Limit")] pub limit: Option<i64> }
-pub async fn emby_search_hints(State(pool): State<Arc<Mutex<Connection>>>, Query(q): Query<SearchQuery>) -> impl IntoResponse {
+pub async fn emby_search_hints(State(pool): State<Arc<Mutex<Connection>>>, Query(q): Query<SearchQuery>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let term = q.search_term.unwrap_or_default();
     if term.is_empty() { return Json(json!({ "SearchHints": [], "TotalRecordCount": 0 })); }
     let limit = q.limit.unwrap_or(20);
     let conn = pool.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT id, title, type, year, poster_path FROM items WHERE title LIKE ?1 ORDER BY id DESC LIMIT ?2").unwrap();
+    let lib_filter = match get_allowed_libs(&conn, req_user_id) {
+        Some(libs) => {
+            if libs.is_empty() { return Json(json!({ "SearchHints": [], "TotalRecordCount": 0 })); }
+            format!(" AND library_id IN ({})", libs.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(","))
+        }
+        None => String::new(),
+    };
+    let sql = format!("SELECT id, title, type, year, poster_path FROM items WHERE title LIKE ?1{} ORDER BY id DESC LIMIT ?2", lib_filter);
+    let mut stmt = conn.prepare(&sql).unwrap();
     let pattern = format!("%{}%", term);
     let hints: Vec<Value> = stmt.query_map(rusqlite::params![pattern, limit], |row| {
         let id: i64 = row.get(0).unwrap_or_default();
