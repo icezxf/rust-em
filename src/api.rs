@@ -503,7 +503,7 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
     }
 
     let where_str = where_clauses.join(" AND ");
-    let sql = format!("SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path, ud.play_count, ud.last_played_date, items.series_id, items.parent_id, items.season_number, items.episode_number FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE {} ORDER BY ud.last_played_date DESC LIMIT 30", req_user_id, where_str);
+    let sql = format!("SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path, ud.play_count, ud.last_played_date, items.series_id, items.parent_id, items.season_number, items.episode_number, IFNULL(ud.is_favorite, 0) as is_favorite FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE {} ORDER BY ud.last_played_date DESC LIMIT 30", req_user_id, where_str);
 
     let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
@@ -550,7 +550,8 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
                 "Played": play_count > 0,
                 "PlaybackPositionTicks": playback_ticks,
                 "PlayedPercentage": played_pct,
-                "PlayCount": play_count
+                "PlayCount": play_count,
+                "IsFavorite": row.get::<_, i32>(26).unwrap_or(0) > 0
             }
         }))
     }).unwrap().filter_map(Result::ok).collect();
@@ -731,6 +732,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             return Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response();
         }
 
+        let mut mixed_boxsets = Vec::new();
         if types.to_lowercase().contains("boxset") {
             let mut sql = "SELECT set_name FROM items WHERE set_name != ''".to_string();
             if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
@@ -758,7 +760,10 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
                     }
                 }
             }
-            return Json(json!({ "Items": boxsets, "TotalRecordCount": boxsets.len() })).into_response();
+            if types.to_lowercase().replace("boxset", "").trim().is_empty() {
+                return Json(json!({ "Items": boxsets, "TotalRecordCount": boxsets.len() })).into_response();
+            }
+            mixed_boxsets.extend(boxsets);
         }
     }
 
@@ -1006,8 +1011,30 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         }))
     }).unwrap().filter_map(Result::ok).collect();
     
-    let final_total = total;
-    Json(json!({ "Items": items, "TotalRecordCount": final_total })).into_response()
+    let mut items = items;
+    items.extend(mixed_boxsets);
+
+    if query.filters.as_deref().map_or(false, |f| f.contains("IsFavorite")) && query.include_item_types.is_none() {
+        let mut set_names = std::collections::HashSet::new();
+        if let Ok(mut stmt) = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''") {
+            if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+                for s in mapped.flatten() { for name in s.split(" / ").filter(|s| !s.trim().is_empty()) { set_names.insert(name.to_string()); } }
+            }
+        }
+        for name in set_names {
+            let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
+            let hash_hex = format!("{:x}", hash);
+            let boxset_id = format!("boxset_{}", hash_hex);
+            let is_fav = if let Ok(count) = conn.query_row("SELECT COUNT(1) FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", rusqlite::params![req_user_id, &boxset_id], |r| r.get::<_, i64>(0)) { count > 0 } else { false };
+            if is_fav {
+                items.push(json!({ "Name": name, "Id": boxset_id, "ServerId": "rust-em-server", "Type": "BoxSet", "IsFolder": true, "MediaType": "Video", "ImageTags": {"Primary": crate::images::get_cover_tag("boxset", "boxset", &hash_hex)}, "BackdropImageTags": [], "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": true, "Played": false } }));
+            }
+        }
+    }
+
+    let final_total = total + items.len() as i64 - (total as i64 - items.len() as i64); // 重新计算
+    let actual_total = items.len() as i64;
+    Json(json!({ "Items": items, "TotalRecordCount": actual_total })).into_response()
 }
 
 pub async fn emby_shows_seasons(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(series_id): AxumPath<String>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
