@@ -845,6 +845,12 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
                 where_clauses.push("library_id = ?".to_string());
                 params.push(lib_id.to_string()); 
             }
+        } else if let Some(hex) = pid.strip_prefix("folder_") {
+            if let Some(path) = crate::utils::from_hex(hex) {
+                let path_clean = path.trim_end_matches('/');
+                where_clauses.push("file_path LIKE ?".to_string());
+                params.push(format!("{}/%", path_clean));
+            }
         } else if pid.starts_with("boxset_") {
             where_clauses.push("set_name LIKE '%' ".to_string());
         }
