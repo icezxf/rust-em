@@ -1016,7 +1016,14 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
 
     if query.filters.as_deref().map_or(false, |f| f.contains("IsFavorite")) && query.include_item_types.is_none() {
         let mut set_names = std::collections::HashSet::new();
-        if let Ok(mut stmt) = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''") {
+        let mut box_sql = "SELECT set_name FROM items WHERE set_name != ''".to_string();
+        if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+            if !libs.is_empty() {
+                let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
+                box_sql.push_str(&format!(" AND library_id IN ({})", libs_str.join(",")));
+            }
+        }
+        if let Ok(mut stmt) = conn.prepare(&box_sql) {
             if let Ok(mapped) = stmt.query_map([], |r| r.get::<_, String>(0)) {
                 for s in mapped.flatten() { for name in s.split(" / ").filter(|s| !s.trim().is_empty()) { set_names.insert(name.to_string()); } }
             }
