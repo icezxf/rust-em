@@ -864,7 +864,27 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
                 params.push(format!("{}/%", path_clean));
             }
         } else if pid.starts_with("boxset_") {
-            where_clauses.push("set_name LIKE '%' ".to_string());
+            let mut found_set_name = String::new();
+            let mut names = Vec::new();
+            if let Ok(mut stmt_all) = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''") {
+                if let Ok(mapped) = stmt_all.query_map([], |r| r.get::<_, String>(0)) { for s in mapped.flatten() { names.push(s); } }
+            }
+            for full_str in names {
+                for name in full_str.split(" / ").filter(|s| !s.trim().is_empty()) {
+                    let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
+                    if format!("boxset_{:x}", hash) == pid { found_set_name = name.to_string(); break; }
+                }
+                if !found_set_name.is_empty() { break; }
+            }
+            if !found_set_name.is_empty() {
+                where_clauses.push("(set_name = ? OR set_name LIKE ? OR set_name LIKE ? OR set_name LIKE ?)".to_string());
+                params.push(found_set_name.clone());
+                params.push(format!("{} / %", found_set_name));
+                params.push(format!("% / {}", found_set_name));
+                params.push(format!("% / {} / %", found_set_name));
+            } else {
+                where_clauses.push("1=0".to_string());
+            }
         }
     }
 
@@ -1128,6 +1148,46 @@ pub async fn emby_item_detail_with_user(State(pool): State<Arc<Mutex<Connection>
 
 async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, req_user_id: i64) -> Response {
     if item_id.starts_with("person_") || item_id.starts_with("studio_") { return StatusCode::NOT_FOUND.into_response(); }
+        if item_id.starts_with("boxset_") {
+        let conn = pool.lock().unwrap();
+        let mut found_set_name = String::new();
+        let mut names = Vec::new();
+        if let Ok(mut stmt_all) = conn.prepare("SELECT DISTINCT set_name FROM items WHERE set_name != ''") {
+            if let Ok(mapped) = stmt_all.query_map([], |r| r.get::<_, String>(0)) { for s in mapped.flatten() { names.push(s); } }
+        }
+        for full_str in names {
+            for name in full_str.split(" / ").filter(|s| !s.trim().is_empty()) {
+                let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
+                if format!("boxset_{:x}", hash) == item_id { found_set_name = name.to_string(); break; }
+            }
+            if !found_set_name.is_empty() { break; }
+        }
+        if !found_set_name.is_empty() {
+            let hash_hex = item_id.strip_prefix("boxset_").unwrap_or("");
+            let cover_tag = crate::images::get_cover_tag("boxset", "boxset", hash_hex);
+            let mut items_count = 0;
+            if let Ok(mut stmt) = conn.prepare("SELECT COUNT(id) FROM items WHERE set_name = ?1 OR set_name LIKE ?2 OR set_name LIKE ?3 OR set_name LIKE ?4") {
+                let p1 = &found_set_name;
+                let p2 = format!("{} / %", found_set_name);
+                let p3 = format!("% / {}", found_set_name);
+                let p4 = format!("% / {} / %", found_set_name);
+                items_count = stmt.query_row([p1, &p2, &p3, &p4], |r| r.get::<_, i64>(0)).unwrap_or(0);
+            }
+            let is_fav = if let Ok(count) = conn.query_row("SELECT COUNT(1) FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", rusqlite::params![req_user_id, &item_id], |r| r.get::<_, i64>(0)) { count > 0 } else { false };
+            return Json(json!({
+                "Name": found_set_name, "Id": item_id, "ServerId": "rust-em-server", "Type": "BoxSet", 
+                "IsFolder": true, "MediaType": "Video", "Overview": "", "ProductionYear": 0,
+                "ImageTags": if cover_tag.is_empty() { json!({}) } else { json!({"Primary": cover_tag}) },
+                "BackdropImageTags": [], "PrimaryImageAspectRatio": 0.6666666666666666,
+                "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": is_fav, "Played": false, "UnplayedItemCount": items_count },
+                "ChildCount": items_count,
+                "RecursiveItemCount": items_count,
+                "MediaSources": []
+            })).into_response();
+        }
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
     let Ok(id) = item_id.parse::<i64>() else { return StatusCode::NOT_FOUND.into_response(); };
     let conn = pool.lock().unwrap();
     
