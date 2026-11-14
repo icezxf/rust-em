@@ -1513,6 +1513,14 @@ pub async fn emby_refresh_library(State(pool): State<Arc<Mutex<Connection>>>) ->
 
 pub async fn emby_mark_played(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
+    if req_user_id != 1 {
+        if let Ok(nid) = item_id.parse::<i64>() {
+            if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+                let allowed = conn.query_row("SELECT library_id FROM items WHERE id = ?1", [nid], |r| r.get::<_, i64>(0)).map(|l| libs.contains(&l)).unwrap_or(false);
+                if !allowed { return StatusCode::NOT_FOUND.into_response(); }
+            }
+        }
+    }
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
     let _ = conn.execute(
         "INSERT INTO user_data (user_id, item_id, play_count, playback_position_ticks, last_played_date) VALUES (?1, ?2, 1, 0, ?3) 
@@ -1539,6 +1547,14 @@ pub async fn emby_mark_played(State(pool): State<Arc<Mutex<Connection>>>, AxumPa
 
 pub async fn emby_mark_unplayed(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
+    if req_user_id != 1 {
+        if let Ok(nid) = item_id.parse::<i64>() {
+            if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+                let allowed = conn.query_row("SELECT library_id FROM items WHERE id = ?1", [nid], |r| r.get::<_, i64>(0)).map(|l| libs.contains(&l)).unwrap_or(false);
+                if !allowed { return StatusCode::NOT_FOUND.into_response(); }
+            }
+        }
+    }
     let _ = conn.execute(
         "INSERT INTO user_data (user_id, item_id, play_count, playback_position_ticks) VALUES (?1, ?2, 0, 0) 
          ON CONFLICT(user_id, item_id) DO UPDATE SET play_count = 0, playback_position_ticks = 0", 
@@ -1549,6 +1565,14 @@ pub async fn emby_mark_unplayed(State(pool): State<Arc<Mutex<Connection>>>, Axum
 
 pub async fn emby_mark_favorite(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
+    if req_user_id != 1 {
+        if let Ok(nid) = item_id.parse::<i64>() {
+            if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+                let allowed = conn.query_row("SELECT library_id FROM items WHERE id = ?1", [nid], |r| r.get::<_, i64>(0)).map(|l| libs.contains(&l)).unwrap_or(false);
+                if !allowed { return StatusCode::NOT_FOUND.into_response(); }
+            }
+        }
+    }
     if item_id.starts_with("boxset_") {
         let _ = conn.execute("INSERT OR IGNORE INTO boxset_favorites (user_id, boxset_id) VALUES (?1, ?2)", rusqlite::params![req_user_id, &item_id]);
     } else if let Ok(_numeric_id) = item_id.parse::<i64>() {
@@ -1559,6 +1583,14 @@ pub async fn emby_mark_favorite(State(pool): State<Arc<Mutex<Connection>>>, Axum
 
 pub async fn emby_unmark_favorite(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((_user_id, item_id)): AxumPath<(String, String)>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
     let conn = pool.lock().unwrap();
+    if req_user_id != 1 {
+        if let Ok(nid) = item_id.parse::<i64>() {
+            if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
+                let allowed = conn.query_row("SELECT library_id FROM items WHERE id = ?1", [nid], |r| r.get::<_, i64>(0)).map(|l| libs.contains(&l)).unwrap_or(false);
+                if !allowed { return StatusCode::NOT_FOUND.into_response(); }
+            }
+        }
+    }
     if item_id.starts_with("boxset_") {
         let _ = conn.execute("DELETE FROM boxset_favorites WHERE user_id = ?1 AND boxset_id = ?2", rusqlite::params![req_user_id, &item_id]);
     } else if let Ok(_numeric_id) = item_id.parse::<i64>() {

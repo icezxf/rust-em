@@ -43,6 +43,7 @@ pub async fn emby_playback_info(
     AxumPath(item_id): AxumPath<i64>,
     Query(query): Query<HashMap<String, String>>,
     headers: HeaderMap,
+    Extension(req_user_id): Extension<i64>,
 ) -> Response {
     let token = query.get("api_key").or_else(|| query.get("token")).or_else(|| query.get("X-Emby-Token"))
         .cloned()
@@ -56,7 +57,15 @@ pub async fn emby_playback_info(
     
     let (parts_json_opt, runtime, media_streams_json, size, item_title) = {
         let conn = pool.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT parts, runtime, media_streams, size, title FROM items WHERE id = ?1").unwrap();
+        let lib_filter = match crate::auth::get_allowed_libs(&conn, req_user_id) {
+            Some(libs) => {
+                if libs.is_empty() { return StatusCode::NOT_FOUND.into_response(); }
+                format!(" AND library_id IN ({})", libs.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(","))
+            }
+            None => String::new(),
+        };
+        let sql = format!("SELECT parts, runtime, media_streams, size, title FROM items WHERE id = ?1{}", lib_filter);
+        let mut stmt = conn.prepare(&sql).unwrap();
         stmt.query_row([item_id], |row| Ok((
             row.get::<_, String>(0).ok(), 
             row.get::<_, i32>(1).unwrap_or(0), 
@@ -203,10 +212,18 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
     (StatusCode::FOUND, [(LOCATION, final_url)], "").into_response()
 }
 
-pub async fn emby_download(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>) -> Response {
+pub async fn emby_download(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>, Extension(req_user_id): Extension<i64>) -> Response {
     let path_opt = {
         let conn = pool.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT parts, file_path FROM items WHERE id = ?1").unwrap();
+        let lib_filter = match crate::auth::get_allowed_libs(&conn, req_user_id) {
+            Some(libs) => {
+                if libs.is_empty() { return StatusCode::NOT_FOUND.into_response(); }
+                format!(" AND library_id IN ({})", libs.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(","))
+            }
+            None => String::new(),
+        };
+        let sql = format!("SELECT parts, file_path FROM items WHERE id = ?1{}", lib_filter);
+        let mut stmt = conn.prepare(&sql).unwrap();
         stmt.query_row([item_id], |row| {
             let parts_json: String = row.get(0).unwrap_or_default();
             let file_path: String = row.get(1).unwrap_or_default();
