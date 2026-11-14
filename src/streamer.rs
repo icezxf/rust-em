@@ -5,7 +5,7 @@
 //! 依赖：utils.rs（sanitize_media_streams / extract_extension_from_url）。
 
 use axum::{
-    extract::{State, Query, Path as AxumPath},
+    extract::{State, Query, Path as AxumPath, Extension},
     http::{StatusCode, HeaderMap, header::{LOCATION, USER_AGENT}},
     Json,
     response::{IntoResponse, Response},
@@ -128,15 +128,15 @@ pub async fn emby_playback_info(
     Json(json!({ "MediaSources": media_sources, "PlaySessionId": play_session_id })).into_response()
 }
 
-pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap) -> Response { emby_stream_inner(pool, item_id, query, headers).await }
+pub async fn emby_stream(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(item_id): AxumPath<i64>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap, Extension(req_user_id): Extension<i64>) -> Response { emby_stream_inner(pool, item_id, query, headers, req_user_id).await }
 
-pub async fn emby_stream_with_ext(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, _ext)): AxumPath<(i64, String)>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap) -> Response { emby_stream_inner(pool, item_id, query, headers).await }
+pub async fn emby_stream_with_ext(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, _ext)): AxumPath<(i64, String)>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap, Extension(req_user_id): Extension<i64>) -> Response { emby_stream_inner(pool, item_id, query, headers, req_user_id).await }
 
-pub async fn emby_stream_with_source(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, _source_id)): AxumPath<(i64, String)>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap) -> Response { emby_stream_inner(pool, item_id, query, headers).await }
+pub async fn emby_stream_with_source(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, _source_id)): AxumPath<(i64, String)>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap, Extension(req_user_id): Extension<i64>) -> Response { emby_stream_inner(pool, item_id, query, headers, req_user_id).await }
 
-pub async fn emby_stream_with_source_ext(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, _source_id, _ext)): AxumPath<(i64, String, String)>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap) -> Response { emby_stream_inner(pool, item_id, query, headers).await }
+pub async fn emby_stream_with_source_ext(State(pool): State<Arc<Mutex<Connection>>>, AxumPath((item_id, _source_id, _ext)): AxumPath<(i64, String, String)>, Query(query): Query<HashMap<String, String>>, headers: HeaderMap, Extension(req_user_id): Extension<i64>) -> Response { emby_stream_inner(pool, item_id, query, headers, req_user_id).await }
 
-async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: HashMap<String, String>, headers: HeaderMap) -> Response {
+async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: HashMap<String, String>, headers: HeaderMap, req_user_id: i64) -> Response {
     let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     let ip = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()).unwrap_or("unknown");
     
@@ -147,7 +147,15 @@ async fn emby_stream_inner(pool: Arc<Mutex<Connection>>, item_id: i64, query: Ha
 
     let (strm_path_opt, item_title) = {
         let conn = pool.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT parts, title FROM items WHERE id = ?1").unwrap();
+        let lib_filter = match crate::auth::get_allowed_libs(&conn, req_user_id) {
+            Some(libs) => {
+                if libs.is_empty() { return StatusCode::NOT_FOUND.into_response(); }
+                format!(" AND library_id IN ({})", libs.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(","))
+            }
+            None => String::new(),
+        };
+        let sql = format!("SELECT parts, title FROM items WHERE id = ?1{}", lib_filter);
+        let mut stmt = conn.prepare(&sql).unwrap();
         let row_res = stmt.query_row([item_id], |row| Ok((row.get::<_, String>(0).ok(), row.get::<_, String>(1).unwrap_or_else(|_| "未知影片".to_string()))));
         match row_res {
             Ok((Some(json), title)) => {
