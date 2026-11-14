@@ -438,7 +438,7 @@
         }
 
         function renderSidebarLibraries() {
-            const filteredLibs = allLibraries.filter(lib => lib.type === currentMediaType);
+            const filteredLibs = allLibraries;
             const allText = currentMediaType === 'movies' ? '全部电影' : '全部剧集';
             const html = filteredLibs.map(lib => {
                 const cls = currentLibId === lib.id ? 'bg-gray-800 text-white font-medium shadow-sm' : 'hover:bg-gray-800/50 text-gray-400';
@@ -463,8 +463,24 @@
         function setLibraryFilter(libId) { 
             closeDetail(); 
             currentLibId = libId; 
+            
+            // 自动识别点击的库类型，切换底部大类的状态
+            if (libId !== 'all') {
+                const lib = allLibraries.find(l => l.id === libId);
+                if (lib) {
+                    currentMediaType = lib.type === 'tvshows' ? 'tvshows' : 'movies';
+                }
+            }
+
             renderSidebarLibraries(); 
             renderMobileLibTabs();
+            
+            // 更新底部导航的高亮状态
+            const btnMovies = document.getElementById('nav-btn-movies');
+            const btnTvshows = document.getElementById('nav-btn-tvshows');
+            if(btnMovies) btnMovies.className = `flex flex-col items-center justify-center w-1/4 transition ${currentMediaType === 'movies' ? 'text-blue-500' : 'text-gray-400 hover:text-white'}`;
+            if(btnTvshows) btnTvshows.className = `flex flex-col items-center justify-center w-1/4 transition ${currentMediaType === 'tvshows' ? 'text-blue-500' : 'text-gray-400 hover:text-white'}`;
+            
             loadMedia();
         }
 
