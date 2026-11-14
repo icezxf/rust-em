@@ -825,7 +825,12 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
         if t.contains("series") { type_conditions.push("type = 'Series'"); }
         if t.contains("episode") { type_conditions.push("type = 'Episode'"); }
         if t.contains("season") { type_conditions.push("type = 'Season'"); }
-        if !type_conditions.is_empty() { where_clauses.push(format!("({})", type_conditions.join(" OR "))); }
+        if !type_conditions.is_empty() { 
+            where_clauses.push(format!("({})", type_conditions.join(" OR "))); 
+        } else {
+            // 如果指定了类型，但不是我们支持的（比如 Person, Video, TvChannel 等），强制返回空
+            where_clauses.push("1=0".to_string());
+        }
     } else {
         if let Some(pid) = &query.parent_id {
             if pid.starts_with("lib_") { 
