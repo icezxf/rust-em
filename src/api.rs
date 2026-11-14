@@ -382,7 +382,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
     let allowed_libs = get_allowed_libs(&conn, req_user_id);
     if let Some(libs) = &allowed_libs { if libs.is_empty() { return Json(json!([])).into_response(); } }
 
-    let mut sql = format!("SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path, (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count, IFNULL(ud.play_count, 0) as play_count, IFNULL(ud.is_favorite, 0) as is_favorite, IFNULL(ud.playback_position_ticks, 0) as playback_position_ticks FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE 1=1", req_user_id);
+    let mut sql = format!("SELECT id, title, type, year, plot, poster_path, file_path, runtime, rating, mpaa, genres, premiered, tmdb_id, imdb_id, size, mtime, sort_title, original_title, fanart_path, (SELECT COUNT(*) FROM items e WHERE e.series_id = items.id AND e.type = 'Episode') as recursive_item_count, (SELECT COUNT(*) FROM items s WHERE s.series_id = items.id AND s.type = 'Season') as total_seasons, IFNULL(ud.play_count, 0) as play_count, IFNULL(ud.is_favorite, 0) as is_favorite, IFNULL(ud.playback_position_ticks, 0) as playback_position_ticks FROM items LEFT JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE 1=1", req_user_id);
     let mut params: Vec<String> = Vec::new();
 
     if let Some(libs) = &allowed_libs {
@@ -442,8 +442,8 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "Path": decode_url(&row.get::<_, String>("file_path").unwrap_or_default()),
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &r_type),
-            "RecursiveItemCount": if r_type == "Series" || r_type == "Season" { row.get::<_, i64>("recursive_item_count").unwrap_or(0) } else { 0 },
-            "ChildCount": if r_type == "Series" { 0 } else if r_type == "Season" { row.get::<_, i64>("recursive_item_count").unwrap_or(0) } else { 0 },
+            "RecursiveItemCount": if r_type == "Series" || r_type == "tvshows" || r_type == "Season" { row.get::<_, i64>("recursive_item_count").unwrap_or(0) } else { 0 },
+            "ChildCount": if r_type == "Series" || r_type == "tvshows" { row.get::<_, i64>("total_seasons").unwrap_or(0) } else if r_type == "Season" { row.get::<_, i64>("recursive_item_count").unwrap_or(0) } else { 0 },
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
             "UserData": {
                 "Played": row.get::<_, i32>("play_count").unwrap_or(0) > 0,
@@ -942,8 +942,8 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             "Container": "mp4", "CanDelete": false, "CanDownload": false, "LocationType": "FileSystem", "Status": "Released",
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
-            "RecursiveItemCount": if r_type == "Series" || r_type == "Season" { recursive_count } else { 0 },
-            "ChildCount": if r_type == "Series" { row.get::<_, i64>("total_seasons").unwrap_or(0) } else if r_type == "Season" { recursive_count } else { 0 },
+            "RecursiveItemCount": if r_type == "Series" || r_type == "tvshows" || r_type == "Season" { recursive_count } else { 0 },
+            "ChildCount": if r_type == "Series" || r_type == "tvshows" { row.get::<_, i64>("total_seasons").unwrap_or(0) } else if r_type == "Season" { recursive_count } else { 0 },
             "Path": decode_url(&row.get::<_, String>("file_path").unwrap_or_default()),
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &r_type),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
@@ -1168,8 +1168,8 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
             "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(), "OriginalLanguage": json!(if !original_language.is_empty() { original_language } else { language }),
             "SetName": json!(set_name), "SeriesName": json!(if typ == "tvshows" { series } else { "".to_string() }),
             "Path": decode_url(&real_path), "Container": "mp4", "MediaSourceCount": media_sources.len(), "MediaSources": media_sources,
-            "RecursiveItemCount": if typ == "Series" { total_eps } else if typ == "Season" { season_total_eps } else { 0 },
-            "ChildCount": if typ == "Series" { total_seasons } else if typ == "Season" { season_total_eps } else { 0 },
+            "RecursiveItemCount": if typ == "Series" || typ == "tvshows" { total_eps } else if typ == "Season" { season_total_eps } else { 0 },
+            "ChildCount": if typ == "Series" || typ == "tvshows" { total_seasons } else if typ == "Season" { season_total_eps } else { 0 },
             "SeasonCount": if typ == "Series" { total_seasons } else { 0 },
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &typ),
             "ProbeEngine": "rust-native", "LocationType": "FileSystem", "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
