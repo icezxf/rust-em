@@ -481,8 +481,9 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         "(items.runtime = 0 OR ud.playback_position_ticks < items.runtime * 10000000)".to_string(),
     ];
     let mut params: Vec<String> = Vec::new();
+
     if let Some(libs) = get_allowed_libs(&conn, req_user_id) {
-        if libs.is_empty() { return Json(json!({"Items": [], "TotalRecordCount": 0})).into_response(); }
+        if libs.is_empty() { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
         let libs_str: Vec<String> = libs.iter().map(|id| id.to_string()).collect();
         where_clauses.push(format!("items.library_id IN ({})", libs_str.join(",")));
     }
@@ -500,13 +501,13 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             }
         }
     }
-    
+
     let where_str = where_clauses.join(" AND ");
     let sql = format!("SELECT items.id, items.title, items.type, items.year, items.plot, items.poster_path, items.file_path, items.runtime, items.rating, items.mpaa, items.genres, items.premiered, items.tmdb_id, items.imdb_id, items.size, items.mtime, items.sort_title, items.original_title, ud.playback_position_ticks, items.fanart_path, ud.play_count, ud.last_played_date, items.series_id, items.parent_id, items.season_number, items.episode_number FROM items JOIN user_data ud ON ud.item_id = CAST(items.id AS TEXT) AND ud.user_id = {} WHERE {} ORDER BY ud.last_played_date DESC LIMIT 30", req_user_id, where_str);
-    
+
     let mut stmt = match conn.prepare(&sql) { Ok(s) => s, Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
-    
+
     let items: Vec<Value> = stmt.query_map(rusqlite::params_from_iter(param_refs), |row| {
         let id: i64 = row.get(0).unwrap_or_default();
         let item_type: String = row.get(2).unwrap_or_default();
@@ -514,7 +515,7 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
         let total_ticks = (runtime_secs as i64) * 10_000_000;
         let playback_ticks: i64 = row.get(18).unwrap_or(0);
         let play_count: i32 = row.get(20).unwrap_or(0);
-        
+
         let poster_path: String = row.get(5).unwrap_or_default();
         let has_poster = !poster_path.is_empty();
         let mut h = Sha256::new(); h.update(poster_path.as_bytes()); let hash = h.finalize();
@@ -531,7 +532,7 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
 
         let tmdb_id: String = row.get(12).unwrap_or_default();
         let imdb_id: String = row.get(13).unwrap_or_default();
-        
+
         Ok(json!({
             "Name": row.get::<_, String>(1).unwrap_or_default(), "Id": id.to_string(), "ServerId": "rust-em-server",
             "Type": if item_type == "movies" { "Movie" } else if item_type == "Series" { "Series" } else { "Episode" },
@@ -545,8 +546,8 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "IndexNumber": if item_type == "Episode" { json!(row.get::<_, i32>(25).unwrap_or(0)) } else { json!(null) },
             "ParentIndexNumber": if item_type == "Episode" { json!(row.get::<_, i32>(24).unwrap_or(0)) } else { json!(null) },
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "RunTimeTicks": total_ticks }],
-            "UserData": { 
-                "Played": play_count > 0, 
+            "UserData": {
+                "Played": play_count > 0,
                 "PlaybackPositionTicks": playback_ticks,
                 "PlayedPercentage": played_pct,
                 "PlayCount": play_count
@@ -555,7 +556,6 @@ pub async fn emby_items_resume(State(pool): State<Arc<Mutex<Connection>>>, AxumP
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "Items": items, "TotalRecordCount": items.len() })).into_response()
 }
-
 pub async fn emby_items_next_up(_: AxumPath<String>) -> impl IntoResponse { Json(json!({ "Items": [], "TotalRecordCount": 0 })) }
 
 pub async fn emby_shows_next_up(State(pool): State<Arc<Mutex<Connection>>>, Extension(req_user_id): Extension<i64>) -> impl IntoResponse {
