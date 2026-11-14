@@ -1186,15 +1186,27 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
             "SeasonCount": if typ == "Series" || typ == "tvshows" { total_seasons } else { 0 },
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &typ),
             "ProbeEngine": "rust-native", "LocationType": "FileSystem", "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
-            "UserData": { 
-                "ItemId": id.to_string(), "Key": id.to_string(), 
-                "PlaybackPositionTicks": playback_ticks, "PlayCount": play_count, 
-                "IsFavorite": is_favorite > 0, "Played": played, 
-                "PlayedPercentage": if run_time_ticks > 0 { playback_ticks * 100 / run_time_ticks } else { 0 },
-                "LastPlayedDate": if !last_played_str.is_empty() {
-                    if let Ok(ts) = last_played_str.parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
-                } else { json!(null) },
-                "UnplayedItemCount": if typ == "Series" || typ == "tvshows" || typ == "Season" { unplayed } else { 0 }
+            "UserData": if typ == "Series" || typ == "tvshows" || typ == "Season" {
+                json!({ 
+                    "ItemId": id.to_string(), "Key": id.to_string(), 
+                    "PlaybackPositionTicks": playback_ticks, "PlayCount": play_count, 
+                    "IsFavorite": is_favorite > 0, "Played": played, 
+                    "PlayedPercentage": if run_time_ticks > 0 { playback_ticks * 100 / run_time_ticks } else { 0 },
+                    "LastPlayedDate": if !last_played_str.is_empty() {
+                        if let Ok(ts) = last_played_str.parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
+                    } else { json!(null) },
+                    "UnplayedItemCount": unplayed
+                })
+            } else {
+                json!({ 
+                    "ItemId": id.to_string(), "Key": id.to_string(), 
+                    "PlaybackPositionTicks": playback_ticks, "PlayCount": play_count, 
+                    "IsFavorite": is_favorite > 0, "Played": played, 
+                    "PlayedPercentage": if run_time_ticks > 0 { playback_ticks * 100 / run_time_ticks } else { 0 },
+                    "LastPlayedDate": if !last_played_str.is_empty() {
+                        if let Ok(ts) = last_played_str.parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
+                    } else { json!(null) }
+                })
             }
         }))
     }).ok();
