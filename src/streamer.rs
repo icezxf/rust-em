@@ -203,7 +203,7 @@ pub async fn emby_download(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(
             let parts_json: String = row.get(0).unwrap_or_default();
             let file_path: String = row.get(1).unwrap_or_default();
             let parts: Vec<String> = serde_json::from_str(&parts_json).unwrap_or_default();
-            parts.into_iter().next().unwrap_or(file_path)
+            Ok(parts.into_iter().next().unwrap_or(file_path))
         }).ok()
     };
     let Some(strm_path) = path_opt else { return StatusCode::NOT_FOUND.into_response(); };

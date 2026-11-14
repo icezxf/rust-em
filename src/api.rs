@@ -844,12 +844,10 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
     }
 
     let search_term_raw = query.search_term.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let mut is_search = false;
 
     if let Some(term) = search_term_raw {
         let len = term.chars().count();
         if len <= 1 { return Json(json!({ "Items": [], "TotalRecordCount": 0 })).into_response(); }
-        is_search = true;
         let pattern = format!("%{}%", term);
         where_clauses.push("(title LIKE ? OR original_title LIKE ? OR tags LIKE ? OR actors LIKE ? OR directors LIKE ?)".to_string());
         for _ in 0..5 { params.push(pattern.clone()); }
