@@ -362,7 +362,21 @@ pub async fn emby_views(State(pool): State<Arc<Mutex<Connection>>>, AxumPath(_us
     let mut stmt = conn.prepare(&sql).unwrap();
     let items: Vec<Value> = stmt.query_map([], |row| {
         let id: i64 = row.get(0).unwrap_or_default(); let name: String = row.get(1).unwrap_or_default(); let lib_type: String = row.get(2).unwrap_or_default();
-        Ok(json!({ "Name": name, "Id": format!("lib_{}", id), "ServerId": "rust-em-server", "Type": "CollectionFolder", "IsFolder": true, "MediaType": "Video", "CollectionType": if lib_type == "movies" { "movies" } else { "tvshows" }, "ImageTags": {"Primary": crate::images::get_cover_tag("library", "lib", &id.to_string())}, "UserData": { "PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false } }))
+        Ok(json!({ "Name": name, "Id": format!("lib_{}", id), "ServerId": "rust-em-server", "Type": "CollectionFolder", "IsFolder": true, "MediaType": "Video", "CollectionType": if lib_type == "movies" { "movies" } else { "tvshows" }, "ImageTags": {"Primary": crate::images::get_cover_tag("library", "lib", &id.to_string())}, "UserData": {
+                "PlaybackPositionTicks": playback_ticks,
+                "PlayCount": play_count,
+                "IsFavorite": row.get::<_, i32>("is_favorite").unwrap_or(0) > 0,
+                "Played": play_count > 0,
+                "PlayedPercentage": if total_ticks > 0 { (playback_ticks as f64 / total_ticks as f64) * 100.0 } else { 0.0 },
+                "LastPlayedDate": if !row.get::<_, String>("last_played_date").unwrap_or_default().is_empty() {
+                    if let Ok(ts) = row.get::<_, String>("last_played_date").unwrap_or_default().parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
+                } else { json!(null) },
+                "UnplayedItemCount": if r_type == "Series" || r_type == "tvshows" || r_type == "Season" {
+                    if play_count > 0 { 0 } else { 1 }
+                } else {
+                    json!(null)
+                }
+            } }))
     }).unwrap().filter_map(Result::ok).collect();
     Json(json!({ "Items": items, "TotalRecordCount": items.len() }))
 }
