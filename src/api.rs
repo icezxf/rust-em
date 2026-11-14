@@ -872,7 +872,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             for full_str in names {
                 for name in full_str.split(" / ").filter(|s| !s.trim().is_empty()) {
                     let mut h = Sha256::new(); h.update(name.as_bytes()); let hash = h.finalize();
-                    if format!("boxset_{:x}", hash) == pid { found_set_name = name.to_string(); break; }
+                    if format!("boxset_{:x}", hash) == pid.as_str() { found_set_name = name.to_string(); break; }
                 }
                 if !found_set_name.is_empty() { break; }
             }
