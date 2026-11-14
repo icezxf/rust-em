@@ -453,7 +453,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "Path": decode_url(&row.get::<_, String>("file_path").unwrap_or_default()),
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &r_type),
             "RecursiveItemCount": if r_type == "Series" || r_type == "tvshows" || r_type == "Season" { recursive_count } else { 0 },
-            "ChildCount": if r_type == "Series" || r_type == "tvshows" { recursive_count } else if r_type == "Season" { recursive_count } else { 0 },
+            "ChildCount": if r_type == "Series" || r_type == "tvshows" { total_seasons } else if r_type == "Season" { recursive_count } else { 0 },
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
             "UserData": {
                 "Played": play_count > 0,
@@ -959,16 +959,24 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             "Path": decode_url(&row.get::<_, String>("file_path").unwrap_or_default()),
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &r_type),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
-            "UserData": { 
-                "PlaybackPositionTicks": playback_ticks, 
-                "PlayCount": play_count, 
-                "IsFavorite": row.get::<_, i32>("is_favorite").unwrap_or(0) > 0, 
-                "Played": play_count > 0, 
-                "PlayedPercentage": if total_ticks > 0 { (playback_ticks as f64 / total_ticks as f64) * 100.0 } else { 0.0 },
-                "LastPlayedDate": if !row.get::<_, String>("last_played_date").unwrap_or_default().is_empty() {
-                    if let Ok(ts) = row.get::<_, String>("last_played_date").unwrap_or_default().parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
-                } else { json!(null) },
-                "UnplayedItemCount": if r_type == "Series" || r_type == "tvshows" || r_type == "Season" { if play_count > 0 { 0 } else { 1 } } else { 0 }
+            "UserData": if r_type == "Series" || r_type == "tvshows" || r_type == "Season" {
+                let unplayed = conn.query_row("SELECT COUNT(*) FROM items e LEFT JOIN user_data ud2 ON ud2.item_id = CAST(e.id AS TEXT) AND ud2.user_id = ?1 WHERE e.series_id = ?2 AND e.type = 'Episode' AND IFNULL(ud2.play_count, 0) = 0", rusqlite::params![req_user_id, id], |r| r.get::<_, i64>(0)).unwrap_or(0);
+                json!({ 
+                    "PlaybackPositionTicks": playback_ticks, 
+                    "PlayCount": play_count, 
+                    "IsFavorite": row.get::<_, i32>("is_favorite").unwrap_or(0) > 0, 
+                    "Played": unplayed == 0, 
+                    "PlayedPercentage": if total_ticks > 0 { (playback_ticks as f64 / total_ticks as f64) * 100.0 } else { 0.0 },
+                    "UnplayedItemCount": unplayed
+                })
+            } else {
+                json!({ 
+                    "PlaybackPositionTicks": playback_ticks, 
+                    "PlayCount": play_count, 
+                    "IsFavorite": row.get::<_, i32>("is_favorite").unwrap_or(0) > 0, 
+                    "Played": play_count > 0, 
+                    "PlayedPercentage": if total_ticks > 0 { (playback_ticks as f64 / total_ticks as f64) * 100.0 } else { 0.0 }
+                })
             }
         }))
     }).unwrap().filter_map(Result::ok).collect();
@@ -1170,8 +1178,8 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
             "ProductionLocations": country.split(" / ").filter(|s| !s.is_empty()).collect::<Vec<_>>(), "OriginalLanguage": json!(if !original_language.is_empty() { original_language } else { language }),
             "SetName": json!(set_name), "SeriesName": json!(if typ == "tvshows" { series } else { "".to_string() }),
             "Path": decode_url(&real_path), "Container": "mp4", "MediaSourceCount": media_sources.len(), "MediaSources": media_sources,
-            "Chapters": [],
-            "Trickplay": {},
+            
+            
             "RecursiveItemCount": if typ == "Series" || typ == "tvshows" { total_eps } else if typ == "Season" { season_total_eps } else { 0 },
             "ChildCount": if typ == "Series" || typ == "tvshows" { total_seasons } else if typ == "Season" { season_total_eps } else { 0 },
             "SeasonCount": if typ == "Series" || typ == "tvshows" { total_seasons } else { 0 },
