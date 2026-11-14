@@ -451,7 +451,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
                 "IsFavorite": row.get::<_, i32>("is_favorite").unwrap_or(0) > 0,
                 "PlaybackPositionTicks": row.get::<_, i64>("playback_position_ticks").unwrap_or(0),
                 "PlayedPercentage": if total_ticks > 0 { (row.get::<_, i64>("playback_position_ticks").unwrap_or(0) as f64 / total_ticks as f64) * 100.0 } else { 0.0 },
-                "UnplayedItemCount": if row.get::<_, i32>("play_count").unwrap_or(0) > 0 { 0 } else { 1 }
+                "UnplayedItemCount": if r_type == "Series" || r_type == "Season" { if row.get::<_, i32>("play_count").unwrap_or(0) > 0 { 0 } else { 1 } } else { 0 }
             }
         }))
     }).unwrap().filter_map(Result::ok).collect();
@@ -956,7 +956,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
                 "LastPlayedDate": if !row.get::<_, String>("last_played_date").unwrap_or_default().is_empty() {
                     if let Ok(ts) = row.get::<_, String>("last_played_date").unwrap_or_default().parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
                 } else { json!(null) },
-                "UnplayedItemCount": if play_count > 0 { 0 } else { 1 }
+                "UnplayedItemCount": if r_type == "Series" || r_type == "Season" { if play_count > 0 { 0 } else { 1 } } else { 0 }
             }
         }))
     }).unwrap().filter_map(Result::ok).collect();
@@ -1181,7 +1181,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
                 "LastPlayedDate": if !last_played_str.is_empty() {
                     if let Ok(ts) = last_played_str.parse::<i64>() { json!(format_iso8601(ts)) } else { json!(null) }
                 } else { json!(null) },
-                "UnplayedItemCount": unplayed
+                "UnplayedItemCount": if typ == "Series" || typ == "Season" { unplayed } else { 0 }
             }
         }))
     }).ok();
