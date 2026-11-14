@@ -42,7 +42,7 @@ pub async fn auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     if path.contains("/Images/") || path.ends_with("/Ping") || path.ends_with("/Info/Public") || path.ends_with("/Users/Public") || path.ends_with("/AuthenticateByName") || path == "/api/login" || path.contains("websocket") {
         return Ok(next.run(req).await);
     }
-    if !path.starts_with("/api") && !path.starts_with("/emby") && !path.starts_with("/Items") && !path.starts_with("/Users") && !path.starts_with("/Videos") && !path.starts_with("/System") && !path.starts_with("/Auth") && !path.starts_with("/Sessions") && !path.starts_with("/Persons") {
+    if !path.starts_with("/api") && !path.starts_with("/emby") && !path.starts_with("/Items") && !path.starts_with("/Users") && !path.starts_with("/Videos") && !path.starts_with("/System") && !path.starts_with("/Auth") && !path.starts_with("/Sessions") && !path.starts_with("/Persons") && !path.starts_with("/Shows") && !path.starts_with("/Genres") && !path.starts_with("/Tags") && !path.starts_with("/Years") && !path.starts_with("/Studios") && !path.starts_with("/OfficialRatings") && !path.starts_with("/Search") {
         return Ok(next.run(req).await);
     }
     
