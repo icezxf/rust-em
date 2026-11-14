@@ -454,7 +454,7 @@ pub async fn emby_items_latest(State(pool): State<Arc<Mutex<Connection>>>, AxumP
             "Path": decode_url(&row.get::<_, String>("file_path").unwrap_or_default()),
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &r_type),
             "RecursiveItemCount": if r_type == "Series" || r_type == "tvshows" || r_type == "Season" { recursive_count } else { 0 },
-            "ChildCount": if r_type == "Series" || r_type == "tvshows" { total_seasons } else if r_type == "Season" { recursive_count } else { 0 },
+            "ChildCount": if r_type == "Series" || r_type == "tvshows" { recursive_count } else if r_type == "Season" { recursive_count } else { 0 },
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
             "UserData": {
                 "Played": play_count > 0,
@@ -956,7 +956,7 @@ async fn emby_items_inner(pool: Arc<Mutex<Connection>>, query: EmbyItemsQuery, r
             "ImageTags": if has_poster { json!({"Primary": poster_tag}) } else { json!({}) },
             "BackdropImageTags": if has_fanart { json!([backdrop_tag]) } else { json!([]) },
             "RecursiveItemCount": if r_type == "Series" || r_type == "tvshows" || r_type == "Season" { recursive_count } else { 0 },
-            "ChildCount": if r_type == "Series" || r_type == "tvshows" { total_seasons } else if r_type == "Season" { recursive_count } else { 0 },
+            "ChildCount": if r_type == "Series" || r_type == "tvshows" { recursive_count } else if r_type == "Season" { recursive_count } else { 0 },
             "Path": decode_url(&row.get::<_, String>("file_path").unwrap_or_default()),
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &r_type),
             "MediaSources": [{ "Id": id.to_string(), "Protocol": "Http", "SupportsDirectPlay": true, "Container": "mp4", "Size": size, "Type": "Default", "Name": "Direct Play", "RunTimeTicks": total_ticks }],
@@ -1182,7 +1182,7 @@ async fn emby_item_detail_inner(pool: Arc<Mutex<Connection>>, item_id: String, r
             
             
             "RecursiveItemCount": if typ == "Series" || typ == "tvshows" { total_eps } else if typ == "Season" { season_total_eps } else { 0 },
-            "ChildCount": if typ == "Series" || typ == "tvshows" { total_seasons } else if typ == "Season" { season_total_eps } else { 0 },
+            "ChildCount": if typ == "Series" || typ == "tvshows" { total_eps } else if typ == "Season" { season_total_eps } else { 0 },
             "SeasonCount": if typ == "Series" || typ == "tvshows" { total_seasons } else { 0 },
             "ExternalUrls": build_external_urls(&tmdb_id, &imdb_id, &typ),
             "ProbeEngine": "rust-native", "LocationType": "FileSystem", "CanDelete": false, "CanDownload": false, "CanDeleteFromFolders": [], "HideMissingActorImages": true,
